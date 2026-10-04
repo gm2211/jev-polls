@@ -1,6 +1,6 @@
 # Using Jev Polls as a companion agent
 
-Your existing coding or research agent does the preparation and interpretation. The CLI calls only TypeSafe for live inference. It does not call another generative model, scrape websites, or invent sources. Normal CLI commands emit JSON to stdout; `mcp` reserves stdout for MCP JSON-RPC. Progress and MCP startup errors go to stderr. Failures exit nonzero with a JSON error or a saved failed run.
+Your existing coding or research agent does the preparation and interpretation. Study execution calls only TypeSafe. The optional local UI assistant invokes an already-authenticated Codex or Claude CLI to propose drafts; it does not execute studies, scrape websites, or invent source evidence. Normal CLI commands emit JSON to stdout; `mcp` reserves stdout for MCP JSON-RPC. Progress and MCP startup errors go to stderr. Failures exit nonzero with a JSON error or a saved failed run.
 
 `workspace` (also available as `connect`) is a long-running local server: stdout contains its workspace URL, while progress and run results are JSON lines on stderr. Its browser editor supports saved cohort and pipeline drafts, stage connections and branch conditions, explicit review, and run history. Opening the page or connecting an account never starts a study.
 
@@ -47,15 +47,21 @@ When using a checkout without installing the CLI, replace `jev-polls` with `npm 
 
 ## Browser workspace
 
-`jev-polls workspace --port 4180` opens an empty workspace by default. Use Cohorts to maintain sources, weighted segments and adult synthetic profiles; use Studies to define context, questions and an acyclic stage graph. Dependency links determine which earlier summaries are exposed to a panel. Save unfinished drafts freely; Review checks full runnable contracts and shows an upper bound on profile evaluations. Only the Run study action starts study inference. Key verification is a separate small request.
+`jev-polls workspace --port 4180` opens an empty workspace by default. Use Pools to maintain sources, weighted segments and adult synthetic profiles; use Pipelines to define context, questions and an acyclic phase graph. Named input bindings select which earlier outputs a phase receives. Save unfinished drafts freely; Review checks full runnable contracts and shows an upper bound on profile evaluations. Only the Run study action starts study inference. Key verification is a separate small request.
 
 Workspace drafts are stored in `.jev-polls/workspace/workspace.json` with a revision number. Multiple tabs use optimistic conflict detection; reload a stale tab instead of overwriting newer work. Workspace JSON references saved cohort IDs, whereas CLI pipeline JSON references relative cohort file paths. Use `connect <pipeline>` to import a CLI project. Browser export/import transfers the whole workspace document; import replaces the draft only after confirmation. Run records capture the exact cohort and pipeline snapshots used at execution.
 
 The browser lists past `.jev-polls/runs` reports alongside workspace runs. Failed or interrupted runs remain visible. Editing a cohort never changes historical results. Saved review tokens expire and become invalid after any saved edit; review again before running a changed study.
 
+## Drafting from the local UI
+
+The local assistant invokes installed Codex or Claude CLIs using their existing login. The saved workspace and user brief go to the selected CLI through stdin. Drafting runs in an isolated temporary directory, with tool access disabled or constrained, and does not receive TypeSafe credentials. Its structured output is validated as a workspace proposal, then shown for explicit application. Only the original saved revision can accept that proposal. Cancellation, failures, or invalid JSON leave the saved workspace unchanged. No TypeSafe study runs from this flow.
+
+The drafting assistant has no research tools. Treat new personas, weights, and traits as synthetic assumptions unless supported by sources already supplied in the brief or workspace. Research sources through the existing agent/MCP flow when needed.
+
 ## Connecting an existing agent
 
-Open the workspace's Agents tab or run `jev-polls mcp-config --workspace-url http://127.0.0.1:4180/` for client settings. The workspace URL must point to the running loopback server. MCP uses that server's validation, persistence, and execution controls; it does not open a second workspace. No API key belongs in MCP settings. The browser owns the saved TypeSafe connection.
+Open Advanced MCP settings in the workspace's Assistant tab or run `jev-polls mcp-config --workspace-url http://127.0.0.1:4180/` for client settings. The workspace URL must point to the running loopback server. MCP uses that server's validation, persistence, and execution controls; it does not open a second workspace. No API key belongs in MCP settings. The browser owns the saved TypeSafe connection.
 
 1. Call `get_guide`, `get_schema`, and `get_workspace` to read current contracts and the saved revision. Workspace pipeline aliases refer to cohort IDs, not filesystem paths.
 2. Use your host agent's research capabilities to prepare sourced, question-independent adult profiles. Preserve evidence gaps, synthetic fields, assumptions, and weight provenance.
@@ -63,7 +69,7 @@ Open the workspace's Agents tab or run `jev-polls mcp-config --workspace-url htt
 4. Call `review_study` after edits are saved. Inspect the cohort sizes, branch graph, warnings, and request bound. Saving, connecting, and review make no study inference calls.
 5. Call `run_study` only within the user's authorization to send these profiles and questions to TypeSafe and spend the reviewed request budget. Supply the reviewed revision and token. Poll `get_run`; inspect `get_run_record` for actual results and failed/skipped stages. Never claim success from a completed transport request alone.
 
-The browser applies external changes when its local draft is clean. A dirty browser draft is preserved with a conflict notice until the user chooses how to reconcile it. Agent connection exposes tools; it does not create an embedded chat model or add shell/custom-agent stage types to the pipeline.
+The browser applies external changes when its local draft is clean. A dirty browser draft is preserved with a conflict notice until the user chooses how to reconcile it. Agent connection exposes tools. The local drafting assistant can invoke the installed CLIs from the UI; this does not add shell/custom-agent execution stages to the study graph.
 
 ## Portable artifacts
 
@@ -95,6 +101,12 @@ Example: run another panel when a modeled preference margin is narrow:
 Default `join: "all"` runs only after every dependency completes successfully. `join: "any"` waits for all dependencies to finish or skip, then runs if at least one completed. This lets mutually exclusive branches rejoin. Skipped branches are visible in the report. Any failed stage makes the overall run failed, even if an independent branch completes.
 
 Conditions require available results. Missing evidence remains unknown, including under `not`; only a true condition starts a stage. Entry stages have no dependency requirement. The request budget counts new profile evaluations; SDK transport retries can make additional HTTP attempts. Use a pinned model version to make comparisons reproducible.
+
+## Explicit phase inputs and outputs
+
+A poll phase exposes each question ID as a named output. New visual phases start with one question, although imported multiquestion phases remain valid. Optional `inputs` maps input names to `{stage, question, select}`. `select` defaults to `summary`; `winner` accepts Choice, `mean` accepts Score/Noul, `probabilities` accepts Choice/Score, and `responses` accepts every type. Responses include only the selected question answer with its persona and weighting metadata.
+
+The engine places these values under `state.inputs`, so instructions can reference `inputs.prior_preference`. Explicit inputs replace automatic upstream summaries: unrelated outputs are not copied. An empty input map means no upstream data; absent `inputs` preserves the legacy `state.upstream` array for compatibility. Each source must be a declared direct dependency. For optional branches that did not produce an available result, the named input is `null`; write downstream questions to handle that absence explicitly.
 
 ## Interpreting numbers
 

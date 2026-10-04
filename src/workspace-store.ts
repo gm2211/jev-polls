@@ -225,7 +225,7 @@ function validateStageDraft(value: unknown, path: string): void {
   if (preliminary.join !== undefined) enumValue(preliminary.join, ['all', 'any'], `${path}.join`);
   if (preliminary.when !== undefined) validateCondition(preliminary.when, `${path}.when`, 0);
   if (preliminary.kind === 'poll') {
-    const s = object(value, path, [...common, 'cohort', 'questions', 'size', 'repeats', 'context'], ['id', 'label', 'kind', 'dependsOn', 'cohort', 'questions']);
+    const s = object(value, path, [...common, 'cohort', 'questions', 'size', 'repeats', 'context', 'inputs'], ['id', 'label', 'kind', 'dependsOn', 'cohort', 'questions']);
     string(s.cohort, `${path}.cohort`); if (s.cohort !== '') id(s.cohort, `${path}.cohort`);
     const questions = object(s.questions, `${path}.questions`, undefined, []);
     if (Object.keys(questions).length > MAX_QUESTIONS) throw new Error(`${path}.questions exceeds ${MAX_QUESTIONS} entries`);
@@ -233,6 +233,18 @@ function validateStageDraft(value: unknown, path: string): void {
     if (s.size !== undefined && (!Number.isSafeInteger(s.size) || (s.size as number) < 1)) throw new Error(`${path}.size must be a positive integer`);
     if (s.repeats !== undefined && (!Number.isSafeInteger(s.repeats) || (s.repeats as number) < 1 || (s.repeats as number) > 100)) throw new Error(`${path}.repeats must be an integer between 1 and 100`);
     if (s.context !== undefined) validateJson(s.context, `${path}.context`);
+    if (s.inputs !== undefined) {
+      const bindings = object(s.inputs, `${path}.inputs`, undefined, []);
+      if (Object.keys(bindings).length > MAX_QUESTIONS) throw new Error(`${path}.inputs exceeds ${MAX_QUESTIONS} bindings`);
+      for (const [alias, binding] of Object.entries(bindings)) {
+        id(alias, `${path}.inputs key`);
+        const entryPath = `${path}.inputs.${alias}`;
+        const b = object(binding, entryPath, ['stage', 'question', 'select'], ['stage', 'question']);
+        string(b.stage, `${entryPath}.stage`); if (b.stage !== '') id(b.stage, `${entryPath}.stage`);
+        string(b.question, `${entryPath}.question`); if (b.question !== '') id(b.question, `${entryPath}.question`);
+        if (b.select !== undefined) enumValue(b.select, ['summary', 'winner', 'mean', 'probabilities', 'responses'], `${entryPath}.select`);
+      }
+    }
   } else if (preliminary.kind === 'aggregate') {
     const s = object(value, path, [...common, 'inputs', 'outputQuestion'], ['id', 'label', 'kind', 'dependsOn', 'inputs', 'outputQuestion']);
     const inputs = array(s.inputs, `${path}.inputs`, MAX_STAGES);

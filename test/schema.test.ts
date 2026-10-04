@@ -15,6 +15,14 @@ test('conditions require declared dependencies and compatible metrics', () => {
   (p.stages[1] as any).dependsOn = ['first']; assert.equal(parsePipeline(p).stages.length, 2);
   (p.stages[1] as any).when.metric = 'mean'; assert.throws(() => parsePipeline(p), /incompatible/);
 });
+test('poll input bindings require declared outputs and type-compatible selectors', () => {
+  const p = pipeline();
+  p.stages.push({ ...structuredClone(poll), id: 'second', dependsOn: ['first'], inputs: { prior: { stage: 'first', question: 'favorite', select: 'probabilities' } } });
+  assert.equal(parsePipeline(p).stages.length, 2);
+  (p.stages[1] as any).inputs.prior.stage = 'missing'; assert.throws(() => parsePipeline(p), /must be in dependsOn/);
+  (p.stages[1] as any).inputs.prior.stage = 'first'; (p.stages[1] as any).inputs.prior.question = 'unknown'; assert.throws(() => parsePipeline(p), /unknown input question/);
+  (p.stages[1] as any).inputs.prior.question = 'favorite'; (p.stages[1] as any).inputs.prior.select = 'mean'; assert.throws(() => parsePipeline(p), /incompatible with choice/);
+});
 test('rejects aggregating incompatible options and undeclared question refs', () => {
   const p = pipeline(); p.stages.push({ ...structuredClone(poll), id: 'second' });
   (p.stages[1] as any).questions.favorite.criteria = { x: 'X', y: 'Y' };

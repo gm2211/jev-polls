@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { z } from 'zod';
-import type { Cohort, Condition, Pipeline, Question, Stage } from './types.js';
+import type { Cohort, Condition, Pipeline, PollInputSelect, Question, Stage } from './types.js';
 
 const safeKey = z.string().min(1).max(160).refine(v => !['__proto__', 'prototype', 'constructor'].includes(v), 'Reserved key');
 const id = safeKey.regex(/^[a-z][a-z0-9_-]*$/, 'Use lowercase letters, digits, underscores, and hyphens, starting with a letter');
@@ -24,8 +24,9 @@ const conditionSchema: z.ZodType<Condition> = z.lazy(() => z.union([
   z.object({ stage: id, question: id, metric: z.enum(['margin', 'topProbability', 'mean', 'winner']), op: z.enum(['gt', 'gte', 'lt', 'lte', 'eq', 'ne']), value: z.union([z.number().finite(), text]) }).strict(),
 ]));
 const base = { id, label: text, dependsOn: z.array(id), join: z.enum(['all', 'any']).optional(), when: conditionSchema.optional() };
+const pollInputBinding = z.object({ stage: id, question: id, select: z.enum(['summary', 'winner', 'mean', 'probabilities', 'responses']).optional() }).strict();
 export const pipelineSchema = z.object({ version: z.literal(1), id, name: text, description: text, context: z.json(), cohorts: z.record(id, text), stages: z.array(z.discriminatedUnion('kind', [
-  z.object({ ...base, kind: z.literal('poll'), cohort: id, questions: z.record(id, questionSchema).refine(v => Object.keys(v).length > 0, 'At least one question is required'), size: z.number().int().positive().optional(), repeats: z.number().int().min(1).max(100).optional(), context: z.json().optional() }).strict(),
+  z.object({ ...base, kind: z.literal('poll'), cohort: id, questions: z.record(id, questionSchema).refine(v => Object.keys(v).length > 0, 'At least one question is required'), size: z.number().int().positive().optional(), repeats: z.number().int().min(1).max(100).optional(), context: z.json().optional(), inputs: z.record(id, pollInputBinding).optional() }).strict(),
   z.object({ ...base, kind: z.literal('aggregate'), inputs: z.array(z.object({ stage: id, question: id, weight: positive }).strict()).min(1), outputQuestion: id }).strict(),
   z.object({ ...base, kind: z.literal('decision'), from: z.object({ stage: id, question: id }).strict(), outputQuestion: id }).strict(),
 ])).min(1) }).strict();
@@ -89,6 +90,7 @@ export function parsePipeline(input: unknown): Pipeline {
     unique(s.dependsOn, `dependency in ${s.id}`);
     if (s.kind === 'poll') assert(Object.hasOwn(p.cohorts, s.cohort), `Stage ${s.id}: unknown cohort ${s.cohort}`);
     if (s.kind === 'aggregate') unique(s.inputs.map(i => `${i.stage}.${i.question}`), `aggregate input in ${s.id}`);
+    if (s.kind === 'poll' && s.inputs) assert(Object.keys(s.inputs).length <= 1000, `Stage ${s.id}: inputs exceeds 1000 bindings`);
   }
   const outputs = outputQuestions(p);
   for (const s of p.stages) {
@@ -103,8 +105,24 @@ export function parsePipeline(input: unknown): Pipeline {
       if (c.metric === 'winner' && q.type === 'choice') assert(Object.hasOwn(q.criteria, c.value as string), `Stage ${s.id}: unknown winner option ${c.value}`);
     }
     if (s.when) check(s.when);
+    if (s.kind === 'poll' && s.inputs) {
+      for (const [alias, binding] of Object.entries(s.inputs)) {
+        assert(!['__proto__', 'prototype', 'constructor'].includes(alias), `Stage ${s.id}: reserved input alias ${alias}`);
+        assert(s.dependsOn.includes(binding.stage), `Stage ${s.id}: input ${binding.stage} must be in dependsOn`);
+        const q = outputs[binding.stage]?.[binding.question];
+        assert(q, `Stage ${s.id}: unknown input question ${binding.stage}.${binding.question}`);
+        assert(inputSelectCompatible(binding.select ?? 'summary', q), `Stage ${s.id}: input selector '${binding.select}' is incompatible with ${q.type} question ${binding.stage}.${binding.question}`);
+      }
+    }
   }
   return p;
+}
+
+export function inputSelectCompatible(select: PollInputSelect, question: Question): boolean {
+  if (select === 'summary' || select === 'responses') return true;
+  if (select === 'winner') return question.type === 'choice';
+  if (select === 'mean') return question.type === 'score' || question.type === 'noul';
+  return question.type === 'choice' || question.type === 'score';
 }
 
 export async function loadProject(path: string): Promise<{ pipeline: Pipeline; cohorts: Record<string, Cohort> }> {

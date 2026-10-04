@@ -16,12 +16,14 @@ test('the served workspace client parses and embeds its session token safely', (
 });
 
 function browserHarness() {
-  const documentValue = { version: 1, cohorts: [{ id: 'cohort', name: 'Original cohort', population: 'Adults', description: '', assumptions: [], sources: [], segments: [], personas: [{ id: 'person' }] }], pipelines: [{ id: 'study', name: 'Original study', description: '', stages: [{ id: 'panel' }], cohorts: {} }] };
+  const documentValue = { version: 1, cohorts: [{ id: 'cohort', name: 'Original cohort', population: 'Adults', description: '', assumptions: [], sources: [], segments: [], personas: [{ id: 'person', label: 'Adult participant', age: 30, segment: 'general', weight: 1, background: 'Independent background', attributes: {}, sourceIds: [], syntheticFields: ['background'] }] }], pipelines: [{ id: 'study', name: 'Original study', description: '', stages: [{ id: 'panel', label: 'First question', kind: 'poll', cohort: 'audience', questions: { answer: { type: 'choice', label: 'Which option fits?', instructions: 'Choose an option.', criteria: { a: 'A', b: 'B' } } }, inputs: {}, dependsOn: [] }], cohorts: { audience: 'cohort' } }] };
   let snapshot = { revision: 1, document: documentValue, auth: { configured: true, source: 'keychain' }, runs: [], activeRun: null };
   const elements = new Map<string, any>();
   const listeners = new Map<string, Function>();
   const intervals: Function[] = [];
   const requests: string[] = [];
+  const bodies: Array<{ path: string; body: unknown }> = [];
+  const responses = new Map<string, unknown>();
   function element(id: string) {
     if (!elements.has(id)) elements.set(id, { innerHTML: '', textContent: '', value: '', hidden: false, inert: false, classList: { add() {}, remove() {}, toggle() {} }, querySelector: () => null, querySelectorAll: () => [], focus() {}, select() {}, open: false, showModal() { this.open = true; }, close() { this.open = false; } });
     return elements.get(id);
@@ -29,18 +31,18 @@ function browserHarness() {
   const context = {
     document: { getElementById: element, querySelectorAll: () => [], visibilityState: 'visible', addEventListener: (name: string, fn: Function) => listeners.set(name, fn) },
     window: { addEventListener: (name: string, fn: Function) => listeners.set(name, fn) },
-    fetch: async (path: string) => { requests.push(path); return { ok: true, json: async () => JSON.parse(JSON.stringify(snapshot)) }; },
+    fetch: async (path: string, options?: { body?: string }) => { requests.push(path); if (options?.body) bodies.push({ path, body: JSON.parse(options.body) }); return { ok: true, json: async () => JSON.parse(JSON.stringify(responses.get(path) ?? snapshot)) }; },
     setTimeout: () => 1, clearTimeout() {}, setInterval: (fn: Function) => { intervals.push(fn); return 1; },
     navigator: {}, confirm: () => { throw new Error('Unexpected native confirmation'); },
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,graphEdgePath,drawStageEdges};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
   return {
     client: (context as typeof context & { clientTest: any }).clientTest,
-    element, listeners, intervals, requests,
+    element, listeners, intervals, requests, bodies, respond: (path: string, value: unknown) => responses.set(path, value),
     setSnapshot: (value: typeof snapshot) => { snapshot = value; },
     snapshot: () => structuredClone(snapshot),
     document: context.document,
@@ -123,4 +125,114 @@ test('background sync pauses while hidden and agent configuration remains escape
   field.select = () => { selected = true; };
   await browser.client.copyAgentText('agentSetup');
   assert.equal(selected, true, 'clipboard-denied fallback selects the setup text');
+});
+
+test('next phase wires a named output, keeps one question, and excludes downstream cycles from input choices', async () => {
+  const browser = browserHarness();
+  await settle();
+  const { S, freshPipeline, addNextPhase, dataInputOptions, projectionOptions } = browser.client;
+  const pipeline = freshPipeline('Which customer-support approach should we use?');
+  S.doc.pipelines = [pipeline]; S.pipelineId = pipeline.id; S.stageId = pipeline.stages[0].id; S.tab = 'studies';
+  addNextPhase();
+  const next = pipeline.stages[1];
+  assert.equal(pipeline.stages.length, 2);
+  assert.equal(Object.keys(next.questions).length, 1);
+  assert.deepEqual(JSON.parse(JSON.stringify(next.dependsOn)), ['panel']);
+  assert.deepEqual(JSON.parse(JSON.stringify(next.inputs)), { previous_result: { stage: 'panel', question: 'preference', select: 'summary' } });
+  assert.equal(next.cohort, pipeline.stages[0].cohort);
+  assert.equal(dataInputOptions(pipeline, pipeline.stages[0]).length, 0, 'a later dependent phase cannot feed its ancestor');
+  assert.equal(dataInputOptions(pipeline, next)[0].id, 'panel');
+  assert.deepEqual(Array.from(projectionOptions(pipeline, next.inputs.previous_result), (x: any) => x.value), ['summary', 'responses', 'winner', 'probabilities']);
+  assert.match(browser.element('app').innerHTML, /previous_result/);
+  assert.match(browser.element('app').innerHTML, /Pool of virtual people/);
+  assert.match(browser.element('app').innerHTML, /Which customer-support approach/);
+  pipeline.stages[0].questions.preference = { type: 'noul', label: 'Would this work?', instructions: 'Answer yes or no.' };
+  assert.deepEqual(Array.from(projectionOptions(pipeline, next.inputs.previous_result), (x: any) => x.value), ['summary', 'responses', 'mean']);
+});
+
+test('local assistant submits saved revision and keeps proposal separate until explicit apply', async () => {
+  const browser = browserHarness();
+  await settle();
+  const { S, startLocalJob, applyLocalProposal } = browser.client;
+  S.tab = 'agents';
+  S.localEngines = [{ id: 'codex', label: 'Codex', available: true }];
+  S.localPrompt = 'Draft a pool for customer-support research using the facts I provided.';
+  const proposal = browser.snapshot().document;
+  proposal.cohorts[0]!.name = 'Proposed support pool';
+  const job = { id: 'job-one', engine: 'codex', status: 'completed', revision: 1, message: 'Ready', proposal: { document: proposal, explanation: 'Added a proposal with explicit assumptions.' } };
+  browser.respond('/api/agent/jobs', job);
+  browser.respond('/api/agent/jobs/job-one/apply', { revision: 2, document: proposal });
+  await startLocalJob();
+  assert.equal(S.doc.cohorts[0].name, 'Original cohort', 'preparation never writes the draft');
+  assert.equal(S.localJob.proposal.document.cohorts[0].name, 'Proposed support pool');
+  assert.deepEqual(browser.bodies[0], { path: '/api/agent/jobs', body: { engine: 'codex', prompt: S.localPrompt, revision: 1 } });
+  assert.equal(browser.requests.includes('/api/agent/jobs/job-one/apply'), false);
+  assert.match(browser.element('app').innerHTML, /Apply proposal/);
+  await applyLocalProposal();
+  assert.equal(S.doc.cohorts[0].name, 'Proposed support pool');
+  assert.equal(S.revision, 2);
+  assert.equal(S.proposalApplied, true);
+  assert.deepEqual(browser.bodies[1], { path: '/api/agent/jobs/job-one/apply', body: { revision: 1 } });
+  assert.equal(browser.requests.some(path => path === '/api/run'), false, 'drafting and apply never run TypeSafe polls');
+});
+
+test('local assistant refuses unsaved work and stale proposals without posting mutations', async () => {
+  const browser = browserHarness();
+  await settle();
+  const { S, startLocalJob, applyLocalProposal } = browser.client;
+  S.localEngines = [{ id: 'codex', available: true }]; S.localPrompt = 'Prepare a pool'; S.dirty = true;
+  await assert.rejects(startLocalJob(), /Save your changes/);
+  S.dirty = false;
+  S.localJob = { id: 'stale', engine: 'codex', status: 'completed', revision: 0, proposal: { document: browser.snapshot().document, explanation: 'Old proposal' } };
+  await assert.rejects(applyLocalProposal(), /Workspace changed/);
+  assert.equal(browser.bodies.length, 0);
+  assert.match(browser.client.proposalReview(S.localJob), /Prepare a new proposal/);
+});
+
+test('proposal review itemizes removed pools and pipelines plus removals inside changed entities', async () => {
+  const browser = browserHarness();
+  await settle();
+  const { S, proposalReview } = browser.client;
+  const originalPool = S.doc.cohorts[0];
+  const originalPipeline = S.doc.pipelines[0];
+  S.doc.cohorts.push({ ...structuredClone(originalPool), id: 'removed-pool', name: 'Archived <audience>' });
+  S.doc.pipelines.push({ ...structuredClone(originalPipeline), id: 'removed-pipeline', name: 'Retired study' });
+  originalPool.personas.push({ ...structuredClone(originalPool.personas[0]), id: 'removed-person' });
+  originalPipeline.stages.push({ ...structuredClone(originalPipeline.stages[0]), id: 'removed-phase' });
+  const proposed = JSON.parse(JSON.stringify(S.doc));
+  proposed.cohorts = [proposed.cohorts[0], { ...structuredClone(originalPool), id: 'added-pool', name: 'New audience' }];
+  proposed.pipelines = [proposed.pipelines[0]];
+  proposed.cohorts[0].personas.pop();
+  proposed.pipelines[0].stages.pop();
+  const html = proposalReview({ status: 'completed', revision: S.revision, proposal: { document: proposed, explanation: 'Reshape the audience and flow.' } });
+  assert.match(html, /Pools: 1 added · 1 changed · 1 removed/);
+  assert.match(html, /Pipelines: 0 added · 1 changed · 1 removed/);
+  assert.match(html, /Removed pool: <strong>Archived &lt;audience&gt;<\/strong> <code>\(removed-pool\)<\/code> · 1 personas removed/);
+  assert.match(html, /Removed pipeline: <strong>Retired study<\/strong> <code>\(removed-pipeline\)<\/code> · 1 phases removed/);
+  assert.match(html, /Changed pool:.*1 personas removed/);
+  assert.match(html, /Changed pipeline:.*1 phases removed/);
+  assert.match(html, /including the removals listed below/);
+  assert.match(html, /Apply proposal/);
+  assert.equal(S.doc.cohorts.length, 2, 'review preserves original workspace until explicit apply');
+});
+
+test('skip-phase edges cross reserved gutter above intermediate cards and finish outside target border', async () => {
+  const browser = browserHarness();
+  await settle();
+  const box = { left: 10, top: 20 };
+  const source = { left: 10, right: 258, top: 64, bottom: 244, width: 248, height: 180 };
+  const middle = { left: 306, right: 554, top: 64, bottom: 244, width: 248, height: 180 };
+  const target = { left: 602, right: 850, top: 64, bottom: 244, width: 248, height: 180 };
+  const path = browser.client.graphEdgePath(source, target, box, 0);
+  const points = [...path.matchAll(/[ML] ([\d.-]+) ([\d.-]+)/g)].map(match => ({ x: Number(match[1]) + box.left, y: Number(match[2]) + box.top }));
+  assert.equal(points.length, 6);
+  for (let i = 1; i < points.length; i++) {
+    const a = points[i - 1]!, b = points[i]!;
+    const intersectsX = Math.max(a.x, b.x) > middle.left && Math.min(a.x, b.x) < middle.right;
+    const intersectsY = Math.max(a.y, b.y) > middle.top && Math.min(a.y, b.y) < middle.bottom;
+    assert.equal(intersectsX && intersectsY, false, 'skip route must not run behind intermediate phase');
+  }
+  assert.ok(points[2]!.y < middle.top && points[3]!.y < middle.top);
+  assert.equal(points.at(-1)!.x, target.left - 3, 'arrowhead remains visible before the destination border');
+  assert.match(browser.client.graphEdgePath(source, middle, box), / C /, 'adjacent phases retain curved direct edges');
 });

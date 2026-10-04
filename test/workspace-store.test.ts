@@ -118,8 +118,10 @@ test('persists structurally sound incomplete drafts and defers semantic checks t
   draft.cohorts[0]!.name = ''; draft.cohorts[0]!.personas[0]!.background = '';
   draft.pipelines[0]!.name = ''; draft.pipelines[0]!.stages[0]!.label = '';
   (draft.pipelines[0]!.stages[0] as Extract<Pipeline['stages'][number], { kind: 'poll' }>).questions.favorite!.instructions = '';
+  (draft.pipelines[0]!.stages[0] as Extract<Pipeline['stages'][number], { kind: 'poll' }>).inputs = { future: { stage: '', question: '', select: 'summary' } };
   const saved = await new WorkspaceStore(directory).save(draft, 0);
   assert.equal(saved.document.cohorts[0]!.name, '');
+  assert.deepEqual((saved.document.pipelines[0]!.stages[0] as Extract<Pipeline['stages'][number], { kind: 'poll' }>).inputs, { future: { stage: '', question: '', select: 'summary' } });
   assert.throws(() => resolveWorkspaceProject(saved.document, 'study'), /too small|invalid|at least|characters/i);
 });
 
