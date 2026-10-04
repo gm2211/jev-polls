@@ -11,12 +11,12 @@ Node.js 22 or newer is required.
 ```sh
 npm install
 npm run build
-npm run demo
+npm start
 ```
 
-Open `.jev-polls/demo/report.html`. Demo mode is completely offline and visibly labeled **mock**. It exercises the real pipeline engine with deterministic fixture distributions, not real Jev results.
+Open the local connection URL printed by `npm start`. Sign in to the linked TypeSafe console, then enter your API key in the local password field. Jev Polls verifies the key with a real request, saves it in macOS Keychain, runs the starter study using live Jev responses, and provides an interactive report. The starter study uses example names and synthetic profiles; edit those for your actual decision. Live requests use your TypeSafe account.
 
-Each normal run gets a new output directory. An explicit `--out` refuses to replace existing run artifacts unless `--overwrite` is supplied. `npm run demo` deliberately replaces only its demo artifacts.
+The connection page serves only on your own computer. Keys never enter the report, project files, command arguments, or chat. Subsequent studies can reuse the saved connection. Every normal run uses TypeSafe by default, with no mock fallback.
 
 To put `jev-polls` on your PATH for local use, run `npm link`. Every example also works as `node dist/cli.js ...` after building.
 
@@ -24,11 +24,14 @@ To put `jev-polls` on your PATH for local use, run `npm link`. Every example als
 node dist/cli.js init my-study
 node dist/cli.js validate my-study/pipeline.json
 node dist/cli.js plan my-study/pipeline.json
-node dist/cli.js auth set
+node dist/cli.js connect my-study/pipeline.json
+node dist/cli.js auth check
 node dist/cli.js run my-study/pipeline.json --out .jev-polls/my-study
 ```
 
-`auth set` uses a hidden prompt and macOS Keychain. An existing secret manager can instead inject `TYPESAFE_API_KEY` into the process environment or pipe the key to `auth set --stdin`. Keys never belong in command arguments or project files.
+`connect` provides the browser flow; `auth set` provides a hidden terminal prompt. Both verify the key before saving it in macOS Keychain. `auth check` verifies a saved connection with one live request. An existing secret manager can instead inject `TYPESAFE_API_KEY` into the process environment or pipe the key to `auth set --stdin`. Keys never belong in command arguments or project files.
+
+Each normal run gets a new output directory. An explicit `--out` refuses to replace existing run artifacts unless `--overwrite` is supplied.
 
 ## What is included
 
@@ -63,6 +66,8 @@ Audience favorites and reviewer recommendations remain separate stages. Decision
 npm run verify
 npm run demo
 ```
+
+`npm run demo` is a developer-only offline fixture. It writes explicitly labeled mock outputs to `.jev-polls/demo/report.html`, replacing previous demo artifacts. It does not test your TypeSafe connection. Use `npm start` for a live study.
 
 Tests exercise weighted math, DAG execution, branches, failures, cache behavior, limits, provider validation, credential handling, CLI contracts and report escaping. Live TypeSafe verification requires a configured key; offline tests never need one.
 

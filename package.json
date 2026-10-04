@@ -9,6 +9,7 @@
   },
   "exports": "./dist/index.js",
   "scripts": {
+    "start": "node --import tsx src/cli.ts connect examples/game-naming/pipeline.json",
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test test/*.test.ts",

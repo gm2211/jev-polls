@@ -2,6 +2,8 @@
 
 Your existing coding or research agent does the preparation and interpretation. The CLI calls only TypeSafe for live inference. It does not call another generative model, scrape websites, or invent sources. Every command except help/version emits JSON to stdout; run progress is JSON lines on stderr. Failures exit nonzero with a JSON error or a saved failed run.
 
+`connect` is a long-running local server: stdout contains its connection URL, while progress and the eventual live-run result are JSON lines on stderr. Its page shows connection and study status.
+
 ## Start from the decision
 
 1. Turn the user's goal into a neutral question and a bounded answer set. Separate factual context supplied by the user from assumptions. Name the intended audience and the decision that the result will inform.
@@ -10,8 +12,8 @@ Your existing coding or research agent does the preparation and interpretation. 
 4. Create or reuse a cohort. Source-backed traits and synthetic details must remain distinguishable. Keep profiles question-independent; do not insert an answer preference, advocacy position, candidate-specific sentiment, or a conclusion merely to influence a result. When preexisting views are relevant, record the evidence and define how they were sampled. Avoid cloning real private individuals.
 5. Use researched population weights only when the source supports this population and measurement. Otherwise mark weights `assumed` or `user`, describe assumptions, and inspect segment results. Preserve correlations in observed data when available; do not independently combine traits into implausible biographies. Record gaps rather than filling them with fabricated facts.
 6. Draft a pipeline. Use Choice for candidate selection, Score for described degrees, Noul for yes/no. Every question contains complete meaning: question IDs are not sent as instructions. Add a no-match option when the candidate set is incomplete. A closed preference comparison may intentionally require one candidate, but say so.
-7. Validate and plan before inference. Run a mock pass to inspect branching and output contracts. Mock scores are deterministic test data, not Jev judgments.
-8. Run live inference when credentials are configured. Inspect failures; a failed respondent invalidates its stage instead of silently narrowing the audience. Retry with a new output directory to reuse validated cached evaluations. Existing run artifacts are protected; `--overwrite` explicitly replaces them. Use `--refresh` to request new evaluations; change seed to vary selection and option presentation.
+7. Validate and plan before inference. Connect the user's TypeSafe account with `jev-polls connect <pipeline>`; the local page checks a key with a real request, saves it in Keychain, and starts the live study. For an existing key, `jev-polls auth check` verifies live access. Developer mock passes can inspect branching, but never satisfy a request for a working study.
+8. Run live inference and inspect the saved results. A failed respondent invalidates its stage instead of silently narrowing the audience. Retry with a new output directory to reuse validated cached evaluations. Existing run artifacts are protected; `--overwrite` explicitly replaces them. Use `--refresh` to request new evaluations; change seed to vary selection and option presentation.
 9. Interpret weighted distributions, segment differences, repeated runs and model certainty separately. A reviewer panel contributes another synthetic judgment. Show its disagreement with the audience instead of presenting it as verified expert consensus.
 10. Export the standalone report. Distinguish a recommendation from a prediction of human behavior. Test useful conclusions against held-out human observations when available.
 
@@ -23,8 +25,8 @@ jev-polls schema cohort
 jev-polls schema pipeline
 jev-polls validate study/pipeline.json
 jev-polls plan study/pipeline.json
-jev-polls run study/pipeline.json --provider mock --out .jev-polls/demo
-jev-polls auth status
+jev-polls connect study/pipeline.json
+jev-polls auth check
 jev-polls run study/pipeline.json --out .jev-polls/live --seed 17 --concurrency 8
 jev-polls run study/pipeline.json --size audience=12 --repeats 3 --out .jev-polls/replicate
 jev-polls compare .jev-polls/live/run.json .jev-polls/replicate/run.json --stage audience --question favorite
@@ -81,6 +83,8 @@ TypeSafe Choice/Score confidence describes how concentrated one model answer is.
 ## Credentials
 
 On macOS, `jev-polls auth set` reads a hidden prompt and stores the key in Keychain. For an existing secret manager, pipe its output into `jev-polls auth set --stdin`, or inject `TYPESAFE_API_KEY` into the process environment in memory. Never pass an API key as a command argument, paste it into a pipeline, or commit it. Reports and caches contain no credentials.
+
+`jev-polls connect [pipeline]` serves a local connection page with a password field. It verifies Choice, Score, and Noul together in one small live request before saving a new key. With a pipeline argument, it then runs the study and serves its report. Keep the command running while using the page; Ctrl-C stops the local server. Account sign-in or key entry must be completed by the user when no saved credential exists. Do not present an offline mock report as completion of account setup.
 
 ## Boundaries
 
