@@ -67,6 +67,56 @@ test('branches select by upstream summary and any-join rejoins completed branche
   assert.equal(run.stages.rejoin?.dependsOn.length, 2);
 });
 
+test('explicit poll inputs project only selected named outputs and preserve legacy omission', async () => {
+  const seen: EvaluationRequest[] = [];
+  const provider = fixedProvider('a', { onCall(request) { seen.push(request); } });
+  const run = await runPipeline(pipeline([
+    poll('source'),
+    poll('selected', ['source'], { inputs: {
+      distribution: { stage: 'source', question: 'pick', select: 'probabilities' },
+      response_rows: { stage: 'source', question: 'pick', select: 'responses' },
+      choice: { stage: 'source', question: 'pick', select: 'winner' },
+    } }),
+    poll('legacy', ['source']),
+  ]), { audience: cohort }, options(provider));
+  const selected = seen.find((request) => Object.hasOwn(request.state as object, 'inputs'))!;
+  const state = selected.state as any;
+  assert.deepEqual(Object.keys(state.inputs).sort(), ['choice', 'distribution', 'response_rows']);
+  assert.ok(Math.abs(state.inputs.distribution.a - 0.8) < 1e-12);
+  assert.ok(Math.abs(state.inputs.distribution.b - 0.2) < 1e-12);
+  assert.equal(state.inputs.choice, 'a');
+  assert.equal(state.inputs.response_rows.length, 4);
+  assert.deepEqual(state.inputs.response_rows[0].answer, { type: 'choice', choice: 'a', probabilities: { a: 0.8, b: 0.2 }, confidence: 0.6 });
+  assert.equal('answers' in state.inputs.response_rows[0], false);
+  assert.equal('upstream' in state, false);
+  const legacy = seen.find((request) => Object.hasOwn(request.state as object, 'upstream'))!;
+  assert.equal(Array.isArray((legacy.state as any).upstream), true);
+  assert.equal(run.stages.selected?.status, 'completed');
+});
+
+test('explicit optional input is null when its source branch was skipped', async () => {
+  const seen: EvaluationRequest[] = [];
+  const provider = fixedProvider('a', { onCall(request) { seen.push(request); } });
+  const run = await runPipeline(pipeline([
+    poll('base'),
+    poll('inactive', ['base'], { when: { stage: 'base', question: 'pick', metric: 'winner', op: 'eq', value: 'b' } }),
+    poll('rejoin', ['base', 'inactive'], { join: 'any', inputs: { optional: { stage: 'inactive', question: 'pick' } } }),
+  ]), { audience: cohort }, options(provider));
+  assert.equal(run.stages.inactive?.status, 'skipped');
+  assert.equal(run.stages.rejoin?.status, 'completed');
+  const request = seen.find((candidate) => (candidate.state as any).inputs !== undefined)!;
+  assert.deepEqual((request.state as any).inputs, { optional: null });
+  assert.equal('upstream' in (request.state as any), false);
+});
+
+test('runtime rejects invalid bindings when callers bypass parsePipeline', async () => {
+  const flow = pipeline([
+    poll('source'),
+    poll('consumer', ['source'], { inputs: { estimate: { stage: 'source', question: 'pick', select: 'mean' } } }),
+  ]);
+  await assert.rejects(() => runPipeline(flow, { audience: cohort }, options(fixedProvider())), /incompatible with choice/);
+});
+
 test('any-join aggregate consumes only completed inputs and normalizes their weights', async () => {
   const flow = pipeline([
     poll('base'),

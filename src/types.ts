@@ -9,7 +9,9 @@ export interface ScoreQuestion { type: 'score'; label: string; instructions: str
 export type Question = ChoiceQuestion | NoulQuestion | ScoreQuestion;
 export type Condition = { all: Condition[] } | { any: Condition[] } | { not: Condition } | { stage: string; question: string; metric: 'margin' | 'topProbability' | 'mean' | 'winner'; op: 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'ne'; value: number | string };
 export interface BaseStage { id: string; label: string; dependsOn: string[]; join?: 'all' | 'any'; when?: Condition }
-export interface PollStage extends BaseStage { kind: 'poll'; cohort: string; questions: Record<string, Question>; size?: number; repeats?: number; context?: Json }
+export type PollInputSelect = 'summary' | 'winner' | 'mean' | 'probabilities' | 'responses';
+export interface PollInputBinding { stage: string; question: string; select?: PollInputSelect }
+export interface PollStage extends BaseStage { kind: 'poll'; cohort: string; questions: Record<string, Question>; size?: number; repeats?: number; context?: Json; inputs?: Record<string, PollInputBinding> }
 export interface AggregateStage extends BaseStage { kind: 'aggregate'; inputs: { stage: string; question: string; weight: number }[]; outputQuestion: string }
 export interface DecisionStage extends BaseStage { kind: 'decision'; from: { stage: string; question: string }; outputQuestion: string }
 export type Stage = PollStage | AggregateStage | DecisionStage;

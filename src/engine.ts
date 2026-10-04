@@ -2,11 +2,12 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type {
-  Answer, ChoiceQuestion, Cohort, Condition, Evaluation, EvaluationRequest, Json, Pipeline,
+  Answer, ChoiceQuestion, Cohort, Condition, Evaluation, EvaluationRequest, Json, Pipeline, PollInputBinding,
   Question, QuestionSummary, RunOptions, RunRecord, Stage, StageResult, Vote,
 } from './types.js';
 import { summarizeVotes } from './analysis.js';
 import { ProviderError, type ProviderResponseIssue } from './provider.js';
+import { inputSelectCompatible } from './schema.js';
 import { errorMessage, hashValue, isFiniteProbability, seededRandom, stableStringify } from './engine-utils.js';
 
 interface CacheEntry { version: 1; key: string; request: EvaluationRequest; evaluation: Evaluation }
@@ -298,17 +299,19 @@ export async function runPipeline(pipeline: Pipeline, cohorts: Record<string, Co
         while (cursor < jobs.length) {
           const job = jobs[cursor++]!;
           const requestSeed = `${options.seed}:${stage.id}:${job.persona.id}:${job.repeat}`;
+          const state: Record<string, Json> = {
+            pipelineContext: pipeline.context,
+            cohort: { id: cohort.id, name: cohort.name, population: cohort.population, description: cohort.description },
+            persona: job.persona as unknown as Json,
+            sharedContext: job.persona.attributes,
+            stageContext: stage.context ?? null,
+          };
+          if (stage.inputs !== undefined) state.inputs = resolvePollInputs(stage.inputs, stages);
+          else state.upstream = upstream.map((item) => ({ stage: item.id, label: item.label, summaries: item.summaries })) as unknown as Json;
           const request: EvaluationRequest = {
             model: options.model,
             seed: requestSeed,
-            state: {
-              pipelineContext: pipeline.context,
-              cohort: { id: cohort.id, name: cohort.name, population: cohort.population, description: cohort.description },
-              persona: job.persona as unknown as Json,
-              sharedContext: job.persona.attributes,
-              stageContext: stage.context ?? null,
-              upstream: upstream.map((item) => ({ stage: item.id, label: item.label, summaries: item.summaries })) as unknown as Json,
-            },
+            state: state as Json,
             questions: questionsForSeed(stage.questions, requestSeed),
           };
           const requestKey = hashValue({ version: 1, provider: options.provider.name, request });
@@ -423,6 +426,39 @@ function stagesToSummaries(stages: StageResult[]): Record<string, Record<string,
   return Object.fromEntries(stages.map((stage) => [stage.id, stage.summaries]));
 }
 
+function resolvePollInputs(bindings: Record<string, PollInputBinding>, stages: Record<string, StageResult>): Json {
+  const resolved: Record<string, Json> = {};
+  for (const [alias, binding] of Object.entries(bindings)) {
+    const result = stages[binding.stage];
+    const summary = result?.status === 'completed' ? result.summaries[binding.question] : undefined;
+    if (!summary) {
+      resolved[alias] = null;
+      continue;
+    }
+    const select = binding.select ?? 'summary';
+    if (select === 'summary') resolved[alias] = summary as unknown as Json;
+    else if (select === 'winner') resolved[alias] = summary.winner ?? null;
+    else if (select === 'mean') resolved[alias] = summary.mean ?? null;
+    else if (select === 'probabilities') resolved[alias] = summary.probabilities ? { ...summary.probabilities } : null;
+    else {
+      resolved[alias] = result!.votes.flatMap((vote) => {
+        const answer = vote.answers[binding.question];
+        if (!answer) return [];
+        return [{
+          personaId: vote.personaId,
+          cohortId: vote.cohortId ?? null,
+          segment: vote.segment,
+          repeat: vote.repeat,
+          weight: vote.weight,
+          model: vote.model,
+          answer: answer as unknown as Json,
+        } as unknown as Json];
+      });
+    }
+  }
+  return resolved;
+}
+
 function compareVotes(left: Vote, right: Vote): number {
   return (left.cohortId ?? '').localeCompare(right.cohortId ?? '') ||
     left.personaId.localeCompare(right.personaId) ||
@@ -491,6 +527,18 @@ function validateExecutionGraph(pipeline: Pipeline, order: Stage[]): void {
         if (!Number.isFinite(input.weight) || input.weight <= 0) throw new Error(`aggregate input '${reference}' must have positive weight`);
       }
       if (new Set(signatures).size > 1) throw new Error(`aggregate stage '${stage.id}' combines incompatible question types or options`);
+    }
+    if (stage.kind === 'poll' && stage.inputs !== undefined) {
+      if (Object.keys(stage.inputs).length > 1000) throw new Error(`poll stage '${stage.id}' has too many input bindings`);
+      for (const [alias, binding] of Object.entries(stage.inputs)) {
+        if (!/^[a-z][a-z0-9_-]{0,159}$/.test(alias) || ['__proto__', 'prototype', 'constructor'].includes(alias)) throw new Error(`poll stage '${stage.id}' has an invalid input alias`);
+        requireDependency(binding.stage, 'poll input');
+        const question = resolveQuestion(pipeline.stages, binding.stage, binding.question);
+        if (!question) throw new Error(`poll stage '${stage.id}' input references unknown question '${binding.stage}.${binding.question}'`);
+        const select = binding.select ?? 'summary';
+        if (!['summary', 'winner', 'mean', 'probabilities', 'responses'].includes(select)) throw new Error(`poll stage '${stage.id}' has an invalid input selector`);
+        if (!inputSelectCompatible(select, question)) throw new Error(`poll stage '${stage.id}' selector '${select}' is incompatible with ${question.type} question '${binding.stage}.${binding.question}'`);
+      }
     }
   }
 }

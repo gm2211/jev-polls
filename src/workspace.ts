@@ -13,6 +13,7 @@ import { writeJson, writeText } from './io.js';
 import { WorkspaceStore, workspacePlan, WorkspaceConflictError, validateWorkspaceDocument } from './workspace-store.js';
 import { renderWorkspace } from './workspace-ui.js';
 import { agentConnectionConfig } from './agent-config.js';
+import { LocalAgentError, LocalAgentService } from './local-agent.js';
 import type { Provider } from './types.js';
 import type { AuthStatus } from './auth.js';
 import type { WorkspaceRun, WorkspacePlan } from './workspace-types.js';
@@ -42,12 +43,14 @@ export interface WorkspaceServerOptions {
   connectAccount?: (key: string) => Promise<unknown>;
   providerFactory?: () => Provider;
   emit?: (event: Record<string, unknown>) => void;
+  localAgents?: Pick<LocalAgentService, 'availability' | 'start' | 'get' | 'cancel' | 'close'>;
 }
 
 /** Account connection and review are separate from explicit study execution. */
 export async function startWorkspaceServer(options: WorkspaceServerOptions): Promise<{ url: string; close: () => Promise<void> }> {
   const directory = resolve(options.directory);
   const store = new WorkspaceStore(directory);
+  const localAgents = options.localAgents ?? new LocalAgentService();
   const csrf = randomBytes(32).toString('hex');
   const nonce = randomBytes(18).toString('base64');
   const getAuth = options.getAuthStatus ?? authStatus;
@@ -160,6 +163,30 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
     }
     if (method === 'GET' && pathname === '/') { send(response, 200, renderWorkspace(nonce, csrf), true); return; }
     if (method === 'GET' && pathname === '/api/agent-config') { send(response, 200, agentConnectionConfig(origin + '/')); return; }
+    if (method === 'GET' && pathname === '/api/local-agents') { send(response, 200, await localAgents.availability()); return; }
+    if (method === 'POST' && pathname === '/api/agent/jobs') {
+      const input = z.object({ engine: z.enum(['codex', 'claude']), prompt: z.string().trim().min(1).max(10_000), revision: z.number().int().nonnegative().safe() }).strict().parse(await body(request, 64 * 1024));
+      const saved = await store.read();
+      if (saved.revision !== input.revision) throw new WorkspaceConflictError(input.revision, saved.revision);
+      send(response, 202, localAgents.start({ ...input, document: saved.document })); return;
+    }
+    const agentRoute = /^\/api\/agent\/jobs\/([0-9a-f-]{36})(?:\/(cancel|apply))?$/.exec(pathname);
+    if (agentRoute) {
+      const job = localAgents.get(agentRoute[1]!);
+      if (!job) throw new HttpError(404, 'AGENT_JOB_NOT_FOUND', 'Assistant task was not found. Start a new task.');
+      if (method === 'GET' && !agentRoute[2]) { send(response, 200, job); return; }
+      if (method === 'POST' && agentRoute[2] === 'cancel') {
+        z.object({}).strict().parse(await body(request));
+        send(response, 200, localAgents.cancel(job.id)); return;
+      }
+      if (method === 'POST' && agentRoute[2] === 'apply') {
+        const input = z.object({ revision: z.number().int().nonnegative().safe() }).strict().parse(await body(request));
+        if (job.status !== 'completed' || !job.proposal) throw new HttpError(409, 'AGENT_PROPOSAL_NOT_READY', 'A completed proposal is required before applying changes.');
+        if (input.revision !== job.revision) throw new WorkspaceConflictError(job.revision, input.revision);
+        const saved = await store.save(job.proposal.document, input.revision);
+        plans.clear(); send(response, 200, saved); return;
+      }
+    }
     if (method === 'GET' && pathname === '/api/workspace') {
       send(response, 200, { ...await store.read(), auth: await getAuth(), runs: [...jobs.values()].sort((a,b) => b.createdAt.localeCompare(a.createdAt)), activeRun }); return;
     }
@@ -245,9 +272,10 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
     void handle(request, response).catch(error => {
       if (response.headersSent) { response.destroy(); return; }
       const conflict = error instanceof WorkspaceConflictError;
-      const status = error instanceof HttpError ? error.status : conflict ? 409 : error instanceof z.ZodError ? 400 : 500;
-      const code = error instanceof HttpError ? error.code : conflict ? 'WORKSPACE_CONFLICT' : status === 400 ? 'INVALID_REQUEST' : 'WORKSPACE_ERROR';
-      const message = error instanceof HttpError ? error.message : conflict ? 'Workspace changed in another tab. Reload before saving.' : status === 400 ? validationMessage(error) : 'Workspace could not complete this request. Retry or check the local server.';
+      const agentError = error instanceof LocalAgentError;
+      const status = error instanceof HttpError ? error.status : conflict || (agentError && error.code === 'AGENT_BUSY') ? 409 : error instanceof z.ZodError || agentError ? 400 : 500;
+      const code = error instanceof HttpError || agentError ? error.code : conflict ? 'WORKSPACE_CONFLICT' : status === 400 ? 'INVALID_REQUEST' : 'WORKSPACE_ERROR';
+      const message = error instanceof HttpError || agentError ? error.message : conflict ? 'Workspace changed in another tab. Reload before saving.' : status === 400 ? validationMessage(error) : 'Workspace could not complete this request. Retry or check the local server.';
       send(response, status, { error: { code, message } });
     });
   });
@@ -259,5 +287,8 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
       expectedHost = `127.0.0.1:${address.port}`; origin = `http://${expectedHost}`; resolveListening();
     });
   });
-  return { url: origin + '/', close: () => closePromise ??= new Promise<void>((resolveClose, reject) => server.close(error => error ? reject(error) : resolveClose())) };
+  return { url: origin + '/', close: () => closePromise ??= (async () => {
+    await localAgents.close();
+    await new Promise<void>((resolveClose, reject) => server.close(error => error ? reject(error) : resolveClose()));
+  })() };
 }
