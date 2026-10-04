@@ -102,12 +102,13 @@ test('TypeSafe hides response bodies and secrets on errors', async () => {
 test('TypeSafe rejects a malformed probability distribution', async () => {
   const fetch = async (): Promise<Response> => Response.json({
     model: 'jev-test',
-    answers: { choice: { type: 'choice', choice: 'alpha', confidence: 0.9, probabilities: { alpha: 0.9, beta: 0.1 } }, likely: { type: 'noul', noul: 0.5 }, fit: { type: 'score', score: 1, confidence: 0.5, legend: { '0': 'Poor fit', '1': 'Mixed fit', '2': 'Strong fit' }, probabilities: { '0': 0, '1': 1, '2': 0 } } },
+    answers: { choice: { type: 'choice', choice: 'alpha', confidence: 0.9, probabilities: { alpha: 0.9, beta: 0.1, gamma: 0.01 } }, likely: { type: 'noul', noul: 0.5 }, fit: { type: 'score', score: 1, confidence: 0.5, legend: { '0': 'Poor fit', '1': 'Mixed fit', '2': 'Strong fit' }, probabilities: { '0': 0, '1': 1, '2': 0 } } },
     usage: { input_tokens: 1, output_tokens: 1 },
   });
   await assert.rejects(createProvider('typesafe', { apiKey: 'fake-test-key', fetch }).evaluate(request), (error: unknown) => {
     assert(error instanceof ProviderError);
     assert.equal(error.code, 'TYPESAFE_RESPONSE_INVALID');
+    assert.equal(error.responseIssue, 'probability_total');
     return true;
   });
 });
@@ -139,6 +140,7 @@ test('TypeSafe rejects choices and scores inconsistent with their probabilities'
   await assert.rejects(createProvider('typesafe', { apiKey: 'fake-test-key', fetch: nonLeadingChoiceFetch }).evaluate(choiceRequest), (error: unknown) => {
     assert(error instanceof ProviderError);
     assert.equal(error.code, 'TYPESAFE_RESPONSE_INVALID');
+    assert.equal(error.responseIssue, 'choice_winner');
     assert.match(error.message, /non-leading option/);
     return true;
   });
@@ -154,6 +156,7 @@ test('TypeSafe rejects choices and scores inconsistent with their probabilities'
   await assert.rejects(createProvider('typesafe', { apiKey: 'fake-test-key', fetch: inconsistentScoreFetch }).evaluate(scoreRequest), (error: unknown) => {
     assert(error instanceof ProviderError);
     assert.equal(error.code, 'TYPESAFE_RESPONSE_INVALID');
+    assert.equal(error.responseIssue, 'score_mean');
     assert.match(error.message, /score inconsistent/);
     return true;
   });

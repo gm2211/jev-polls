@@ -32,3 +32,16 @@ test('exports machine-readable schema and rejects prototype pollution keys', () 
   assert.equal(jsonSchema('pipeline').type, 'object');
   const p = pipeline(); (p.stages[0] as any).id = '__proto__'; assert.throws(() => parsePipeline(p));
 });
+
+test('Score schemas match TypeSafe’s 2–10 level limit in validation and JSON Schema', () => {
+  const p = pipeline();
+  (p.stages[0] as any).questions = { rating: { type: 'score', label: 'Rating', instructions: 'Rate the idea.', criteria: Array.from({ length: 10 }, (_, i) => `Level ${i}`) } };
+  assert.equal(parsePipeline(p).stages.length, 1);
+  (p.stages[0] as any).questions.rating.criteria.push('Level 10');
+  assert.throws(() => parsePipeline(p), /Score requires 2–10 levels/);
+
+  const schema = jsonSchema('pipeline') as any;
+  const questionVariants = schema.properties.stages.items.oneOf[0].properties.questions.additionalProperties.oneOf;
+  const scoreVariant = questionVariants.find((variant: any) => variant.properties?.type?.const === 'score');
+  assert.equal(scoreVariant?.properties?.criteria?.maxItems, 10);
+});

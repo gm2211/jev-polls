@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { cp, mkdtemp, readFile, rm, writeFile, access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import { authStatus } from '../src/auth.js';
 import { parseRun } from '../src/run-record.js';
 
@@ -33,6 +34,67 @@ function output(result: CliResult): Record<string, any> {
 
 async function exists(path: string): Promise<boolean> {
   try { await access(path); return true; } catch { return false; }
+}
+
+interface RunningCli {
+  child: ChildProcess;
+  initialOutput: Record<string, any>;
+  stdout: string;
+  stderr: string;
+}
+
+async function startCli(args: string[], cwd: string): Promise<RunningCli> {
+  const child = spawn(process.execPath, ['--import', join(root, 'node_modules/tsx/dist/loader.mjs'), cli, ...args], {
+    cwd,
+    env: { ...process.env, TYPESAFE_API_KEY: '', NO_COLOR: '1' },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let stdout = '';
+  let stderr = '';
+  let ready = false;
+  let resolveReady!: (value: Record<string, any>) => void;
+  let rejectReady!: (error: Error) => void;
+  const initial = new Promise<Record<string, any>>((resolve, reject) => { resolveReady = resolve; rejectReady = reject; });
+  const timer = setTimeout(() => rejectReady(new Error(`CLI did not emit startup JSON. stderr=${stderr.slice(0, 500)}`)), 15_000);
+  child.stdout?.setEncoding('utf8');
+  child.stderr?.setEncoding('utf8');
+  child.stdout?.on('data', (chunk: string) => {
+    stdout += chunk;
+    if (ready) return;
+    try { resolveReady(JSON.parse(stdout.trim()) as Record<string, any>); }
+    catch { /* Commander action has not finished writing the complete pretty-printed JSON yet. */ }
+  });
+  child.stderr?.on('data', (chunk: string) => { stderr += chunk; });
+  child.once('error', error => rejectReady(error));
+  child.once('exit', (code, signal) => {
+    if (!ready) rejectReady(new Error(`CLI exited before startup JSON (code=${code}, signal=${signal}); stderr=${stderr.slice(0, 500)}`));
+  });
+  try {
+    const initialOutput = await initial;
+    ready = true;
+    clearTimeout(timer);
+    return {
+      child, initialOutput,
+      get stdout() { return stdout; },
+      get stderr() { return stderr; },
+    };
+  } catch (error) {
+    clearTimeout(timer);
+    child.kill('SIGKILL');
+    throw error;
+  }
+}
+
+async function stopCli(child: ChildProcess): Promise<void> {
+  if (child.exitCode !== null) return;
+  const exited = new Promise<void>(resolveExit => child.once('exit', () => resolveExit()));
+  child.kill('SIGINT');
+  await Promise.race([exited, delay(3000)]);
+  if (child.exitCode === null) {
+    child.kill('SIGKILL');
+    await exited;
+  }
+  assert.equal(child.exitCode, 0, 'workspace CLI should exit cleanly on SIGINT');
 }
 
 test('CLI commands work offline with a temporary study and mock provider', async (t) => {
@@ -153,4 +215,66 @@ test('CLI commands work offline with a temporary study and mock provider', async
   assert.equal(noKey.status, 1);
   assert.match(output(noKey).error.message, /credentials missing/i);
   assert.equal(await exists(missingOutput), false);
+});
+
+test('workspace opens empty without running; connect imports a pipeline for editing only', async (t) => {
+  const temp = await mkdtemp(join(tmpdir(), 'jev-polls-workspace-cli-'));
+  t.after(async () => rm(temp, { recursive: true, force: true }));
+
+  const emptyDirectory = join(temp, 'empty-workspace');
+  const empty = await startCli(['workspace', '--directory', emptyDirectory], temp);
+  t.after(() => stopCli(empty.child));
+  assert.equal(empty.initialOutput.status, 'workspace-ready');
+  assert.match(empty.initialOutput.url, /^http:\/\/127\.0\.0\.1:\d+\/$/);
+  assert.deepEqual(JSON.parse(empty.stdout.trim()), empty.initialOutput, 'stdout contains only the startup JSON object');
+  assert.match(empty.initialOutput.note, /never runs a study/i);
+  const page = await fetch(empty.initialOutput.url);
+  assert.equal(page.status, 200);
+  assert.ok((await page.text()).includes('Research workspace'), 'CLI serves the browser workspace');
+  const emptyStateResponse = await fetch(new URL('/api/workspace', empty.initialOutput.url));
+  assert.equal(emptyStateResponse.status, 200);
+  const emptyState = await emptyStateResponse.json() as { document: { version: number; cohorts: unknown[]; pipelines: unknown[] }; runs: unknown[]; activeRun: unknown };
+  assert.deepEqual(emptyState.document, { version: 1, cohorts: [], pipelines: [] });
+  assert.deepEqual(emptyState.runs, []);
+  assert.equal(emptyState.activeRun, null);
+  await delay(100);
+  assert.equal(empty.child.exitCode, null, 'workspace remains open for user actions');
+  assert.doesNotMatch(empty.stderr, /"event":"(?:progress|workspace-run)"/);
+  assert.equal(await exists(join(emptyDirectory, 'runs')), false);
+  await stopCli(empty.child);
+
+  const importedDirectory = join(temp, 'imported-workspace');
+  const imported = await startCli(['connect', join(fixture, 'pipeline.json'), '--directory', importedDirectory], temp);
+  t.after(() => stopCli(imported.child));
+  assert.equal(imported.initialOutput.status, 'workspace-ready');
+  assert.deepEqual(JSON.parse(imported.stdout.trim()), imported.initialOutput, 'stdout contains only the startup JSON object');
+  assert.match(imported.initialOutput.note, /never runs a study/i);
+  const saved = JSON.parse(await readFile(join(importedDirectory, 'workspace.json'), 'utf8')) as {
+    revision: number;
+    document: { cohorts: Array<{ id: string }>; pipelines: Array<{ id: string; cohorts: Record<string, string> }> };
+  };
+  assert.equal(saved.revision, 1);
+  assert.deepEqual(saved.document.cohorts.map(cohort => cohort.id).sort(), ['review-panel', 'strategy-players']);
+  assert.equal(saved.document.pipelines.length, 1);
+  assert.equal(saved.document.pipelines[0]?.id, 'game-naming');
+  assert.deepEqual(saved.document.pipelines[0]?.cohorts, { players: 'strategy-players', reviewers: 'review-panel' });
+  const importedState = await (await fetch(new URL('/api/workspace', imported.initialOutput.url))).json() as { runs: unknown[]; activeRun: unknown };
+  assert.deepEqual(importedState.runs, []);
+  assert.equal(importedState.activeRun, null);
+  await delay(100);
+  assert.equal(imported.child.exitCode, null);
+  assert.doesNotMatch(imported.stderr, /"event":"(?:progress|workspace-run)"/);
+  assert.equal(await exists(join(importedDirectory, 'runs')), false);
+  await stopCli(imported.child);
+
+  const malformedPath = join(temp, 'malformed-pipeline.json');
+  await writeFile(malformedPath, '{ not json');
+  const invalid = invoke(['connect', malformedPath, '--directory', join(temp, 'must-not-start')], root);
+  assert.equal(invalid.status, 1);
+  const errorOutput = output(invalid);
+  assert.equal(typeof errorOutput.error.code, 'string');
+  assert.match(errorOutput.error.message, /JSON|parse|valid/i);
+  assert.deepEqual(JSON.parse(invalid.stdout.trim()), errorOutput, 'failures also emit only one JSON object to stdout');
+  assert.equal(invalid.stderr, '');
+  assert.equal(await exists(join(temp, 'must-not-start')), false);
 });

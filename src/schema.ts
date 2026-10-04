@@ -15,7 +15,7 @@ export const cohortSchema = z.object({ version: z.literal(1), id, name: text, de
 export const questionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('choice'), label: text, instructions: text, criteria: z.record(safeKey, z.string().nullable()).refine(v => Object.keys(v).length >= 2 && Object.keys(v).length <= 255, 'Choice requires 2–255 options') }).strict(),
   z.object({ type: z.literal('noul'), label: text, instructions: text }).strict(),
-  z.object({ type: z.literal('score'), label: text, instructions: text, criteria: z.array(text).min(2).max(255) }).strict(),
+  z.object({ type: z.literal('score'), label: text, instructions: text, criteria: z.array(text).min(2).max(10, 'Score requires 2–10 levels') }).strict(),
 ]);
 const conditionSchema: z.ZodType<Condition> = z.lazy(() => z.union([
   z.object({ all: z.array(conditionSchema).min(1) }).strict(),

@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
+import { ProviderError } from '../src/provider.js';
 import type { Cohort, Evaluation, EvaluationRequest, Pipeline, Provider, Question, RunOptions } from '../src/types.js';
 import { runPipeline, selectPersonas } from '../src/engine.js';
 import { simulateVotes } from '../src/analysis.js';
@@ -143,6 +144,20 @@ test('failed voters remain visible and descendants skip; malformed provider answ
   const malformed = await runPipeline(pipeline([poll('bad')]), { audience: cohort }, options(fixedProvider('a', { malformed: true })));
   assert.equal(malformed.stages.bad?.status, 'failed');
   assert.equal(malformed.stages.bad?.votes.length, 0);
+});
+
+test('live response failures report only fixed provider validation guidance', async () => {
+  const secret = 'fake-upstream-body-must-not-appear';
+  const provider: Provider = {
+    name: 'typesafe',
+    async evaluate(): Promise<Evaluation> {
+      throw new ProviderError('TYPESAFE_RESPONSE_INVALID', `upstream echoed ${secret}`, undefined, 'choice_winner');
+    },
+  };
+  const run = await runPipeline(pipeline([poll('invalid')]), { audience: cohort }, options(provider, { concurrency: 1 }));
+  const reason = run.stages.invalid?.reason ?? '';
+  assert.match(reason, /selected Choice is not the most probable option/);
+  assert.doesNotMatch(reason, /upstream echoed|fake-upstream-body-must-not-appear/);
 });
 
 test('cycles are rejected before provider calls', async () => {

@@ -33,8 +33,30 @@ export type ProviderErrorCode =
   | 'TYPESAFE_REQUEST_REJECTED'
   | 'TYPESAFE_RESPONSE_INVALID'
   | 'TYPESAFE_EVALUATION_FAILED';
+/** Safe classification for provider-owned response validation failures. */
+export type ProviderResponseIssue =
+  | 'answers_shape'
+  | 'answer_shape'
+  | 'answer_type'
+  | 'noul_probability'
+  | 'probability_shape'
+  | 'probability_range'
+  | 'probability_total'
+  | 'choice_value'
+  | 'choice_winner'
+  | 'score_value'
+  | 'score_legend'
+  | 'score_mean'
+  | 'usage_shape'
+  | 'model_shape';
+
 export class ProviderError extends Error {
-  constructor(readonly code: ProviderErrorCode, message: string, readonly httpStatus?: number) {
+  constructor(
+    readonly code: ProviderErrorCode,
+    message: string,
+    readonly httpStatus?: number,
+    readonly responseIssue?: ProviderResponseIssue,
+  ) {
     super(message);
     this.name = 'ProviderError';
   }
@@ -69,23 +91,23 @@ function scoreConfidence(values: number[]): number {
   return Math.max(0, 1 - spread / uniformSpread);
 }
 
-function assertProbability(value: unknown, path: string): asserts value is number {
+function assertProbability(value: unknown, path: string, issue: ProviderResponseIssue = 'probability_range'): asserts value is number {
   if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) {
-    throw invalidResponse(`TypeSafe returned an invalid probability for ${path}.`);
+    throw invalidResponse(issue, `TypeSafe returned an invalid probability for ${path}.`);
   }
 }
 
-function invalidResponse(message: string): ProviderError {
-  return new ProviderError('TYPESAFE_RESPONSE_INVALID', message);
+function invalidResponse(issue: ProviderResponseIssue, message: string): ProviderError {
+  return new ProviderError('TYPESAFE_RESPONSE_INVALID', message, undefined, issue);
 }
 
 function validateAnswer(question: Question, value: unknown, id: string): Answer {
-  if (!value || typeof value !== 'object') throw invalidResponse(`TypeSafe omitted a valid answer for ${id}.`);
+  if (!value || typeof value !== 'object') throw invalidResponse('answer_shape', `TypeSafe omitted a valid answer for ${id}.`);
   const answer = value as Record<string, unknown>;
-  if (answer.type !== question.type) throw invalidResponse(`TypeSafe returned the wrong answer type for ${id}.`);
+  if (answer.type !== question.type) throw invalidResponse('answer_type', `TypeSafe returned the wrong answer type for ${id}.`);
 
   if (question.type === 'noul') {
-    assertProbability(answer.noul, id);
+    assertProbability(answer.noul, id, 'noul_probability');
     return { type: 'noul', noul: answer.noul };
   }
 
@@ -94,42 +116,42 @@ function validateAnswer(question: Question, value: unknown, id: string): Answer 
     : question.criteria.map((_, index) => String(index));
   const rawProbabilities = answer.probabilities;
   if (!rawProbabilities || typeof rawProbabilities !== 'object' || Array.isArray(rawProbabilities)) {
-    throw invalidResponse(`TypeSafe returned invalid probabilities for ${id}.`);
+    throw invalidResponse('probability_shape', `TypeSafe returned invalid probabilities for ${id}.`);
   }
   const probabilities = rawProbabilities as Record<string, unknown>;
   if (Object.keys(probabilities).length !== expected.length || expected.some((key) => !(key in probabilities))) {
-    throw invalidResponse(`TypeSafe returned an incomplete probability distribution for ${id}.`);
+    throw invalidResponse('probability_shape', `TypeSafe returned an incomplete probability distribution for ${id}.`);
   }
   let sum = 0;
   for (const key of expected) {
     assertProbability(probabilities[key], `${id}.${key}`);
     sum += probabilities[key];
   }
-  if (Math.abs(sum - 1) > 1e-5) throw invalidResponse(`TypeSafe returned an unnormalized probability distribution for ${id}.`);
+  if (Math.abs(sum - 1) > 1e-5) throw invalidResponse('probability_total', `TypeSafe returned an unnormalized probability distribution for ${id}.`);
   assertProbability(answer.confidence, `${id}.confidence`);
 
   if (question.type === 'choice') {
     if (typeof answer.choice !== 'string' || !expected.includes(answer.choice)) {
-      throw invalidResponse(`TypeSafe selected an unknown option for ${id}.`);
+      throw invalidResponse('choice_value', `TypeSafe selected an unknown option for ${id}.`);
     }
     const values = expected.map((key) => probabilities[key] as number);
     if ((probabilities[answer.choice] as number) < Math.max(...values) - 1e-8) {
-      throw invalidResponse(`TypeSafe selected a non-leading option for ${id}.`);
+      throw invalidResponse('choice_winner', `TypeSafe selected a non-leading option for ${id}.`);
     }
     return { type: 'choice', choice: answer.choice, probabilities: probabilities as Record<string, number>, confidence: answer.confidence };
   }
 
   if (typeof answer.score !== 'number' || !Number.isFinite(answer.score) || answer.score < 0 || answer.score > question.criteria.length - 1) {
-    throw invalidResponse(`TypeSafe returned an invalid score for ${id}.`);
+    throw invalidResponse('score_value', `TypeSafe returned an invalid score for ${id}.`);
   }
   const expectedLegend = Object.fromEntries(question.criteria.map((criterion, index) => [String(index), criterion]));
   if (!answer.legend || typeof answer.legend !== 'object' || stableJson(answer.legend) !== stableJson(expectedLegend)) {
-    throw invalidResponse(`TypeSafe returned an invalid score legend for ${id}.`);
+    throw invalidResponse('score_legend', `TypeSafe returned an invalid score legend for ${id}.`);
   }
   const values = expected.map((key) => probabilities[key] as number);
   const expectedScore = values.reduce((sum, probability, index) => sum + probability * index, 0);
   // The API may round its expected score; tolerate small display precision differences.
-  if (Math.abs(answer.score - expectedScore) > 0.01) throw invalidResponse(`TypeSafe returned a score inconsistent with its distribution for ${id}.`);
+  if (Math.abs(answer.score - expectedScore) > 0.01) throw invalidResponse('score_mean', `TypeSafe returned a score inconsistent with its distribution for ${id}.`);
   return { type: 'score', score: answer.score, probabilities: probabilities as Record<string, number>, confidence: answer.confidence, legend: expectedLegend };
 }
 
@@ -213,16 +235,16 @@ function createTypeSafeProvider(config: ProviderConfig): Provider {
         });
         const questions = Object.fromEntries(Object.entries(request.questions).map(([id, question]) => [id, toApiQuestion(question)]));
         const result = await client.systemOne({ state: request.state as Parameters<TypeSafeClient['systemOne']>[0]['state'], model: request.model, questions });
-        if (!result.answers || typeof result.answers !== 'object') throw invalidResponse('TypeSafe returned an invalid answers object.');
+        if (!result.answers || typeof result.answers !== 'object') throw invalidResponse('answers_shape', 'TypeSafe returned an invalid answers object.');
         const keys = Object.keys(request.questions);
-        if (Object.keys(result.answers).length !== keys.length || keys.some((id) => !(id in result.answers))) throw invalidResponse('TypeSafe returned an incomplete answers object.');
+        if (Object.keys(result.answers).length !== keys.length || keys.some((id) => !(id in result.answers))) throw invalidResponse('answers_shape', 'TypeSafe returned an incomplete answers object.');
         const answers: Record<string, Answer> = {};
         for (const [id, question] of Object.entries(request.questions)) answers[id] = validateAnswer(question, result.answers[id], id);
         const usage = result.usage;
         if (!usage || !Number.isSafeInteger(usage.input_tokens) || usage.input_tokens < 0 || !Number.isSafeInteger(usage.output_tokens) || usage.output_tokens < 0) {
-          throw invalidResponse('TypeSafe returned invalid usage metadata.');
+          throw invalidResponse('usage_shape', 'TypeSafe returned invalid usage metadata.');
         }
-        if (typeof result.model !== 'string' || !result.model) throw invalidResponse('TypeSafe returned an invalid model name.');
+        if (typeof result.model !== 'string' || !result.model) throw invalidResponse('model_shape', 'TypeSafe returned an invalid model name.');
         return { answers, model: result.model, usage: { inputTokens: usage.input_tokens, outputTokens: usage.output_tokens } };
       } catch (error) {
         throw safeFailure(error);

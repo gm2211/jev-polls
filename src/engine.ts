@@ -6,7 +6,7 @@ import type {
   Question, QuestionSummary, RunOptions, RunRecord, Stage, StageResult, Vote,
 } from './types.js';
 import { summarizeVotes } from './analysis.js';
-import { ProviderError } from './provider.js';
+import { ProviderError, type ProviderResponseIssue } from './provider.js';
 import { errorMessage, hashValue, isFiniteProbability, seededRandom, stableStringify } from './engine-utils.js';
 
 interface CacheEntry { version: 1; key: string; request: EvaluationRequest; evaluation: Evaluation }
@@ -533,6 +533,10 @@ function safeRequestFailure(error: unknown): string {
   if (error instanceof RequestLimitError) return 'request limit reached';
   if (error instanceof InvalidEvaluationError) return 'invalid provider response';
   if (!(error instanceof ProviderError)) return 'provider request failed';
+  if (error.code === 'TYPESAFE_RESPONSE_INVALID') {
+    const issue = error.responseIssue ? responseIssueMessages.get(error.responseIssue) : undefined;
+    return `${error.code}: ${issue ?? 'TypeSafe returned an invalid response'}`;
+  }
   const messages: Record<string, string> = {
     MISSING_TYPESAFE_API_KEY: 'TypeSafe API key is not configured',
     TYPESAFE_AUTHENTICATION_FAILED: 'TypeSafe authentication failed',
@@ -547,3 +551,20 @@ function safeRequestFailure(error: unknown): string {
   };
   return `${error.code}: ${messages[error.code] ?? 'provider request failed'}`;
 }
+
+const responseIssueMessages = new Map<ProviderResponseIssue, string>([
+  ['answers_shape', 'the answer map is missing or incomplete'],
+  ['answer_shape', 'an answer is missing or malformed'],
+  ['answer_type', 'an answer type does not match its question'],
+  ['noul_probability', 'a Noul probability is outside 0 to 1'],
+  ['probability_shape', 'a Choice or Score distribution is missing or incomplete'],
+  ['probability_range', 'a probability or confidence value is outside 0 to 1'],
+  ['probability_total', 'a Choice or Score distribution does not sum to 1'],
+  ['choice_value', 'the selected Choice is not one of the requested options'],
+  ['choice_winner', 'the selected Choice is not the most probable option'],
+  ['score_value', 'a Score value is outside its requested range'],
+  ['score_legend', 'a Score legend does not match its requested levels'],
+  ['score_mean', 'a Score value does not match its probability-weighted mean'],
+  ['usage_shape', 'token usage metadata is missing or invalid'],
+  ['model_shape', 'the resolved model metadata is missing or invalid'],
+]);

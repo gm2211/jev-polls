@@ -12,7 +12,8 @@ import { compareRuns, simulateVotes } from './analysis.js';
 import { createProvider } from './provider.js';
 import { authStatus, setApiKey } from './auth.js';
 import { verifyTypeSafeConnection } from './auth-check.js';
-import { startConnectServer } from './connect.js';
+import { startWorkspaceServer } from './workspace.js';
+import { WorkspaceStore } from './workspace-store.js';
 import { renderReport } from './report.js';
 import { loadRun } from './run-record.js';
 import { hashValue } from './engine-utils.js';
@@ -64,48 +65,35 @@ function plan(pipeline: Pipeline, cohorts: Record<string, Cohort>) {
 }
 program.command('plan').argument('<pipeline>').description('Inspect graph and maximum request count without credentials or API calls').action(async file => { const { pipeline, cohorts } = await loadProject(file); output(plan(pipeline, cohorts)); });
 
-program.command('connect').argument('[pipeline]', 'Optional study to run live after connecting')
-  .option('--out <directory>', 'New directory for live run artifacts')
-  .option('--port <port>', 'Local connection page port (default: automatic)', integer)
-  .description('Connect your TypeSafe account in a local browser page, verify Jev, and optionally run a study')
-  .action(async (file, opts) => {
-    const project = file ? await loadProject(file) : undefined;
-    const requestBudget = project ? plan(project.pipeline, project.cohorts).maxRequests : 0;
-    if (opts.port && opts.port > 65535) throw new Error('Port must be at most 65535');
-    const directory = resolve(opts.out ?? `.jev-polls/runs/live-${Date.now()}-${randomUUID().slice(0, 8)}`);
-    if (project) { await absent(join(directory, 'run.json')); await absent(join(directory, 'report.html')); }
-    const configured = await authStatus();
-    const connection = await startConnectServer({
-      title: project?.pipeline.name,
-      detail: project ? `${project.pipeline.description} Up to ${requestBudget} live profile evaluations.` : undefined,
-      hasCredential: configured.configured,
-      port: opts.port,
-      connect: async (key, progress) => {
-        progress('Checking your TypeSafe connection with a live Jev request…');
-        const verified = await verifyTypeSafeConnection(key);
-        if (key) await setApiKey(key);
-        process.stderr.write(JSON.stringify({ event: 'connection-verified', model: verified.model, usage: verified.usage }) + '\n');
-        if (!project) return { model: verified.model, message: 'TypeSafe connected and verified. Your CLI is ready for live studies.' };
-        progress('Connected. Running your study with live Jev responses…');
-        const run = await runPipeline(project.pipeline, project.cohorts, {
-          provider: createProvider('typesafe', { apiKey: key }), model: verified.model, seed: '1', concurrency: 4,
-          maxRequests: requestBudget, cacheDir: resolve('.jev-polls/cache'),
-          onProgress: event => {
-            progress(`${event.stage}: ${event.completed} of ${event.total} evaluations processed`);
-            process.stderr.write(JSON.stringify({ event: 'progress', ...event }) + '\n');
-          },
-        });
-        const html = renderReport(run);
-        await writeJson(join(directory, 'run.json'), run);
-        await writeText(join(directory, 'report.html'), html);
-        process.stderr.write(JSON.stringify({ event: 'live-run', status: run.status, provider: run.provider, model: run.model, usage: run.usage, files: { run: join(directory, 'run.json'), report: join(directory, 'report.html') } }) + '\n');
-        return { model: run.model, reportHtml: html, reportPath: join(directory, 'report.html'), message: run.status === 'completed' ? 'Live study complete. Open your report.' : 'Live study ended with failures. Open the report for details and successful responses.' };
-      },
-    });
-    output({ status: 'waiting-for-connection', url: connection.url, provider: 'typesafe', note: 'Open this local URL to connect. Keep this process running while using the page.' });
-    const shutdown = () => { void connection.close().then(() => { process.exitCode = 0; }); };
-    process.once('SIGINT', shutdown); process.once('SIGTERM', shutdown);
-  });
+async function openWorkspace(file: string | undefined, opts: { directory?: string; port?: number }) {
+  if (opts.port && opts.port > 65535) throw new Error('Port must be at most 65535');
+  const directory = resolve(opts.directory ?? '.jev-polls/workspace');
+  if (file) {
+    const project = await loadProject(file);
+    const store = new WorkspaceStore(directory);
+    const saved = await store.read();
+    const draft = structuredClone(saved.document);
+    for (const cohort of Object.values(project.cohorts)) {
+      const existing = draft.cohorts.find(c => c.id === cohort.id);
+      if (existing && hashValue(existing) !== hashValue(cohort)) throw new Error(`Cohort ${cohort.id} already exists with different content. Import under a new id to preserve it.`);
+      if (!existing) draft.cohorts.push(cohort);
+    }
+    const pipeline = { ...project.pipeline, cohorts: Object.fromEntries(Object.entries(project.cohorts).map(([alias, cohort]) => [alias, cohort.id])) };
+    const existing = draft.pipelines.find(p => p.id === pipeline.id);
+    if (existing && hashValue(existing) !== hashValue(pipeline)) throw new Error(`Study ${pipeline.id} already exists with different content. Import under a new id to preserve it.`);
+    if (!existing) draft.pipelines.push(pipeline);
+    await store.save(draft, saved.revision);
+  }
+  const workspace = await startWorkspaceServer({ directory, port: opts.port, legacyRunsDirectory: resolve('.jev-polls/runs'), emit: event => process.stderr.write(JSON.stringify(event) + '\n') });
+  output({ status: 'workspace-ready', url: workspace.url, directory, note: 'Create cohorts and a pipeline, then review before choosing Run study. Opening the workspace or connecting an account never runs a study.' });
+  const shutdown = () => { void workspace.close().then(() => { process.exitCode = 0; }); };
+  process.once('SIGINT', shutdown); process.once('SIGTERM', shutdown);
+}
+program.command('workspace').option('--directory <directory>', 'Saved workspace directory').option('--port <port>', 'Local workspace port', integer)
+  .description('Open the cohort builder, visual pipeline editor, and run history').action(opts => openWorkspace(undefined, opts));
+program.command('connect').argument('[pipeline]', 'Optional existing pipeline to import for editing; never runs automatically')
+  .option('--directory <directory>', 'Saved workspace directory').option('--port <port>', 'Local workspace port', integer)
+  .description('Connect TypeSafe and set up studies in the browser workspace').action(openWorkspace);
 
 program.command('run').argument('<pipeline>').description('Execute pipeline, resume exact cached evaluations, and write JSON plus standalone HTML')
   .addOption(new Option('--provider <provider>', 'typesafe for live Jev, mock for a fully offline demonstration').choices(['typesafe', 'mock']).default('typesafe'))
@@ -132,7 +120,7 @@ program.command('run').argument('<pipeline>').description('Execute pipeline, res
     }
     if (opts.repeats) for (const s of project.pipeline.stages) if (s.kind === 'poll') s.repeats = opts.repeats;
     project.pipeline = parsePipeline(project.pipeline);
-    if (opts.provider === 'typesafe' && !(await authStatus()).configured) throw new Error('TypeSafe credentials missing. Run jev-polls connect with your pipeline path to connect and run live, or jev-polls auth set for a hidden terminal prompt.');
+    if (opts.provider === 'typesafe' && !(await authStatus()).configured) throw new Error('TypeSafe credentials missing. Run jev-polls connect with your pipeline path to prepare a study in the browser workspace, or jev-polls auth set for a hidden terminal prompt.');
     const directory = resolve(opts.out ?? `.jev-polls/runs/${project.pipeline.id}-${Date.now()}-${randomUUID().slice(0, 8)}`);
     if (!opts.overwrite) {
       await absent(join(directory, 'run.json'));

@@ -14,11 +14,13 @@ npm run build
 npm start
 ```
 
-Open the local connection URL printed by `npm start`. Sign in to the linked TypeSafe console, then enter your API key in the local password field. Jev Polls verifies the key with a real request, saves it in macOS Keychain, runs the starter study using live Jev responses, and provides an interactive report. The starter study uses example names and synthetic profiles; edit those for your actual decision. Live requests use your TypeSafe account.
+Open the local workspace URL printed by `npm start`. Create cohorts with source notes, weighted segments and synthetic adult profiles. Create a study, write questions, and connect poll, aggregate and decision stages in the visual pipeline editor. Drafts are saved locally and can be reused or exported as JSON.
 
-The connection page serves only on your own computer. Keys never enter the report, project files, command arguments, or chat. Subsequent studies can reuse the saved connection. Every normal run uses TypeSafe by default, with no mock fallback.
+Connect your TypeSafe account from the workspace when needed. The password field verifies the key with one small request and saves it in macOS Keychain. Connecting never runs a study. Review the stage plan and request budget, then choose **Run study** to start live inference. Completed and failed runs remain in **Runs**, with standalone reports.
 
-Keep the `npm start` terminal running while connecting and viewing the report. If the local server stops, restart it and open the new URL it prints; reload any page reused on the same port. A stopped server or an expired local page does not mean your TypeSafe key is invalid. TypeSafe console sign-in can happen in your usual browser; the CLI only needs the API key entered on the local connection page.
+The workspace serves only on your own computer. Keys never enter reports, project files, command arguments, or chat. Subsequent studies reuse the saved connection. Normal runs use TypeSafe with no mock fallback. The initial workspace is empty; example names and profiles are imported only when you choose them.
+
+Keep the `npm start` terminal running while using the workspace. If the server stops, restart it and reload the page. Drafts and reports persist in `.jev-polls/workspace`; an expired local page does not mean your TypeSafe key is invalid. TypeSafe console sign-in can happen in your usual browser; enter the resulting API key in the local workspace.
 
 To put `jev-polls` on your PATH for local use, run `npm link`. Every example also works as `node dist/cli.js ...` after building.
 
@@ -31,12 +33,13 @@ node dist/cli.js auth check
 node dist/cli.js run my-study/pipeline.json --out .jev-polls/my-study
 ```
 
-`connect` provides the browser flow; `auth set` provides a hidden terminal prompt. Both verify the key before saving it in macOS Keychain. `auth check` verifies a saved connection with one live request. An existing secret manager can instead inject `TYPESAFE_API_KEY` into the process environment or pipe the key to `auth set --stdin`. Keys never belong in command arguments or project files.
+`workspace` opens the browser editor. `connect <pipeline>` imports an existing CLI project into that workspace for editing, without running it. Connecting through the browser or using the `auth set` hidden terminal prompt verifies the key before saving it in macOS Keychain. `auth check` verifies a saved connection with one live request. An existing secret manager can instead inject `TYPESAFE_API_KEY` into the process environment or pipe the key to `auth set --stdin`. Keys never belong in command arguments or project files.
 
 Each normal run gets a new output directory. An explicit `--out` refuses to replace existing run artifacts unless `--overwrite` is supplied.
 
 ## What is included
 
+- Browser workspace with reusable cohort forms, typed question editors, a connected stage graph, branch conditions, saved drafts, explicit run review and run history.
 - Portable, validated cohort JSON with source references, synthetic-field labels, adult profiles, explicit segment weights and assumptions.
 - Reusable cohort revisions, deterministic sampling without replacement, configurable cohort size and repeated evaluations.
 - Arbitrary acyclic pipelines: parallel panels, compound conditions, split/rejoin paths, weighted aggregation and explicit decisions.
@@ -69,7 +72,7 @@ npm run verify
 npm run demo
 ```
 
-`npm run demo` is a developer-only offline fixture. It writes explicitly labeled mock outputs to `.jev-polls/demo/report.html`, replacing previous demo artifacts. It does not test your TypeSafe connection. Use `npm start` for a live study.
+`npm run demo` is a developer-only offline fixture. It writes explicitly labeled mock outputs to `.jev-polls/demo/report.html`, replacing previous demo artifacts. It does not test your TypeSafe connection. Use `npm start` to prepare and explicitly start a live study.
 
 Tests exercise weighted math, DAG execution, branches, failures, cache behavior, limits, provider validation, credential handling, CLI contracts and report escaping. Live TypeSafe verification requires a configured key; offline tests never need one.
 
