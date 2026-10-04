@@ -1,6 +1,6 @@
 # Jev Polls
 
-A local visual workspace for virtual research pools and data pipelines. Configure synthetic personas, give each phase a pool and a question, connect named outputs to later phases, and inspect modeled results. A companion CLI and MCP tools support existing research agents.
+A local visual workspace for virtual research cohorts and data pipelines. Configure synthetic personas, give each phase a cohort and a question, connect named outputs to later phases, and inspect modeled results. A companion CLI and MCP tools support existing research agents.
 
 Use forms directly or ask an installed, authenticated Codex or Claude CLI to draft changes from the UI. No separate model API key is required for drafting; the selected CLI uses its existing account. TypeSafe performs live profile evaluations. Source research can still happen in your existing agent; the local drafting assistant uses the supplied brief and saved workspace.
 
@@ -14,7 +14,7 @@ npm run build
 npm start
 ```
 
-Open the local workspace URL printed by `npm start`. Configure virtual pools with source notes, weighted segments and synthetic adult profiles. Create a pipeline, give each phase a question and pool, and use **Add next phase** for a linear flow. Named input connections also support branches and joins. Drafts are saved locally and can be reused or exported as JSON.
+Open the local workspace URL printed by `npm start`. Configure virtual cohorts with source notes, weighted segments and synthetic adult profiles. Create a pipeline, give each phase a question and cohort, and use **Add next phase** for a linear flow. Named input connections also support branches and joins. Drafts are saved locally and can be reused or exported as JSON.
 
 Connect your TypeSafe account from the workspace when needed. The password field verifies the key with one small request and saves it in macOS Keychain. Connecting never runs a study. Review the stage plan and request budget, then choose **Run study** to start live inference. Completed and failed runs remain in **Runs**, with standalone reports.
 
@@ -37,7 +37,7 @@ Each normal run gets a new output directory. An explicit `--out` refuses to repl
 
 ## What is included
 
-- Local visual pool workspace, persona tiles, segment composition, typed phase editors, explicit input/output connections, saved drafts, run review and history.
+- Local visual cohort workspace, persona tiles, segment composition, typed phase editors, explicit input/output connections, saved drafts, run review and history.
 - Local CLI drafting with installed Codex or Claude, cancellation, validated proposals, and revision-safe explicit application.
 - MCP tools for existing agents to read and update the same workspace, prepare cohorts and pipelines, review request budgets, start authorized runs, and inspect saved results.
 - Portable, validated cohort JSON with source references, synthetic-field labels, adult profiles, explicit segment weights and assumptions.
@@ -51,13 +51,13 @@ Each normal run gets a new output directory. An explicit `--out` refuses to repl
 
 ## Phase data flow
 
-New phases ask one question across the selected pool. Each question ID names an output. A downstream phase can map an output to a named input, selecting its full summary, winning option (Choice), mean (Score/Noul), probability distribution (Choice/Score), or individual weighted responses. For example, map `screening.preference` to `prior_preference`, then refer to `inputs.prior_preference` in the next question. No text generation is implied: Jev outputs typed judgments and probabilities.
+New phases ask one question across the selected cohort. Each question ID names an output. A downstream phase can map an output to a named input, selecting its full summary, winning option (Choice), mean (Score/Noul), probability distribution (Choice/Score), or individual weighted responses. For example, map `screening.preference` to `prior_preference`, then refer to `inputs.prior_preference` in the next question. No text generation is implied: Jev outputs typed judgments and probabilities.
 
 Every input source is an explicit graph dependency; cycles and incompatible projections fail validation. Optional skipped branches supply `null` for their mapped inputs. Existing multiquestion phases remain supported, and imported pipelines without explicit inputs retain their legacy upstream-summary behavior.
 
 ## Agent workflow
 
-The local assistant runs your installed Codex or Claude CLI with its existing login. Save changes first, describe the desired pool or pipeline, then review the proposed changes before applying them. Generation never saves automatically or starts a TypeSafe study. If the saved workspace changes meanwhile, the proposal must be regenerated against the new revision. The assistant cannot browse for evidence: supplied sources and synthetic assumptions remain distinct.
+The local assistant runs your installed Codex or Claude CLI with its existing login. Save changes first, describe the desired cohort or pipeline, then review the proposed changes before applying them. Generation never saves automatically or starts a TypeSafe study. If the saved workspace changes meanwhile, the proposal must be regenerated against the new revision. The assistant cannot browse for evidence: supplied sources and synthetic assumptions remain distinct.
 
 Advanced MCP connection settings also support Codex, Claude Code, or another client. Keep the workspace server running. The adapter uses local stdio and the same revision checks and run controls as the browser; it never asks the agent to copy your TypeSafe key. Start a new agent session after registering the server so its tools are loaded.
 

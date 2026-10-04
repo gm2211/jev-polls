@@ -47,7 +47,7 @@ When using a checkout without installing the CLI, replace `jev-polls` with `npm 
 
 ## Browser workspace
 
-`jev-polls workspace --port 4180` opens an empty workspace by default. Use Pools to maintain sources, weighted segments and adult synthetic profiles; use Pipelines to define context, questions and an acyclic phase graph. Named input bindings select which earlier outputs a phase receives. Save unfinished drafts freely; Review checks full runnable contracts and shows an upper bound on profile evaluations. Only the Run study action starts study inference. Key verification is a separate small request.
+`jev-polls workspace --port 4180` opens an empty workspace by default. Use Cohorts to maintain sources, weighted segments and adult synthetic profiles; use Pipelines to define context, questions and an acyclic phase graph. Named input bindings select which earlier outputs a phase receives. Save unfinished drafts freely; Review checks full runnable contracts and shows an upper bound on profile evaluations. Only the Run study action starts study inference. Key verification is a separate small request.
 
 Workspace drafts are stored in `.jev-polls/workspace/workspace.json` with a revision number. Multiple tabs use optimistic conflict detection; reload a stale tab instead of overwriting newer work. Workspace JSON references saved cohort IDs, whereas CLI pipeline JSON references relative cohort file paths. Use `connect <pipeline>` to import a CLI project. Browser export/import transfers the whole workspace document; import replaces the draft only after confirmation. Run records capture the exact cohort and pipeline snapshots used at execution.
 
