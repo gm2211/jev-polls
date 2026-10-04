@@ -1,0 +1,179 @@
+{
+  "version": 1,
+  "id": "game-naming",
+  "name": "Find a name worth rallying around",
+  "description": "An audience panel, a blind reviewer panel, conditional follow-up review, and an explicit recommendation.",
+  "context": {
+    "game": {
+      "description": "A macro-focused RTS combining large industrial economies, large armies, consequential infrastructure losses, underground mining and bunkers, and eventual orbital expansion, satellites and asteroid resources.",
+      "platform": "PC",
+      "audience": "Adult players of automation and strategy games"
+    },
+    "study": {
+      "goal": "Explore candidate game names before human testing.",
+      "candidateStatus": "Illustrative placeholder names, not names supplied by the user.",
+      "displayRule": "No logos, prices or unequal marketing copy."
+    }
+  },
+  "cohorts": {
+    "players": "players.json",
+    "reviewers": "reviewers.json"
+  },
+  "stages": [
+    {
+      "id": "audience",
+      "kind": "poll",
+      "label": "Audience preferences",
+      "dependsOn": [],
+      "cohort": "players",
+      "repeats": 2,
+      "questions": {
+        "favorite": {
+          "type": "choice",
+          "label": "Name preference",
+          "instructions": "Given only this profile and the game context, which candidate name would this person prefer? Evaluate from their own stated gaming preferences. Do not infer a preferred name from demographics alone.",
+          "criteria": {
+            "deepforge": "Deepforge",
+            "orbital-foundry": "Orbital Foundry",
+            "iron-meridian": "Iron Meridian"
+          }
+        },
+        "appeal": {
+          "type": "score",
+          "label": "Concept appeal",
+          "instructions": "How appealing is the described game to this profile, irrespective of its eventual name?",
+          "criteria": [
+            "Uninterested in this kind of game",
+            "Curious but unlikely to try",
+            "Would consider trying it",
+            "Strong fit with established gaming interests"
+          ]
+        },
+        "would-explore": {
+          "type": "noul",
+          "label": "Would explore further",
+          "instructions": "Would this person want to read more about this game based on the supplied concept?"
+        }
+      }
+    },
+    {
+      "id": "blind-review",
+      "kind": "poll",
+      "label": "Independent review",
+      "dependsOn": [],
+      "cohort": "reviewers",
+      "questions": {
+        "favorite": {
+          "type": "choice",
+          "label": "Reviewer recommendation",
+          "instructions": "From this reviewer perspective, which name best fits the described game and intended audience? Consider upstream audience distributions and segment disagreements as synthetic evidence, not measured human votes. Retain uncertainty when tradeoffs are close.",
+          "criteria": {
+            "deepforge": "Deepforge",
+            "orbital-foundry": "Orbital Foundry",
+            "iron-meridian": "Iron Meridian"
+          }
+        }
+      }
+    },
+    {
+      "id": "close-review",
+      "kind": "poll",
+      "label": "Resolve a close result",
+      "dependsOn": [
+        "audience",
+        "blind-review"
+      ],
+      "cohort": "reviewers",
+      "when": {
+        "stage": "audience",
+        "question": "favorite",
+        "metric": "margin",
+        "op": "lt",
+        "value": 0.15
+      },
+      "questions": {
+        "favorite": {
+          "type": "choice",
+          "label": "Reviewer recommendation",
+          "instructions": "From this reviewer perspective, which name best fits the described game and intended audience? Consider upstream audience distributions and segment disagreements as synthetic evidence, not measured human votes. Retain uncertainty when tradeoffs are close.",
+          "criteria": {
+            "deepforge": "Deepforge",
+            "orbital-foundry": "Orbital Foundry",
+            "iron-meridian": "Iron Meridian"
+          }
+        }
+      },
+      "context": {
+        "focus": "Audience preferences are close. Inspect segment tradeoffs and make an independent recommendation."
+      }
+    },
+    {
+      "id": "clear-review",
+      "kind": "poll",
+      "label": "Challenge a clear favorite",
+      "dependsOn": [
+        "audience",
+        "blind-review"
+      ],
+      "cohort": "reviewers",
+      "when": {
+        "stage": "audience",
+        "question": "favorite",
+        "metric": "margin",
+        "op": "gte",
+        "value": 0.15
+      },
+      "questions": {
+        "favorite": {
+          "type": "choice",
+          "label": "Reviewer recommendation",
+          "instructions": "From this reviewer perspective, which name best fits the described game and intended audience? Consider upstream audience distributions and segment disagreements as synthetic evidence, not measured human votes. Retain uncertainty when tradeoffs are close.",
+          "criteria": {
+            "deepforge": "Deepforge",
+            "orbital-foundry": "Orbital Foundry",
+            "iron-meridian": "Iron Meridian"
+          }
+        }
+      },
+      "context": {
+        "focus": "Audience has a clear modeled favorite. Check whether it fits the brief before accepting it."
+      }
+    },
+    {
+      "id": "review-result",
+      "kind": "aggregate",
+      "label": "Reviewer conclusion",
+      "dependsOn": [
+        "close-review",
+        "clear-review"
+      ],
+      "join": "any",
+      "inputs": [
+        {
+          "stage": "close-review",
+          "question": "favorite",
+          "weight": 1
+        },
+        {
+          "stage": "clear-review",
+          "question": "favorite",
+          "weight": 1
+        }
+      ],
+      "outputQuestion": "favorite"
+    },
+    {
+      "id": "recommendation",
+      "kind": "decision",
+      "label": "Suggested name",
+      "dependsOn": [
+        "review-result"
+      ],
+      "from": {
+        "stage": "review-result",
+        "question": "favorite"
+      },
+      "outputQuestion": "favorite"
+    }
+  ]
+}

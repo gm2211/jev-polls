@@ -1,0 +1,259 @@
+import type { Cohort, RunRecord, Stage, StageResult } from './types.js';
+
+const escapeHtml = (value: unknown): string => String(value ?? '')
+  .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
+  .replaceAll('"', '&quot;').replaceAll("'", '&#39;');
+
+const safeJson = (value: unknown): string => JSON.stringify(value).replaceAll('<', '\\u003c').replaceAll('>', '\\u003e').replaceAll('&', '\\u0026').replaceAll('\u2028', '\\u2028').replaceAll('\u2029', '\\u2029');
+
+const cohortFor = (run: RunRecord, stage: Stage | undefined): Cohort | undefined => stage?.kind === 'poll' ? run.cohorts[stage.cohort] : undefined;
+
+/** Render a self-contained, interactive report for a single simulated research run. */
+export function renderReport(run: RunRecord): string {
+  const pipeline = run.pipeline;
+  const result = (id: string): StageResult | undefined => run.stages[id];
+  const initialStageId = pipeline.stages[0]?.id ?? '';
+  const boot = {
+    run,
+    ui: {
+      initialStageId,
+      pageSize: 8,
+    },
+  };
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light"><title>${escapeHtml(pipeline.name)} — research run</title>
+  <style>
+    :root{color-scheme:light;--paper:#f4f7fa;--surface:#fff;--ink:#172a3b;--muted:#617385;--line:#d8e1e9;--blue:#315fbd;--blue-soft:#e8eefb;--teal:#177d79;--teal-soft:#e3f2f0;--amber:#9a6a24;--amber-soft:#f8f0df;--red:#ad4b4b;--red-soft:#faeaea;--shadow:0 10px 28px rgba(31,57,81,.06)}
+    *{box-sizing:border-box}html{background:var(--paper);scroll-behavior:smooth}body{margin:0;color:var(--ink);font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:linear-gradient(180deg,#eaf1f7 0,#f4f7fa 340px)}button,input,select{font:inherit}button{color:inherit}a{color:var(--blue);text-underline-offset:3px}.shell{max-width:1280px;margin:0 auto;padding:0 34px 64px}.masthead{display:flex;justify-content:space-between;align-items:center;padding:24px 0 40px;border-bottom:1px solid #cedae4}.brand{font-size:12px;font-weight:750;letter-spacing:.15em;text-transform:uppercase;color:#425c70}.brand-mark{display:inline-block;width:9px;height:9px;margin-right:9px;border-radius:2px;background:var(--teal);transform:rotate(45deg)}.top-actions{display:flex;align-items:center;gap:10px}.button{border:1px solid var(--line);background:#fff;border-radius:8px;padding:9px 13px;font-size:13px;font-weight:650;cursor:pointer;transition:background .16s,border-color .16s,transform .16s}.button:hover{background:#f7faff;border-color:#aebfd0}.button:active{transform:translateY(1px)}:focus-visible{outline:3px solid #74a5e4;outline-offset:3px}.intro{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:28px;padding:34px 0 27px}.eyebrow,.micro-label{color:#627a8e;text-transform:uppercase;letter-spacing:.13em;font-size:10px;font-weight:750}.intro h1{font:400 clamp(31px,4.5vw,49px)/1.08 Georgia,"Times New Roman",serif;letter-spacing:-.035em;margin:10px 0 9px;max-width:850px}.description{max-width:760px;color:#4c6173;margin:0}.run-stamp{padding:12px 15px;border-left:2px solid var(--teal);background:rgba(255,255,255,.58);min-width:165px}.run-stamp strong{display:block;font-size:12px;letter-spacing:.06em;text-transform:uppercase}.run-stamp span{display:block;margin-top:3px;font:12px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted)}.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin:4px 0 30px;border:1px solid var(--line);border-radius:11px;overflow:hidden;background:rgba(255,255,255,.7)}.metric{padding:15px 18px;border-right:1px solid var(--line)}.metric:last-child{border:0}.metric strong{display:block;font:500 24px/1.15 Georgia,"Times New Roman",serif}.metric span{display:block;margin-top:4px;color:var(--muted);font-size:11px;letter-spacing:.04em;text-transform:uppercase}.pipeline-wrap{padding:20px;background:#e9f0f6;border:1px solid #d3dfe8;border-radius:13px;margin-bottom:24px}.section-heading{display:flex;justify-content:space-between;align-items:baseline;gap:15px;margin:0 0 15px}.section-heading h2{font:600 14px/1.3 inherit;margin:0}.section-heading p{margin:0;color:var(--muted);font-size:12px}.stage-map{display:grid;grid-template-columns:repeat(auto-fit,minmax(195px,1fr));gap:10px;align-items:stretch}.stage-node{text-align:left;position:relative;display:flex;flex-direction:column;min-height:138px;padding:13px 14px 12px;background:rgba(255,255,255,.83);border:1px solid #cddae4;border-radius:9px;cursor:pointer;transition:transform .15s,border-color .15s,box-shadow .15s}.stage-node:hover{transform:translateY(-2px);border-color:#96abc0}.stage-node[aria-pressed="true"]{border-color:var(--blue);box-shadow:inset 0 0 0 1px var(--blue),0 5px 16px rgba(49,95,189,.1);background:#fff}.stage-node.failed{background:#fff9f9}.stage-node.skipped{background:#f5f6f7}.node-top{display:flex;align-items:center;gap:8px;color:var(--muted)}.node-index{font:11px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--blue)}.node-kind{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em}.status-mark{margin-left:auto;width:8px;height:8px;border-radius:50%;background:var(--teal)}.failed .status-mark{background:var(--red)}.skipped .status-mark{background:#a9b2bb}.node-name{display:block;margin:9px 0 3px;font-size:14px;font-weight:700;line-height:1.3}.node-meta{font-size:11px;color:var(--muted)}.condition-label{display:inline-block;color:var(--amber);font-size:10px;margin-left:7px;text-transform:uppercase;letter-spacing:.08em;font-weight:750}.node-links{display:flex;flex-wrap:wrap;gap:4px;margin-top:auto;padding-top:12px}.edge-label,.feeds-label{font:10px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;color:#546b7e}.feeds-label{width:100%;color:#708496}.root-edge{color:var(--teal)}.report-card{background:var(--surface);border:1px solid var(--line);border-radius:13px;box-shadow:var(--shadow);overflow:hidden}.report-toolbar{display:flex;align-items:center;gap:18px;justify-content:space-between;padding:15px 20px;border-bottom:1px solid var(--line);background:#fbfcfd}.selected-stage{min-width:180px}.selected-stage .micro-label{display:block}.selected-stage strong{font-size:16px}.view-tabs{display:flex;gap:4px;padding:4px;background:#edf2f6;border-radius:8px}.view-tab{border:0;background:transparent;padding:7px 11px;border-radius:6px;color:#53697c;font-size:12px;font-weight:650;cursor:pointer}.view-tab[aria-selected="true"]{background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(34,57,78,.12)}.filters{display:flex;gap:10px;align-items:center;padding:14px 20px;border-bottom:1px solid var(--line)}.filters label{font-size:11px;color:var(--muted);font-weight:700}.filters select,.filters input{border:1px solid var(--line);border-radius:7px;background:#fff;padding:7px 10px;color:var(--ink);font-size:12px}.filters input{min-width:190px}.filter-note{margin-left:auto;font-size:11px;color:var(--muted)}.view-panel{padding:22px 20px 24px;min-height:270px}.view-title{display:flex;justify-content:space-between;align-items:flex-start;gap:15px;margin-bottom:19px}.view-title h2{font:400 25px/1.15 Georgia,"Times New Roman",serif;margin:0}.view-title p{color:var(--muted);font-size:12px;margin:5px 0 0}.summary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}.summary-card{border:1px solid var(--line);border-radius:9px;padding:15px 16px;background:#fff}.summary-card h3{margin:0 0 4px;font-size:13px}.summary-stats{color:var(--muted);font-size:11px;margin-bottom:15px}.bar-row{display:grid;grid-template-columns:minmax(90px,1fr) minmax(80px,2fr) 38px;align-items:center;gap:10px;margin:10px 0;font-size:11px}.bar-label{overflow-wrap:anywhere}.bar-track{height:9px;background:#edf1f5;border-radius:3px;overflow:hidden}.bar-fill{height:100%;background:var(--blue);border-radius:3px;min-width:0}.bar-row:nth-of-type(even) .bar-fill{background:var(--teal)}.bar-value{text-align:right;font:11px ui-monospace,SFMono-Regular,Menlo,monospace;color:#41596d}.summary-foot{display:flex;gap:14px;flex-wrap:wrap;padding-top:12px;border-top:1px solid #edf1f4;margin-top:14px;color:#526a7d;font-size:11px}.summary-foot strong{color:var(--ink);font-weight:700}.empty{padding:28px;text-align:center;color:var(--muted);background:#f7f9fb;border:1px dashed var(--line);border-radius:8px}.respondent-layout{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(265px,.85fr);gap:17px}.person-list{border:1px solid var(--line);border-radius:9px;overflow:hidden}.person-row{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;padding:12px 14px;border-bottom:1px solid #edf1f4;cursor:pointer;background:#fff}.person-row:last-child{border:0}.person-row:hover,.person-row[aria-current="true"]{background:#f2f6fc}.person-name{font-size:12px;font-weight:700}.person-meta{font-size:10px;color:var(--muted);margin-top:2px}.person-count{align-self:center;font:10px ui-monospace,SFMono-Regular,Menlo,monospace;color:#63788a}.pagination{display:flex;justify-content:space-between;align-items:center;padding:10px 12px;border-top:1px solid var(--line);color:var(--muted);font-size:11px}.pagination button{border:1px solid var(--line);background:white;border-radius:6px;padding:5px 9px;font-size:11px;cursor:pointer}.pagination button:disabled{opacity:.45;cursor:default}.profile{border:1px solid #cbdbe5;border-radius:9px;padding:17px;background:#f8fbfd;align-self:start}.profile h3{font:400 22px Georgia,"Times New Roman",serif;margin:0 0 2px}.profile-sub{font-size:11px;color:var(--muted)}.profile dl{display:grid;grid-template-columns:95px 1fr;gap:8px 12px;margin:17px 0;font-size:11px}.profile dt{color:var(--muted)}.profile dd{margin:0;overflow-wrap:anywhere}.attribute-list{display:grid;gap:5px}.source-list{padding-top:13px;border-top:1px solid var(--line);margin-top:13px}.source-list h4{font-size:10px;text-transform:uppercase;letter-spacing:.1em;margin:0 0 8px;color:var(--muted)}.source-item{display:block;font-size:11px;margin:6px 0}.source-item span{display:block;color:var(--muted);font-size:10px;overflow-wrap:anywhere}.source-none{color:var(--muted);font-size:11px}.repeat-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));gap:10px}.repeat-card{padding:14px;border:1px solid var(--line);border-radius:8px}.repeat-card h3{margin:0;font:600 12px ui-monospace,SFMono-Regular,Menlo,monospace}.repeat-card p{margin:8px 0 3px;font:400 23px Georgia,"Times New Roman",serif}.repeat-card small{color:var(--muted);font-size:10px}.repeat-options{display:flex;flex-wrap:wrap;gap:7px;margin-top:11px}.repeat-chip{border:1px solid #dfe7ed;border-radius:5px;padding:4px 7px;font-size:10px;background:#f8fafb}.assumption-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}.method-card{border:1px solid var(--line);border-radius:9px;padding:16px}.method-card h3{margin:0 0 10px;font-size:12px}.method-card p,.method-card li{font-size:12px;color:#4d6477}.method-card ul{padding-left:17px;margin:0}.notice{margin:0 0 18px;padding:11px 13px;border-radius:7px;background:var(--blue-soft);color:#2d4e87;font-size:11px}.warning-list{margin-top:13px;padding:12px 15px;border-left:2px solid var(--amber);background:var(--amber-soft);font-size:11px;color:#735322}.footer{padding:18px 3px;color:#718293;font-size:10px;display:flex;justify-content:space-between;gap:12px}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+    .metrics{margin-bottom:20px}.metric{padding:12px 16px}.metric strong{font-size:23px}.metric span{font-size:10px}.metric small{display:block;color:#718395;font-size:10px;line-height:1.3;margin-top:3px}.pipeline-wrap{padding:16px 17px;margin-bottom:20px}.section-heading{margin-bottom:12px}.stage-map{grid-template-columns:none;grid-auto-flow:column;grid-auto-columns:minmax(170px,1fr);gap:8px;overflow-x:auto;padding:1px 1px 5px}.stage-node{min-width:0;min-height:116px;padding:10px 11px 9px;border-radius:8px}.node-top{gap:7px}.node-index{font-size:10px}.node-kind{font-size:9px}.node-name{margin:7px 0 2px;font-size:12px;line-height:1.25;overflow-wrap:anywhere}.node-meta{font-size:10px}.condition-label{font-size:9px;margin-left:5px}.node-links{gap:3px;padding-top:8px}.edge-label,.feeds-label{font-size:9px;line-height:1.4;overflow-wrap:anywhere}.stage-jump{display:none;border:1px solid #cad8e2;border-radius:7px;background:white;padding:8px 10px;color:var(--ink);font-size:12px;max-width:100%}
+    .score-mean{font:400 23px/1.2 Georgia,"Times New Roman",serif;margin:5px 0}.mean-score{font-size:11px;color:var(--muted);font-weight:650;margin:8px 0 0}.reason-details{margin-top:8px;text-align:left}.reason-details summary{cursor:pointer;color:var(--blue);font-size:11px;font-weight:650}.reason-details p{margin:8px 0 0;overflow-wrap:anywhere;font-size:11px;color:var(--muted);text-align:left}
+    @media(max-width:760px){.shell{padding:0 18px 44px}.masthead{padding:17px 0 25px}.intro{grid-template-columns:1fr;padding:27px 0 21px;gap:16px}.run-stamp{display:flex;align-items:center;justify-content:space-between;min-width:0;border-left:0;border-top:2px solid var(--teal)}.metrics{grid-template-columns:repeat(2,1fr);margin-bottom:20px}.metric:nth-child(2){border-right:0}.metric:nth-child(-n+2){border-bottom:1px solid var(--line)}.stage-map{display:none}.stage-jump{display:block}.pipeline-wrap{padding:14px}.pipeline-wrap .section-heading{align-items:stretch;flex-direction:column;gap:3px}.pipeline-wrap .stage-jump{width:100%}.report-toolbar{align-items:flex-start;flex-direction:column;gap:12px}.view-tabs{width:100%;overflow-x:auto}.view-tab{flex:1;white-space:nowrap}.filters{flex-wrap:wrap;padding:12px 14px}.filter-note{width:100%;margin-left:0}.view-panel{padding:18px 14px}.respondent-layout{grid-template-columns:1fr}.assumption-grid{grid-template-columns:1fr}.profile{order:-1}.summary-grid{grid-template-columns:1fr}.footer{flex-direction:column}}
+    @media(max-width:390px){.shell{padding-left:13px;padding-right:13px}.top-actions .button{padding:8px 9px;font-size:11px}.brand{font-size:10px}.metric{padding:12px}.view-tabs{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:3px;overflow:visible}.view-tab{min-width:0;padding:6px 3px;font-size:10px;white-space:nowrap}.filters input{width:100%;min-width:0}.filters select{max-width:100%}.bar-row{grid-template-columns:minmax(75px,1fr) minmax(55px,1.2fr) 34px;gap:7px}.view-title{flex-direction:column}}
+    @media(max-width:360px){.view-tabs{grid-template-columns:repeat(2,minmax(0,1fr))}.view-tab{padding:7px 8px;font-size:11px}}
+    @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important}}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="masthead"><div class="brand"><span class="brand-mark" aria-hidden="true"></span>Jev / field notes</div><div class="top-actions"><span class="provider-tag" id="providerLabel"></span><button class="button" id="downloadJson" type="button">Download run JSON</button></div></header>
+    <section class="intro" aria-labelledby="reportTitle"><div><div class="eyebrow" id="runStatus"></div><h1 id="reportTitle"></h1><p class="description" id="pipelineDescription"></p></div><div class="run-stamp"><strong>Run record</strong><span id="runId"></span><span id="runDate"></span></div></section>
+    <section class="metrics" id="metrics" aria-label="Run overview"></section>
+    <section class="pipeline-wrap" aria-labelledby="pipelineHeading"><div class="section-heading"><h2 id="pipelineHeading">Panel route</h2><p>Choose a stage to inspect its evidence</p><select id="stageJump" class="stage-jump" aria-label="Choose a pipeline stage"></select></div><nav class="stage-map" id="stageMap" aria-label="Pipeline stages"></nav></section>
+    <section class="report-card" aria-label="Stage report">
+      <div class="report-toolbar"><div class="selected-stage"><span class="micro-label">Selected panel</span><strong id="selectedStageName"></strong></div><div class="view-tabs" role="tablist" aria-label="Report view"><button id="tabFindings" class="view-tab" type="button" role="tab" data-view="findings" aria-controls="viewPanel" aria-selected="true" tabindex="0">Findings</button><button id="tabPeople" class="view-tab" type="button" role="tab" data-view="people" aria-controls="viewPanel" aria-selected="false" tabindex="-1">Respondents</button><button id="tabRepeats" class="view-tab" type="button" role="tab" data-view="repeats" aria-controls="viewPanel" aria-selected="false" tabindex="-1">By repeat</button><button id="tabMethod" class="view-tab" type="button" role="tab" data-view="method" aria-controls="viewPanel" aria-selected="false" tabindex="-1">Method</button></div></div>
+      <div class="filters" id="filters"><label for="segmentSelect">Segment</label><select id="segmentSelect" aria-label="Filter by segment"></select><label for="peopleSearch" id="searchLabel" hidden>Find a respondent</label><input id="peopleSearch" type="search" placeholder="Search respondents" aria-label="Search respondents" hidden><span class="filter-note" id="filterNote"></span></div>
+      <div class="view-panel" id="viewPanel" role="tabpanel" aria-labelledby="tabFindings" tabindex="0" aria-live="polite"></div>
+    </section>
+    <footer class="footer"><span>Simulated judgments are conditional on the stated inputs and model outputs.</span><span id="footerMeta"></span></footer>
+  </main>
+  <script id="reportData" type="application/json">${safeJson(boot)}</script>
+  <script>
+  (()=>{
+    'use strict';
+    const {run,ui}=JSON.parse(document.getElementById('reportData').textContent);
+    const $=(selector,root=document)=>root.querySelector(selector);
+    const el=(tag,className,text)=>{const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=String(text);return node;};
+    const button=(label,className='button')=>{const node=el('button',className,label);node.type='button';return node;};
+    const fmt=(n,d=0)=>typeof n==='number'&&Number.isFinite(n)?n.toFixed(d):'—';
+    const pct=n=>typeof n==='number'&&Number.isFinite(n)?Math.round(n*100)+'%':'—';
+    const stageDef=id=>run.pipeline.stages.find(s=>s.id===id);
+    const stageResult=id=>run.stages[id];
+    const cohortFor=s=>s&&s.kind==='poll'?run.cohorts[s.cohort]:undefined;
+    const state={stageId:ui.initialStageId,view:'findings',segment:'all',page:0,search:'',personaId:null};
+    const selectedStage=()=>stageDef(state.stageId);
+    const selectedResult=()=>stageResult(state.stageId);
+    const visibleVotes=()=>{const votes=selectedResult()?.votes??[];return votes.filter(v=>state.segment==='all'||v.segment===state.segment);};
+    const setText=(selector,value)=>{const node=$(selector);if(node)node.textContent=String(value??'');};
+    function initHeader(){
+      setText('#reportTitle',run.pipeline.name);setText('#pipelineDescription',run.pipeline.description||'A staged audience research run.');
+      setText('#runStatus',(run.status==='completed'?'Completed run':'Run ended with failures')+' · '+(run.provider==='mock'?'MOCK SIMULATION':'LIVE PROVIDER'));
+      setText('#runId',run.id);setText('#runDate',run.createdAt);setText('#providerLabel',run.provider==='mock'?'MOCK PROVIDER':'LIVE PROVIDER');
+      setText('#footerMeta',run.model+' · seed '+run.seed);
+      const completed=Object.values(run.stages).filter(s=>s.status==='completed').length;
+      const skipped=Object.values(run.stages).filter(s=>s.status==='skipped').length;
+      const failed=Object.values(run.stages).filter(s=>s.status==='failed').length;
+      const profileEvaluations=run.pipeline.stages.filter(stage=>stage.kind==='poll').reduce((sum,stage)=>sum+(run.stages[stage.id]?.votes.length??0),0);
+      const metrics=[['Stages completed',completed+' / '+run.pipeline.stages.length,''],['Profile evaluations',profileEvaluations,'poll responses · repeats included'],['Provider requests',run.usage.requests,''],['Cache hits',run.usage.cacheHits,'']];
+      const host=$('#metrics');metrics.forEach(([label,value,detail])=>{const card=el('div','metric');card.append(el('strong','',value),el('span','',label));if(detail)card.append(el('small','',detail));host.append(card);});
+      if(skipped||failed){const note=el('div','warning-list');note.textContent=[failed?failed+' failed stage'+(failed===1?'':'s'):null,skipped?skipped+' skipped stage'+(skipped===1?'':'s'):null].filter(Boolean).join(' · ')+'. Open each stage for its recorded status and reason.';$('#pipelineHeading').parentElement.after(note);}
+      if(run.warnings?.length){const note=el('div','warning-list');const title=el('strong','');title.textContent='Run notes';const list=el('ul','');run.warnings.forEach(w=>list.append(el('li','',w)));note.replaceChildren(title,list);$('#pipelineHeading').parentElement.after(note);}
+    }
+    function initMap(){
+      const host=$('#stageMap'),jump=$('#stageJump');run.pipeline.stages.forEach((stage,index)=>{
+        const option=el('option','',stage.label+' · '+(stageResult(stage.id)?.status??'no result'));option.value=stage.id;jump.append(option);
+        const res=stageResult(stage.id);const status=res?.status??'unknown';const downstream=run.pipeline.stages.filter(s=>s.dependsOn.includes(stage.id));
+        const shownStatus=status==='unknown'?'No result':status[0].toUpperCase()+status.slice(1);
+        const node=button('','stage-node '+status);node.dataset.stage=stage.id;node.setAttribute('aria-pressed','false');node.setAttribute('aria-label',stage.label+'; '+shownStatus+(stage.when?', conditional stage':''));
+        const top=el('span','node-top');top.append(el('span','node-index',String(index+1).padStart(2,'0')),el('span','node-kind',stage.kind),el('span','status-mark'));top.lastChild.setAttribute('aria-hidden','true');
+        const name=el('span','node-name',stage.label),meta=el('span','node-meta',shownStatus);if(stage.when)meta.append(el('span','condition-label','conditioned'));
+        const links=el('span','node-links');if(stage.dependsOn.length)stage.dependsOn.forEach(id=>links.append(el('span','edge-label','after '+(stageDef(id)?.label??id))));else links.append(el('span','edge-label root-edge','entry point'));
+        links.append(el('span','feeds-label',downstream.length?'feeds '+downstream.map(s=>s.label).join(' · '):'terminal stage'));
+        node.append(top,name,meta,links);node.addEventListener('click',()=>selectStage(stage.id));host.append(node);
+      });
+      jump.value=ui.initialStageId;jump.addEventListener('change',()=>selectStage(jump.value));
+    }
+    function updateSegments(){
+      const select=$('#segmentSelect'),stage=selectedStage(),cohort=cohortFor(stage),previous=state.segment;
+      select.replaceChildren();const all=el('option','', 'All segments');all.value='all';select.append(all);
+      const keys=[...new Set(Object.values(selectedResult()?.summaries??{}).flatMap(summary=>Object.keys(summary.bySegment??{})))];
+      const choices=keys.map(key=>{
+        if(cohort){const segment=cohort.segments.find(item=>item.id===key);if(segment)return {key,label:segment.label};}
+        const split=key.lastIndexOf(':');if(split>0){const cohortId=key.slice(0,split),segmentId=key.slice(split+1);const source=Object.values(run.cohorts).find(item=>item.id===cohortId);const segment=source?.segments.find(item=>item.id===segmentId);return {key,label:(source?.name??cohortId)+' · '+(segment?.label??segmentId)};}
+        const segment=Object.values(run.cohorts).flatMap(item=>item.segments).find(item=>item.id===key);return {key,label:segment?.label??key};
+      });
+      choices.forEach(({key,label})=>{const option=el('option','',label);option.value=key;select.append(option);});
+      const has=previous==='all'||choices.some(item=>item.key===previous);state.segment=has?previous:'all';select.value=state.segment;
+      select.disabled=choices.length===0;
+    }
+    function selectStage(id){state.stageId=id;$('#stageJump').value=id;state.page=0;state.search='';state.personaId=null;updateSegments();render();}
+    function summaryPairs(summary){return Object.entries(summary?.probabilities??{}).sort((a,b)=>b[1]-a[1]);}
+    function questionFor(stage,qid,seen=new Set()){
+      if(!stage)return undefined;const visitKey=stage.id+'.'+qid;if(seen.has(visitKey))return undefined;seen.add(visitKey);
+      if(stage.kind==='poll')return stage.questions[qid];
+      if(stage.kind==='decision'&&stage.outputQuestion===qid)return questionFor(stageDef(stage.from.stage),stage.from.question,seen);
+      if(stage.kind==='aggregate'&&stage.outputQuestion===qid){const input=stage.inputs[0];return input?questionFor(stageDef(input.stage),input.question,seen):undefined;}
+      return undefined;
+    }
+    function reasonHeadline(reason,status){
+      if(!reason)return '';
+      if(status==='failed'&&reason.length>120){const colon=reason.indexOf(': ');return colon>0?reason.slice(0,colon):reason.slice(0,117)+'…';}
+      return reason;
+    }
+    function appendReason(parent,reason,status){
+      if(!reason)return;
+      const headline=reasonHeadline(reason,status);parent.append(el('p','',headline));
+      if(headline!==reason){const details=el('details','reason-details');details.append(el('summary','',status==='failed'?'Failure details':'Full details'),el('p','',reason));parent.append(details);}
+    }
+    function choiceLabel(question,key){const meaning=question?.type==='choice'?question.criteria[key]:null;return typeof meaning==='string'&&meaning.trim().length<=48?meaning.trim():key;}
+    function scoreLabel(question,key){const level=Number(key);if(question?.type==='score'&&Number.isInteger(level)&&level>=0)return level+' · '+(question.criteria[level]??key);return key;}
+    function orderedPairs(summary,question){const pairs=Object.entries(summary?.probabilities??{});if(summary?.type==='score')return pairs.sort((a,b)=>Number(a[0])-Number(b[0]));return pairs.sort((a,b)=>b[1]-a[1]);}
+    function summaryForSegment(summary){if(state.segment==='all')return summary;return summary?.bySegment?.[state.segment]??undefined;}
+    function renderFindings(host){
+      const result=selectedResult();const title=el('div','view-title');title.append(el('div','', ''));title.firstChild.replaceChildren(el('h2','', 'What the panel returned'),el('p','', 'Probability distributions summarize the model’s judgments for this simulated panel.'));
+      const stage=selectedStage();const questions=stage?.kind==='poll'?stage.questions:stage?.kind==='aggregate'?{[stage.outputQuestion]:{label:stage.outputQuestion}}:stage?.kind==='decision'?{[stage.outputQuestion]:{label:stage.outputQuestion}}:{};
+      host.append(title);
+      if(!result||result.status!=='completed'){const empty=el('div','empty');appendReason(empty,result?.reason??'This stage has no completed result.',result?.status);host.append(empty);return;}
+      const grid=el('div','summary-grid');let count=0;
+      Object.entries(questions).forEach(([qid,q])=>{
+        const full=result.summaries[qid];if(!full)return;const summary=summaryForSegment(full);if(!summary)return;count++;
+        const card=el('article','summary-card');card.append(el('h3','',full.label||q.label||qid));
+        card.append(el('div','summary-stats',summary.respondentCount+' profiles represented · weighted total '+fmt(summary.totalWeight,2)));
+        const question=questionFor(stage,qid),pairs=orderedPairs(summary,question);
+        if(summary.type==='noul'){
+          const yes=summary.mean??summary.probabilities?.yes??summary.topProbability;
+          if(typeof yes==='number')card.append(el('div','mean-score','Probability of yes'),makeBar('Yes',yes));else card.append(el('div','empty','No yes-probability summary was recorded.'));
+        }else if(summary.type==='score'){
+          const levelKeys=pairs.map(([key])=>Number(key)).filter(Number.isFinite),range=levelKeys.length?Math.min(...levelKeys)+'–'+Math.max(...levelKeys):'unavailable';
+          if(typeof summary.mean==='number')card.append(el('p','score-mean','Mean score '+fmt(summary.mean,2)),el('div','summary-stats','Ordered scale · '+range));
+          pairs.forEach(([key,value])=>card.append(makeBar(scoreLabel(question,key),value)));
+          if(!pairs.length)card.append(el('div','empty','No score distribution was recorded.'));
+        }else if(pairs.length){pairs.forEach(([key,value])=>card.append(makeBar(choiceLabel(question,key),value)));}
+        else card.append(el('div','empty','No distribution is available for this summary.'));
+        const foot=el('div','summary-foot');if(summary.winner&&summary.type==='choice')foot.append(el('span','','Leader: '),el('strong','',choiceLabel(question,summary.winner)));if(typeof summary.margin==='number')foot.append(el('span','','Margin '+pct(summary.margin)));if(summary.type==='noul'&&typeof summary.mean==='number')foot.append(el('span','','Probability of yes '+pct(summary.mean)));if(typeof summary.meanConfidence==='number')foot.append(el('span','','Mean confidence '+fmt(summary.meanConfidence,2)));card.append(foot);grid.append(card);
+      });
+      if(!count)host.append(el('div','empty','No summary was recorded for this stage or segment.'));else host.append(grid);
+      host.append(el('p','notice','These outputs describe simulated responses to the supplied state. They are not a sample of real people and do not estimate real-world support.'));
+    }
+    function makeBar(label,value){const row=el('div','bar-row');row.append(el('span','bar-label',label));const track=el('div','bar-track'),fill=el('div','bar-fill');fill.style.width=Math.max(0,Math.min(100,value*100))+'%';fill.setAttribute('aria-hidden','true');track.append(fill);row.append(track,el('span','bar-value',pct(value)));row.setAttribute('aria-label',label+': '+pct(value));return row;}
+    function answerDisplay(answer,question){if(!answer)return 'No answer recorded';if(answer.type==='choice')return choiceLabel(question,answer.choice)+' · '+Object.entries(answer.probabilities).sort((a,b)=>b[1]-a[1]).map(([k,v])=>choiceLabel(question,k)+' '+pct(v)).join(', ');if(answer.type==='score')return 'Score '+fmt(answer.score,2)+' · '+Object.entries(answer.probabilities).sort((a,b)=>Number(a[0])-Number(b[0])).map(([k,v])=>(answer.legend[k]??scoreLabel(question,k))+' '+pct(v)).join(', ');return 'Probability of yes '+pct(answer.noul);}
+    function attributeText(value){if(value===null)return 'null';if(typeof value==='object')return JSON.stringify(value);return String(value);}
+    function sourceLink(cohort,ids){
+      const box=el('div','source-list');box.append(el('h4','',ids.length?'Source references':'Source references'));
+      const found=ids.map(id=>cohort?.sources.find(source=>source.id===id)).filter(Boolean);
+      if(!found.length)box.append(el('p','source-none','No linked sources were recorded for this profile.'));
+      found.forEach(source=>{const item=el('div','source-item');const parsed=(()=>{try{return new URL(source.url)}catch{return null}})();if(parsed&&(parsed.protocol==='https:'||parsed.protocol==='http:')){const link=el('a','',source.title||source.url);link.href=parsed.href;link.rel='noreferrer';link.target='_blank';item.append(link);}else item.append(el('span','',source.title||source.url));item.append(el('span','',source.retrievedAt+' · '+source.notes));box.append(item);});return box;
+    }
+    function pollSources(stage,seen=new Set()){
+      if(!stage||seen.has(stage.id))return [];seen.add(stage.id);if(stage.kind==='poll')return [stage];
+      if(stage.kind==='decision')return pollSources(stageDef(stage.from.stage),seen);
+      if(stage.kind==='aggregate')return stage.inputs.flatMap(input=>pollSources(stageDef(input.stage),seen));return [];
+    }
+    function renderPeople(host){
+      const result=selectedResult(),stage=selectedStage(),cohort=cohortFor(stage);const heading=el('div','view-title');heading.append(el('div'));heading.firstChild.append(el('h2','', 'Respondent records'),el('p','', 'Profiles and answers from the cohort attached to this stage.'));host.append(heading);
+      if(!result){host.append(el('div','empty','This stage has no recorded result.'));return;}
+      if(!cohort){const empty=el('div','empty','Individual profiles are available on the source poll stages.');const sources=pollSources(stage);if(sources.length){empty.append(el('p','','Open a source panel to inspect its respondents and evidence.'));sources.forEach(source=>{const open=button(source.label,'button');open.addEventListener('click',()=>selectStage(source.id));empty.append(open);});}else empty.append(el('p','','No source poll stage is available for profile drilldown.'));host.append(empty);return;}
+      const votes=visibleVotes();const voteIds=new Set(votes.map(v=>v.personaId));let personas=cohort.personas.filter(p=>voteIds.has(p.id));if(state.search)personas=personas.filter(p=>(p.label+' '+p.segment+' '+p.background+' '+JSON.stringify(p.attributes)).toLowerCase().includes(state.search.toLowerCase()));
+      const pages=Math.max(1,Math.ceil(personas.length/ui.pageSize));state.page=Math.min(state.page,pages-1);const pageItems=personas.slice(state.page*ui.pageSize,(state.page+1)*ui.pageSize);
+      if(!pageItems.some(p=>p.id===state.personaId))state.personaId=pageItems[0]?.id??null;
+      const layout=el('div','respondent-layout'),left=el('div',''),list=el('div','person-list');pageItems.forEach(persona=>{
+        const row=button('','person-row');row.setAttribute('aria-current',String(persona.id===state.personaId));row.append(el('span','', ''));
+        row.firstChild.append(el('span','person-name',persona.label),el('span','person-meta',persona.segment+' · within-segment weight '+fmt(persona.weight,2)));
+        const count=votes.filter(v=>v.personaId===persona.id).length;row.append(el('span','person-count',count+' vote'+(count===1?'':'s')));row.addEventListener('click',()=>{state.personaId=persona.id;render();});list.append(row);
+      });
+      if(!pageItems.length)list.append(el('div','empty',state.search?'No respondents match this search.':'No respondent records are available for this filter.'));
+      const pagination=el('div','pagination'),prev=button('Previous',''),next=button('Next','');prev.disabled=state.page===0;next.disabled=state.page>=pages-1;prev.addEventListener('click',()=>{state.page--;render();});next.addEventListener('click',()=>{state.page++;render();});pagination.append(prev,el('span','',personas.length?'Page '+(state.page+1)+' of '+pages+' · '+personas.length+' respondents':'0 respondents'),next);list.append(pagination);left.append(list);
+      const profile=el('aside','profile');const person=cohort.personas.find(p=>p.id===state.personaId);
+      if(person){profile.append(el('h3','',person.label),el('div','profile-sub',person.segment+' · '+person.age+' years · within-segment weight '+fmt(person.weight,2)));
+        const dl=el('dl');dl.append(el('dt','','Background'),el('dd','',person.background),el('dt','','Synthetic fields'),el('dd','',person.syntheticFields.length?person.syntheticFields.join(', '):'None listed'),el('dt','','Source IDs'),el('dd','',person.sourceIds.length?person.sourceIds.join(', '):'None listed'));
+        const attr=el('div','attribute-list');Object.entries(person.attributes).forEach(([k,v])=>{attr.append(el('div','',k+': '+attributeText(v)));});if(Object.keys(person.attributes).length){dl.append(el('dt','','Attributes'),el('dd',''));dl.lastChild.append(attr);}profile.append(dl);
+        const answers=el('div','source-list');answers.append(el('h4','','Recorded answers'));const personVotes=votes.filter(v=>v.personaId===person.id);if(!personVotes.length)answers.append(el('p','source-none','No vote is recorded for this profile.'));personVotes.forEach(v=>{answers.append(el('p','source-item','Repeat '+v.repeat+' · '+v.model+' · '+(v.cacheHit?'cached':'requested')));Object.entries(v.answers).forEach(([qid,a])=>answers.append(el('div','source-none',(selectedResult().summaries[qid]?.label??qid)+': '+answerDisplay(a,questionFor(stage,qid)))));});profile.append(answers,sourceLink(cohort,person.sourceIds));
+      }else profile.append(el('p','source-none','Select a respondent to inspect the profile.'));
+      layout.append(left,profile);host.append(layout);
+    }
+    function summarizeRepeat(qid,repeatId,summary){
+      if(state.segment==='all')return summary.byRepeat?.[repeatId];
+      const allVotes=selectedResult()?.votes??[],cohortIds=new Set(allVotes.map(v=>v.cohortId).filter(Boolean));
+      const segmentName=vote=>cohortIds.size>1?(vote.cohortId??'unknown')+':'+vote.segment:vote.segment;
+      const votes=allVotes.filter(v=>v.repeat===Number(repeatId)&&segmentName(v)===state.segment&&v.answers[qid]);
+      if(!votes.length)return undefined;
+      const probabilities={},totalWeight=votes.reduce((sum,v)=>sum+v.weight,0);let weightedMean=0,confidenceTotal=0,confidenceWeight=0;
+      votes.forEach(v=>{const answer=v.answers[qid],weight=v.weight;if(answer.type==='choice'||answer.type==='score')Object.entries(answer.probabilities).forEach(([key,value])=>probabilities[key]=(probabilities[key]??0)+value*weight);if(answer.type==='score')weightedMean+=answer.score*weight;if((answer.type==='choice'||answer.type==='score')&&typeof answer.confidence==='number'){confidenceTotal+=answer.confidence*weight;confidenceWeight+=weight;}if(answer.type==='noul')weightedMean+=answer.noul*weight;});
+      Object.keys(probabilities).forEach(key=>probabilities[key]/=totalWeight||1);
+      const ranked=Object.entries(probabilities).sort((a,b)=>b[1]-a[1]),scores=votes.filter(v=>v.answers[qid].type==='score'),noul=votes.some(v=>v.answers[qid].type==='noul');
+      const out={type:summary.type,respondentCount:new Set(votes.map(v=>(v.cohortId??'')+'|'+v.personaId)).size,totalWeight,probabilities};
+      if(ranked.length){out.winner=ranked[0][0];out.topProbability=ranked[0][1];out.margin=ranked[0][1]-(ranked[1]?.[1]??0);}
+      if(scores.length||noul)out.mean=weightedMean/(totalWeight||1);
+      if(confidenceWeight)out.meanConfidence=confidenceTotal/confidenceWeight;
+      return out;
+    }
+    function renderRepeats(host){
+      const result=selectedResult(),stage=selectedStage();const heading=el('div','view-title');heading.append(el('div'));heading.firstChild.append(el('h2','', 'Repeat-level comparison'),el('p','', 'Each card shows the stage summary recorded for one repeat. Repeats are not additional people.'));host.append(heading);
+      if(!result||result.status!=='completed'){host.append(el('div','empty','Repeat comparisons require a completed stage.'));return;}
+      const ids=stage?.kind==='poll'?Object.keys(stage.questions):stage?.kind==='aggregate'?[stage.outputQuestion]:stage?.kind==='decision'?[stage.outputQuestion]:[];const grid=el('div','summary-grid');let found=0;
+      ids.forEach(qid=>{const qsummary=result.summaries[qid];if(!qsummary)return;const selected=summaryForSegment(qsummary);if(!selected)return;const wrapper=el('article','summary-card');wrapper.append(el('h3','',qsummary.label||qid),el('div','summary-stats','Recorded repeat summaries · '+selected.respondentCount+' total respondent judgments'));
+        const repeatIds=Object.keys(qsummary.byRepeat??{}).sort((a,b)=>Number(a)-Number(b));if(!repeatIds.length){wrapper.append(el('div','empty','No by-repeat breakdown was recorded.'));grid.append(wrapper);found++;return;}
+        const question=questionFor(stage,qid);const cards=el('div','repeat-grid');repeatIds.forEach(repeat=>{const summary=summarizeRepeat(qid,repeat,qsummary);if(!summary)return;const card=el('section','repeat-card');card.append(el('h3','', 'Repeat '+repeat));if(summary.type==='choice'&&summary.winner)card.append(el('p','',choiceLabel(question,summary.winner)));else if(summary.type==='noul'&&typeof summary.mean==='number')card.append(el('p','', 'Probability of yes '+pct(summary.mean)));else if(typeof summary.mean==='number')card.append(el('p','', 'Mean score '+fmt(summary.mean,2)));card.append(el('small','',summary.respondentCount+' profiles · weight '+fmt(summary.totalWeight,2)));const options=el('div','repeat-options');orderedPairs(summary,question).forEach(([key,p])=>options.append(el('span','repeat-chip',(summary.type==='score'?scoreLabel(question,key):summary.type==='choice'?choiceLabel(question,key):key)+' '+pct(p))));if(typeof summary.meanConfidence==='number')options.append(el('span','repeat-chip','confidence '+fmt(summary.meanConfidence,2)));card.append(options);cards.append(card);});if(!cards.childElementCount)wrapper.append(el('div','empty','No repeat-level responses match this segment.'));else wrapper.append(cards);grid.append(wrapper);found++;});
+      if(!found)host.append(el('div','empty','No repeat-level comparison is available for this stage.'));else host.append(grid);
+      host.append(el('p','notice','The report keeps each repeat separate. It does not add repeat counts to the underlying respondent sample size.'));
+    }
+    function renderMethod(host){
+      const stage=selectedStage(),cohort=cohortFor(stage),result=selectedResult();const heading=el('div','view-title');heading.append(el('div'));heading.firstChild.append(el('h2','', 'How to read this run'),el('p','', 'Inputs, provenance, and execution assumptions attached to this panel.'));host.append(heading);
+      const grid=el('div','assumption-grid');const runCard=el('section','method-card');runCard.append(el('h3','','Run conditions'));const list=el('ul');[["Provider",run.provider==='mock'?'Mock simulation':'Live provider'],['Model',run.model],['Seed',run.seed],['Run status',run.status],['Pipeline hash',run.pipelineHash],['Stage status',result?.status??'no result'],['Requests',run.usage.requests],['Cache hits',run.usage.cacheHits]].forEach(([label,value])=>list.append(el('li','',label+': '+value)));if(result?.reason){const reason=el('li','','Stage reason: '+reasonHeadline(result.reason,result.status));const headline=reasonHeadline(result.reason,result.status);if(headline!==result.reason){const details=el('details','reason-details');details.append(el('summary','',result.status==='failed'?'Failure details':'Full details'),el('p','',result.reason));reason.append(details);}list.append(reason);}runCard.append(list);
+      const cohortCard=el('section','method-card');cohortCard.append(el('h3','','Cohort and assumptions'));if(cohort){cohortCard.append(el('p','',cohort.name+' · '+cohort.population),el('p','',cohort.description));const assumptions=el('ul');if(cohort.assumptions.length)cohort.assumptions.forEach(item=>assumptions.append(el('li','',item)));else assumptions.append(el('li','','No cohort assumptions were recorded.'));cohortCard.append(assumptions);if(cohort.sources.length){const sources=el('div','source-list');sources.append(el('h4','','Cohort sources'));cohort.sources.forEach(s=>{const item=el('div','source-item');const parsed=(()=>{try{return new URL(s.url)}catch{return null}})();if(parsed&&(parsed.protocol==='https:'||parsed.protocol==='http:')){const link=el('a','',s.title||s.url);link.href=parsed.href;link.target='_blank';link.rel='noreferrer';item.append(link);}else item.append(el('span','',s.title||s.url));item.append(el('span','',s.retrievedAt+' · '+s.notes));sources.append(item);});cohortCard.append(sources);}}else cohortCard.append(el('p','',stage?.kind==='poll'?'The configured cohort is missing from this run record.':'This stage does not have its own cohort.'));
+      grid.append(runCard,cohortCard);host.append(grid);
+      const spec=el('section','method-card');spec.style.marginTop='14px';spec.append(el('h3','','Stage question and route'));
+      if(stage?.kind==='poll')Object.entries(stage.questions).forEach(([id,question])=>{const block=el('div','source-item');block.append(el('strong','',question.label+' · '+id),el('p','',question.instructions));if(question.type==='choice')Object.entries(question.criteria).forEach(([key,meaning])=>block.append(el('span','',key+': '+(meaning??'No-match option'))));if(question.type==='score')question.criteria.forEach((meaning,index)=>block.append(el('span','','Level '+index+': '+meaning)));spec.append(block);});
+      else if(stage?.kind==='aggregate'){spec.append(el('p','','Output: '+stage.outputQuestion));stage.inputs.forEach(input=>spec.append(el('p','',input.stage+' / '+input.question+' · weight '+input.weight)));}
+      else if(stage?.kind==='decision')spec.append(el('p','', 'Selects from '+stage.from.stage+' / '+stage.from.question+' · output '+stage.outputQuestion));
+      if(stage&&(stage.kind==='aggregate'||stage.kind==='decision')){const sourceQuestion=questionFor(stage,stage.outputQuestion);if(sourceQuestion){const block=el('div','source-item');block.append(el('strong','',sourceQuestion.label+' · inherited question definition'),el('p','',sourceQuestion.instructions));if(sourceQuestion.type==='choice')Object.entries(sourceQuestion.criteria).forEach(([key,meaning])=>block.append(el('span','',key+': '+(meaning??'No-match option'))));if(sourceQuestion.type==='score')sourceQuestion.criteria.forEach((meaning,index)=>block.append(el('span','','Level '+index+': '+meaning)));spec.append(block);}}
+      if(!stage)spec.append(el('p','','No stage definition is available.'));
+      const context=el('details','source-list'),summary=el('summary','','Pipeline context');context.append(summary,el('pre','',JSON.stringify(run.pipeline.context,null,2)));spec.append(context);host.append(spec);
+      if(stage?.when){const condition=el('section','method-card');condition.style.marginTop='14px';condition.append(el('h3','','Stage condition'),el('pre','',JSON.stringify(stage.when,null,2)));host.append(condition);}
+      if(run.warnings?.length){const warnings=el('section','method-card');warnings.style.marginTop='14px';warnings.append(el('h3','','Run warnings'));const ul=el('ul');run.warnings.forEach(w=>ul.append(el('li','',w)));warnings.append(ul);host.append(warnings);}
+    }
+    function render(){
+      const stage=selectedStage();setText('#selectedStageName',stage?.label??'No stages');document.querySelectorAll('.stage-node').forEach(node=>node.setAttribute('aria-pressed',String(node.dataset.stage===state.stageId)));
+      document.querySelectorAll('.view-tab').forEach(tab=>{const active=tab.dataset.view===state.view;tab.setAttribute('aria-selected',String(active));tab.tabIndex=active?0:-1;});
+      const activeTab=$('.view-tab[aria-selected="true"]');$('#viewPanel').setAttribute('aria-labelledby',activeTab.id);
+      const isPeople=state.view==='people';$('#peopleSearch').hidden=!isPeople;$('#searchLabel').hidden=!isPeople;$('#peopleSearch').value=state.search;updateSegments();
+      setText('#filterNote',state.view==='people'?'Profiles come from the selected stage’s saved cohort.':state.segment==='all'?'Showing the complete panel summary.':'Showing the recorded segment breakdown.');
+      const host=$('#viewPanel');host.replaceChildren();if(state.view==='findings')renderFindings(host);else if(state.view==='people')renderPeople(host);else if(state.view==='repeats')renderRepeats(host);else renderMethod(host);
+    }
+    const viewTabs=[...document.querySelectorAll('.view-tab')];
+    viewTabs.forEach((tab,index)=>{
+      tab.addEventListener('click',()=>{state.view=tab.dataset.view;state.page=0;render();});
+      tab.addEventListener('keydown',event=>{let target=null;if(event.key==='ArrowRight')target=(index+1)%viewTabs.length;if(event.key==='ArrowLeft')target=(index+viewTabs.length-1)%viewTabs.length;if(event.key==='Home')target=0;if(event.key==='End')target=viewTabs.length-1;if(target!==null){event.preventDefault();viewTabs[target].focus();viewTabs[target].click();}});
+    });
+    $('#segmentSelect').addEventListener('change',event=>{state.segment=event.target.value;state.page=0;state.personaId=null;render();});
+    $('#peopleSearch').addEventListener('input',event=>{state.search=event.target.value;state.page=0;state.personaId=null;render();$('#peopleSearch').focus();});
+    $('#downloadJson').addEventListener('click',()=>{const blob=new Blob([JSON.stringify(run,null,2)],{type:'application/json'});const href=URL.createObjectURL(blob);const link=el('a');link.href=href;link.download='jev-polls-run.json';link.click();setTimeout(()=>URL.revokeObjectURL(href),1000);});
+    initHeader();initMap();updateSegments();render();
+  })();
+  </script>
+</body>
+</html>`;
+}

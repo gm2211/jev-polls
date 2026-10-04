@@ -1,0 +1,35 @@
+{
+  "name": "jev-polls",
+  "version": "0.1.0",
+  "description": "Agent-driven synthetic audience research with reusable cohorts and branching Jev pipelines",
+  "type": "module",
+  "private": true,
+  "bin": {
+    "jev-polls": "dist/cli.js"
+  },
+  "exports": "./dist/index.js",
+  "scripts": {
+    "start": "node --import tsx src/cli.ts workspace",
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test test/*.test.ts",
+    "dev": "node --import tsx src/cli.ts",
+    "demo": "node --import tsx src/cli.ts run examples/game-naming/pipeline.json --provider mock --out .jev-polls/demo --overwrite",
+    "verify": "npm run check && npm test && npm run build"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.0",
+    "@napi-rs/keyring": "^2.1.0",
+    "@typesafe-ai/sdk": "^0.6.0",
+    "commander": "^15.0.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
+  }
+}

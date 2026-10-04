@@ -1,5 +1,13 @@
 # Project instructions
 
+## Standing merge approval
+
+The user authorizes agents to merge PRs for `gm2211/jev-polls` without asking again.
+Complete implementation, review, required checks, and browser acceptance when
+applicable; resolve failures and conflicts, push scoped changes, and merge the PR.
+Verify the result on `origin/main` and leave the local checkout clean and current.
+Do not stop at an open PR or wait for another user prompt. Preserve unrelated work.
+
 Use the `typesafe-ai` skill when working on this project. Read
 `.agents/skills/typesafe-ai/SKILL.md` and follow its guidance for relevant work.
 

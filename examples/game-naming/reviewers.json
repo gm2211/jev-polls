@@ -1,0 +1,150 @@
+{
+  "version": 1,
+  "id": "review-panel",
+  "name": "Independent reviewer panel",
+  "description": "Six fictional professional perspectives. Advisory simulation, not verified professional expertise.",
+  "population": "Synthetic review perspectives for game positioning, production and communication.",
+  "createdAt": "2026-10-03T00:00:00Z",
+  "sources": [],
+  "segments": [
+    {
+      "id": "positioning",
+      "label": "Positioning",
+      "description": "Positioning perspective",
+      "weight": 0.3333333333333333,
+      "weightBasis": "assumed",
+      "sourceIds": []
+    },
+    {
+      "id": "production",
+      "label": "Production",
+      "description": "Production perspective",
+      "weight": 0.3333333333333333,
+      "weightBasis": "assumed",
+      "sourceIds": []
+    },
+    {
+      "id": "distribution",
+      "label": "Distribution",
+      "description": "Distribution perspective",
+      "weight": 0.3333333333333333,
+      "weightBasis": "assumed",
+      "sourceIds": []
+    }
+  ],
+  "personas": [
+    {
+      "id": "reviewer-1",
+      "label": "Reviewer 1",
+      "segment": "positioning",
+      "age": 30,
+      "background": "Fictional positioning specialist. Evaluates whether a name communicates the core experience to intended players; does not treat broad appeal as the only goal.",
+      "attributes": {
+        "role": "positioning"
+      },
+      "sourceIds": [],
+      "syntheticFields": [
+        "label",
+        "age",
+        "background",
+        "attributes"
+      ],
+      "weight": 1
+    },
+    {
+      "id": "reviewer-2",
+      "label": "Reviewer 2",
+      "segment": "positioning",
+      "age": 34,
+      "background": "Fictional audience researcher. Evaluates segment differences and whether a proposed choice remains reasonable under uncertain audience weights.",
+      "attributes": {
+        "role": "positioning"
+      },
+      "sourceIds": [],
+      "syntheticFields": [
+        "label",
+        "age",
+        "background",
+        "attributes"
+      ],
+      "weight": 1
+    },
+    {
+      "id": "reviewer-3",
+      "label": "Reviewer 3",
+      "segment": "production",
+      "age": 38,
+      "background": "Fictional strategy-game producer. Evaluates whether a name matches the actual gameplay scope and sets sustainable player expectations.",
+      "attributes": {
+        "role": "production"
+      },
+      "sourceIds": [],
+      "syntheticFields": [
+        "label",
+        "age",
+        "background",
+        "attributes"
+      ],
+      "weight": 1
+    },
+    {
+      "id": "reviewer-4",
+      "label": "Reviewer 4",
+      "segment": "production",
+      "age": 42,
+      "background": "Fictional independent game designer. Evaluates names for clarity and distinctiveness within the described game, without assuming market success.",
+      "attributes": {
+        "role": "production"
+      },
+      "sourceIds": [],
+      "syntheticFields": [
+        "label",
+        "age",
+        "background",
+        "attributes"
+      ],
+      "weight": 1
+    },
+    {
+      "id": "reviewer-5",
+      "label": "Reviewer 5",
+      "segment": "distribution",
+      "age": 46,
+      "background": "Fictional game-marketing practitioner. Evaluates how a name reads in a store listing and how easily someone might remember it.",
+      "attributes": {
+        "role": "distribution"
+      },
+      "sourceIds": [],
+      "syntheticFields": [
+        "label",
+        "age",
+        "background",
+        "attributes"
+      ],
+      "weight": 1
+    },
+    {
+      "id": "reviewer-6",
+      "label": "Reviewer 6",
+      "segment": "distribution",
+      "age": 50,
+      "background": "Fictional community specialist. Evaluates whether players could comfortably say, share and discuss a name. Does not assert trademark availability.",
+      "attributes": {
+        "role": "distribution"
+      },
+      "sourceIds": [],
+      "syntheticFields": [
+        "label",
+        "age",
+        "background",
+        "attributes"
+      ],
+      "weight": 1
+    }
+  ],
+  "assumptions": [
+    "Reviewer roles and biographies are synthetic and equally weighted.",
+    "Reviewer recommendations are separate from audience preferences.",
+    "No trademark, availability or commercial-success claim is made."
+  ]
+}
