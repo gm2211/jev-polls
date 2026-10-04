@@ -1,0 +1,647 @@
+{
+  "version": 1,
+  "id": "strategy-players",
+  "name": "Strategy players \u00b7 starter cohort",
+  "description": "24 fictional adult profiles, informed by game mechanics and research dimensions. A transparent starting hypothesis, not a measured audience sample.",
+  "population": "English-speaking adult PC players interested in macro RTS, automation, or systems-heavy strategy games.",
+  "createdAt": "2026-10-03T00:00:00Z",
+  "sources": [
+    {
+      "id": "motivation-model",
+      "title": "Quantic Foundry gamer motivation model",
+      "url": "https://quanticfoundry.com/gamer-motivation-model/",
+      "retrievedAt": "2026-10-03T00:00:00Z",
+      "notes": "Primary research describes motivation dimensions and game-audience profiles. Used to choose research dimensions only; does not establish these segment weights or individual profiles."
+    },
+    {
+      "id": "factorio",
+      "title": "Factorio official gameplay overview",
+      "url": "https://factorio.com/game/content",
+      "retrievedAt": "2026-10-03T00:00:00Z",
+      "notes": "Grounds references to automation, infrastructure, resources and combat in actual game mechanics. Does not measure player preferences."
+    },
+    {
+      "id": "aoe",
+      "title": "Age of Empires IV official overview",
+      "url": "https://www.ageofempires.com/games/age-of-empires-iv/",
+      "retrievedAt": "2026-10-03T00:00:00Z",
+      "notes": "Grounds real-time strategy examples. No population share is inferred from this product page."
+    }
+  ],
+  "segments": [
+    {
+      "id": "builders",
+      "label": "Automation builders",
+      "description": "Enjoy planning and optimizing production systems.",
+      "weight": 0.35,
+      "weightBasis": "assumed",
+      "sourceIds": [
+        "factorio",
+        "motivation-model"
+      ]
+    },
+    {
+      "id": "competitors",
+      "label": "Competitive strategists",
+      "description": "Enjoy economic timing, opponents and large tactical confrontations.",
+      "weight": 0.3,
+      "weightBasis": "assumed",
+      "sourceIds": [
+        "aoe",
+        "motivation-model"
+      ]
+    },
+    {
+      "id": "explorers",
+      "label": "Systems explorers",
+      "description": "Enjoy discovering interacting mechanics and long-term progression.",
+      "weight": 0.2,
+      "weightBasis": "assumed",
+      "sourceIds": [
+        "motivation-model"
+      ]
+    },
+    {
+      "id": "social",
+      "label": "Social strategy players",
+      "description": "Enjoy shared goals, readable systems and playing with friends.",
+      "weight": 0.15,
+      "weightBasis": "assumed",
+      "sourceIds": [
+        "motivation-model"
+      ]
+    }
+  ],
+  "personas": [
+    {
+      "id": "builders-01",
+      "label": "Automation builder 01",
+      "segment": "builders",
+      "age": 22,
+      "background": "Builds elaborate resource networks in Factorio. Enjoys untangling bottlenecks more than fast reactions; plays solo on weekends.",
+      "attributes": {
+        "platform": "PC",
+        "weeklyHours": 4,
+        "sessionPreference": "solo",
+        "language": "English"
+      },
+      "sourceIds": [
+        "factorio",
+        "motivation-model"
+      ],
+      "syntheticFields": [
+        "label",
+        "age",
+        "background",
+        "attributes"
+      ],
+      "weight": 1
+    },
+    {
+      "id": "builders-02",
+      "label": "Automation builder 02",
+      "segment": "builders",
+      "age": 29,
+      "background": "Plays both factory games and RTS campaigns. Likes seeing an economy turn into a large army, but dislikes constant micromanagement.",
+      "attributes": {
+        "platform": "PC",
+        "weeklyHours": 7,
+        "sessionPreference": "solo",
+        "language": "English"
+      },
+      "sourceIds": [
+        "factorio",
+        "motivation-model"
+      ],
+      "syntheticFields": [
+        "label",
+        "age",
+        "background",
+        "attributes"
+      ],
+      "weight": 1
+    },
+    {
+      "id": "builders-03",
+      "label": "Automation builder 03",
+      "segment": "builders",
+      "age": 35,
+      "background": "Returns to long-running automation saves. Enjoys designing resilient transport networks and recovering when production breaks.",
+      "attributes": {
+        "platform": "PC",
+        "weeklyHours": 10,
+        "sessionPreference": "solo",
+        "language": "English"
+      },
+      "sourceIds": [
+        "factorio",
+        "motivation-model"
+      ],
+      "syntheticFields": [
+        "label",
+        "age",
+        "background",
+        "attributes"
+      ],
+      "weight": 1
+    },
+    {
+      "id": "builders-04",
+      "label": "Automation builder 04",
+      "segment": "builders",
+      "age": 43,
+      "background": "Usually plays cooperative building games. Values clear production chains and steady progress with a small group of friends.",
+      "attributes": {
+        "platform": "PC",
+        "weeklyHours": 14,
+        "sessionPreference": "cooperative",
+        "language": "English"
+      },
+      "sourceIds": [
+        "factorio",
+        "motivation-model"
+      ],
+      "syntheticFields": [
+        "label",
+        "age",
+        "background",
+        "attributes"
+      ],
+      "weight": 1
+    },
+    {
+      "id": "builders-05",
+      "label": "Automation builder 05",
+      "segment": "builders",
+      "age": 51,
+      "background": "Likes efficiency challenges and compact industrial layouts. Experiments with unusual solutions instead of following optimized guides.",
+      "attributes": {
+        "platform": "PC",
+        "weeklyHours": 6,
+        "sessionPreference": "solo",
+        "language": "English"
+      },
+      "sourceIds": [
+        "factorio",
+        "motivation-model"
+      ],
+      "syntheticFields": [
+        "label",
+        "age",
+        "background",
+        "attributes"
+      ],
+      "weight": 1
+    },
+    {
+      "id": "builders-06",
+      "label": "Automation builder 06",
+      "segment": "builders",
+      "age": 26,
+      "background": "Prefers large, visible industrial scale and extensive technology trees. Interested in a campaign that moves from mining to orbital industry.",
+      "attributes": {
+        "platform": "PC",
+        "weeklyHours": 9,
+        "sessionPreference": "solo",
+        "language": "English"
+      },
+      "sourceIds": [
+        "factorio",
+        "motivation-model"
+      ],
+      "syntheticFields": [
+        "label",
+        "age",
+        "background",
+        "attributes"
+      ],
+      "weight": 1
+    },
+    {
+      "id": "competitors-01",
+      "label": "Competitive strategist 01",
+      "segment": "competitors",
+      "age": 29,
+      "background": "Plays ranked RTS matches regularly. Enjoys scouting, expansion timing and converting an economic advantage into decisive combat.",
+      "attributes": {
+        "platform": "PC",
+        "weeklyHours": 4,
+        "sessionPreference": "competitive",
+        "language": "English"
+      },
+      "sourceIds": [
+        "aoe",
+        "motivation-model"
+      ],
+      "syntheticFields": [
+        "label",
+        "age",
+        "background",
+        "attributes"
+      ],
+      "weight": 1
+    },
+    {
+      "id": "competitors-02",
+      "label": "Competitive strategist 02",
+      "segment": "competitors",
+      "age": 35,
+      "background": "Grew up playing Age of Empires and likes faction variety. Prefers strategic adaptation over memorizing long sequences of hotkeys.",
+      "attributes": {
+        "platform": "PC",
+        "weeklyHours": 7,
+        "sessionPreference": "solo",
+        "language": "English"
+      },
+      "sourceIds": [
+        "aoe",
+        "motivation-model"
+      ],
+      "syntheticFields": [
+        "label",
+        "age",
+        "background",
+        "attributes"
+      ],
+      "weight": 1
+    },
+    {
+      "id": "competitors-03",
+      "label": "Competitive strategist 03",
+      "segment": "competitors",
+      "age": 43,
+      "background": "Mostly plays team RTS matches. Enjoys defending allies and coordinating large attacks after a deliberate economic buildup.",
+      "attributes": {
+        "platform": "PC",
+        "weeklyHours": 10,
+        "sessionPreference": "competitive",
+        "language": "English"
+      },
+      "sourceIds": [
+        "aoe",
+        "motivation-model"
+      ],
+      "syntheticFields": [
+        "label",
+        "age",
+        "background",
+        "attributes"
+      ],
+      "weight": 1
+    },
+    {
+      "id": "competitors-04",
+      "label": "Competitive strategist 04",
+      "segment": "competitors",
+      "age": 51,
+      "background": "Follows competitive strategy games but plays casually. Wants readable battles and understandable counters without excessive clicking.",
+      "attributes": {
+        "platform": "PC",
+        "weeklyHours": 14,
+        "sessionPreference": "competitive",
+        "language": "English"
+      },
+      "sourceIds": [
+        "aoe",
+        "motivation-model"
+      ],
+      "syntheticFields": [
+        "label",
+        "age",
+        "background",
+        "attributes"
+      ],
+      "weight": 1
+    },
+    {
+      "id": "competitors-05",
+      "label": "Competitive strategist 05",
+      "segment": "competitors",
+      "age": 26,
+      "background": "Enjoys RTS campaigns and skirmishes against AI. Likes large bases and terrain that creates meaningful offensive choices.",
+      "attributes": {
+        "platform": "PC",
+        "weeklyHours": 6,
+        "sessionPreference": "solo",
+        "language": "English"
+      },
+      "sourceIds": [
+        "aoe",
+        "motivation-model"
+      ],
+      "syntheticFields": [
+        "label",
+        "age",
+        "background",
+        "attributes"
+      ],
+      "weight": 1
+    },
+    {
+      "id": "competitors-06",
+      "label": "Competitive strategist 06",
+      "segment": "competitors",
+      "age": 22,
+      "background": "Enjoys testing unusual macro strategies. Likes games that reward logistics disruption and protecting important infrastructure.",
+      "attributes": {
+        "platform": "PC",
+        "weeklyHours": 9,
+        "sessionPreference": "competitive",
+        "language": "English"
+      },
+      "sourceIds": [
+        "aoe",
+        "motivation-model"
+      ],
+      "syntheticFields": [
+        "label",
+        "age",
+        "background",
+        "attributes"
+      ],
+      "weight": 1
+    },
+    {
+      "id": "explorers-01",
+      "label": "Systems explorer 01",
+      "segment": "explorers",
+      "age": 35,
+      "background": "Plays systems-heavy strategy games for discovery. Enjoys finding interactions between technology, resources and geography.",
+      "attributes": {
+        "platform": "PC",
+        "weeklyHours": 4,
+        "sessionPreference": "solo",
+        "language": "English"
+      },
+      "sourceIds": [
+        "motivation-model"
+      ],
+      "syntheticFields": [
+        "label",
+        "age",
+        "background",
+        "attributes"
+      ],
+      "weight": 1
+    },
+    {
+      "id": "explorers-02",
+      "label": "Systems explorer 02",
+      "segment": "explorers",
+      "age": 43,
+      "background": "Interested in science-fiction worlds and space logistics. Often explores games slowly before trying competitive modes.",
+      "attributes": {
+        "platform": "PC",
+        "weeklyHours": 7,
+        "sessionPreference": "solo",
+        "language": "English"
+      },
+      "sourceIds": [
+        "motivation-model"
+      ],
+      "syntheticFields": [
+        "label",
+        "age",
+        "background",
+        "attributes"
+      ],
+      "weight": 1
+    },
+    {
+      "id": "explorers-03",
+      "label": "Systems explorer 03",
+      "segment": "explorers",
+      "age": 51,
+      "background": "Likes long campaigns with multiple viable strategies. Prefers a clear sense of progression and meaningful setbacks.",
+      "attributes": {
+        "platform": "PC",
+        "weeklyHours": 10,
+        "sessionPreference": "solo",
+        "language": "English"
+      },
+      "sourceIds": [
+        "motivation-model"
+      ],
+      "syntheticFields": [
+        "label",
+        "age",
+        "background",
+        "attributes"
+      ],
+      "weight": 1
+    },
+    {
+      "id": "explorers-04",
+      "label": "Systems explorer 04",
+      "segment": "explorers",
+      "age": 26,
+      "background": "Enjoys building underground infrastructure and adapting to limited resources. Experiments freely and seldom follows guides.",
+      "attributes": {
+        "platform": "PC",
+        "weeklyHours": 14,
+        "sessionPreference": "solo",
+        "language": "English"
+      },
+      "sourceIds": [
+        "motivation-model"
+      ],
+      "syntheticFields": [
+        "label",
+        "age",
+        "background",
+        "attributes"
+      ],
+      "weight": 1
+    },
+    {
+      "id": "explorers-05",
+      "label": "Systems explorer 05",
+      "segment": "explorers",
+      "age": 22,
+      "background": "Plays strategy games with friends and enjoys learning unfamiliar mechanics together. Space expansion is interesting when it changes strategy.",
+      "attributes": {
+        "platform": "PC",
+        "weeklyHours": 6,
+        "sessionPreference": "cooperative",
+        "language": "English"
+      },
+      "sourceIds": [
+        "motivation-model"
+      ],
+      "syntheticFields": [
+        "label",
+        "age",
+        "background",
+        "attributes"
+      ],
+      "weight": 1
+    },
+    {
+      "id": "explorers-06",
+      "label": "Systems explorer 06",
+      "segment": "explorers",
+      "age": 29,
+      "background": "Likes simulation depth, coherent resource rules and emergent outcomes. Wants mistakes to have understandable consequences.",
+      "attributes": {
+        "platform": "PC",
+        "weeklyHours": 9,
+        "sessionPreference": "solo",
+        "language": "English"
+      },
+      "sourceIds": [
+        "motivation-model"
+      ],
+      "syntheticFields": [
+        "label",
+        "age",
+        "background",
+        "attributes"
+      ],
+      "weight": 1
+    },
+    {
+      "id": "social-01",
+      "label": "Social strategy player 01",
+      "segment": "social",
+      "age": 43,
+      "background": "Plays cooperative strategy games once a week with friends. Values understandable goals and room for players with different skill levels.",
+      "attributes": {
+        "platform": "PC",
+        "weeklyHours": 4,
+        "sessionPreference": "cooperative",
+        "language": "English"
+      },
+      "sourceIds": [
+        "motivation-model"
+      ],
+      "syntheticFields": [
+        "label",
+        "age",
+        "background",
+        "attributes"
+      ],
+      "weight": 1
+    },
+    {
+      "id": "social-02",
+      "label": "Social strategy player 02",
+      "segment": "social",
+      "age": 51,
+      "background": "Mostly enjoys relaxed multiplayer building. Likes contributing through resource production while friends handle combat.",
+      "attributes": {
+        "platform": "PC",
+        "weeklyHours": 7,
+        "sessionPreference": "cooperative",
+        "language": "English"
+      },
+      "sourceIds": [
+        "motivation-model"
+      ],
+      "syntheticFields": [
+        "label",
+        "age",
+        "background",
+        "attributes"
+      ],
+      "weight": 1
+    },
+    {
+      "id": "social-03",
+      "label": "Social strategy player 03",
+      "segment": "social",
+      "age": 26,
+      "background": "Prefers team-based RTS matches over solo ranked play. Enjoys coordinating roles and planning a shared economy.",
+      "attributes": {
+        "platform": "PC",
+        "weeklyHours": 10,
+        "sessionPreference": "competitive",
+        "language": "English"
+      },
+      "sourceIds": [
+        "motivation-model"
+      ],
+      "syntheticFields": [
+        "label",
+        "age",
+        "background",
+        "attributes"
+      ],
+      "weight": 1
+    },
+    {
+      "id": "social-04",
+      "label": "Social strategy player 04",
+      "segment": "social",
+      "age": 22,
+      "background": "Alternates between strategy campaigns and cooperative games. Likes distinct responsibilities and clear feedback about progress.",
+      "attributes": {
+        "platform": "PC",
+        "weeklyHours": 14,
+        "sessionPreference": "cooperative",
+        "language": "English"
+      },
+      "sourceIds": [
+        "motivation-model"
+      ],
+      "syntheticFields": [
+        "label",
+        "age",
+        "background",
+        "attributes"
+      ],
+      "weight": 1
+    },
+    {
+      "id": "social-05",
+      "label": "Social strategy player 05",
+      "segment": "social",
+      "age": 29,
+      "background": "Plays with a small mixed-experience group. Will learn complex systems if early sessions are approachable and teammates can help.",
+      "attributes": {
+        "platform": "PC",
+        "weeklyHours": 6,
+        "sessionPreference": "cooperative",
+        "language": "English"
+      },
+      "sourceIds": [
+        "motivation-model"
+      ],
+      "syntheticFields": [
+        "label",
+        "age",
+        "background",
+        "attributes"
+      ],
+      "weight": 1
+    },
+    {
+      "id": "social-06",
+      "label": "Social strategy player 06",
+      "segment": "social",
+      "age": 35,
+      "background": "Enjoys long weekend strategy sessions. Prefers big collaborative projects and memorable battles over frequent short matches.",
+      "attributes": {
+        "platform": "PC",
+        "weeklyHours": 9,
+        "sessionPreference": "cooperative",
+        "language": "English"
+      },
+      "sourceIds": [
+        "motivation-model"
+      ],
+      "syntheticFields": [
+        "label",
+        "age",
+        "background",
+        "attributes"
+      ],
+      "weight": 1
+    }
+  ],
+  "assumptions": [
+    "Segment weights are illustrative hypotheses, not measured market shares.",
+    "All profiles are synthetic; cited sources support research dimensions or game facts, not individual biographies.",
+    "Age, language, playtime and platform distribution are assumed.",
+    "Profiles were constructed without candidate-name preferences; replace or expand them using audience evidence before relying on results."
+  ]
+}
