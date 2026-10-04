@@ -38,6 +38,7 @@ Each normal run gets a new output directory. An explicit `--out` refuses to repl
 ## What is included
 
 - Browser workspace with reusable cohort forms, typed question editors, a connected stage graph, branch conditions, saved drafts, explicit run review and run history.
+- MCP tools for existing agents to read and update the same workspace, prepare cohorts and pipelines, review request budgets, start authorized runs, and inspect saved results.
 - Portable, validated cohort JSON with source references, synthetic-field labels, adult profiles, explicit segment weights and assumptions.
 - Reusable cohort revisions, deterministic sampling without replacement, configurable cohort size and repeated evaluations.
 - Arbitrary acyclic pipelines: parallel panels, compound conditions, split/rejoin paths, weighted aggregation and explicit decisions.
@@ -48,6 +49,16 @@ Each normal run gets a new output directory. An explicit `--out` refuses to repl
 - JSON stdout, progress JSON lines on stderr, nonzero failure exits, JSON Schema, an agent guide, and a programmatic TypeScript API.
 
 ## Agent workflow
+
+Open **Agents** in the browser workspace for Codex, Claude Code, or generic MCP connection settings. Keep the workspace server running. The adapter uses local stdio and the same revision checks and run controls as the browser; it never asks the agent to copy your TypeSafe key. Start a new agent session after registering the server so its tools are loaded.
+
+Your existing agent supplies research and conversation. It can edit persona backgrounds, attributes, source references, segment weights, questions, and branches through MCP. TypeSafe supplies the live typed judgments for each profile. The workspace does not include a separate chat model or automatically research sources.
+
+```sh
+node dist/cli.js mcp-config --workspace-url http://127.0.0.1:4180/
+```
+
+Use the returned setup command for your client, or add the returned `mcpConfig` to its MCP settings. The server tools include `get_workspace`, `save_cohort`, `save_pipeline`, `review_study`, `run_study`, and `get_run_record`. Reads, edits, and reviews never perform study inference; `run_study` requires the exact reviewed revision, a fresh plan token, and a request budget. The browser picks up saved agent edits automatically when your local draft is clean; unsaved edits are preserved and a conflict notice offers a reload.
 
 Ask your existing agent to read [the workflow guide](docs/agent-guide.md), then run `jev-polls guide`. The schemas are available through `jev-polls schema pipeline` and `jev-polls schema cohort`.
 

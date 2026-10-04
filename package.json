@@ -21,6 +21,7 @@
     "node": ">=22"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.0",
     "@napi-rs/keyring": "^2.1.0",
     "@typesafe-ai/sdk": "^0.6.0",
     "commander": "^15.0.0",

@@ -1,6 +1,6 @@
 # Using Jev Polls as a companion agent
 
-Your existing coding or research agent does the preparation and interpretation. The CLI calls only TypeSafe for live inference. It does not call another generative model, scrape websites, or invent sources. Every command except help/version emits JSON to stdout; run progress is JSON lines on stderr. Failures exit nonzero with a JSON error or a saved failed run.
+Your existing coding or research agent does the preparation and interpretation. The CLI calls only TypeSafe for live inference. It does not call another generative model, scrape websites, or invent sources. Normal CLI commands emit JSON to stdout; `mcp` reserves stdout for MCP JSON-RPC. Progress and MCP startup errors go to stderr. Failures exit nonzero with a JSON error or a saved failed run.
 
 `workspace` (also available as `connect`) is a long-running local server: stdout contains its workspace URL, while progress and run results are JSON lines on stderr. Its browser editor supports saved cohort and pipeline drafts, stage connections and branch conditions, explicit review, and run history. Opening the page or connecting an account never starts a study.
 
@@ -52,6 +52,18 @@ When using a checkout without installing the CLI, replace `jev-polls` with `npm 
 Workspace drafts are stored in `.jev-polls/workspace/workspace.json` with a revision number. Multiple tabs use optimistic conflict detection; reload a stale tab instead of overwriting newer work. Workspace JSON references saved cohort IDs, whereas CLI pipeline JSON references relative cohort file paths. Use `connect <pipeline>` to import a CLI project. Browser export/import transfers the whole workspace document; import replaces the draft only after confirmation. Run records capture the exact cohort and pipeline snapshots used at execution.
 
 The browser lists past `.jev-polls/runs` reports alongside workspace runs. Failed or interrupted runs remain visible. Editing a cohort never changes historical results. Saved review tokens expire and become invalid after any saved edit; review again before running a changed study.
+
+## Connecting an existing agent
+
+Open the workspace's Agents tab or run `jev-polls mcp-config --workspace-url http://127.0.0.1:4180/` for client settings. The workspace URL must point to the running loopback server. MCP uses that server's validation, persistence, and execution controls; it does not open a second workspace. No API key belongs in MCP settings. The browser owns the saved TypeSafe connection.
+
+1. Call `get_guide`, `get_schema`, and `get_workspace` to read current contracts and the saved revision. Workspace pipeline aliases refer to cohort IDs, not filesystem paths.
+2. Use your host agent's research capabilities to prepare sourced, question-independent adult profiles. Preserve evidence gaps, synthetic fields, assumptions, and weight provenance.
+3. Save each cohort or pipeline with `save_cohort` or `save_pipeline` and `expectedRevision`. Re-read after each save. On a revision conflict, inspect the newer draft and reconcile changes instead of blindly overwriting them. Other cohorts and pipelines remain intact.
+4. Call `review_study` after edits are saved. Inspect the cohort sizes, branch graph, warnings, and request bound. Saving, connecting, and review make no study inference calls.
+5. Call `run_study` only within the user's authorization to send these profiles and questions to TypeSafe and spend the reviewed request budget. Supply the reviewed revision and token. Poll `get_run`; inspect `get_run_record` for actual results and failed/skipped stages. Never claim success from a completed transport request alone.
+
+The browser applies external changes when its local draft is clean. A dirty browser draft is preserved with a conflict notice until the user chooses how to reconcile it. Agent connection exposes tools; it does not create an embedded chat model or add shell/custom-agent stage types to the pipeline.
 
 ## Portable artifacts
 

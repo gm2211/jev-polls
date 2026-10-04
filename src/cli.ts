@@ -14,6 +14,7 @@ import { authStatus, setApiKey } from './auth.js';
 import { verifyTypeSafeConnection } from './auth-check.js';
 import { startWorkspaceServer } from './workspace.js';
 import { WorkspaceStore, emptyWorkspaceDocument } from './workspace-store.js';
+import { agentConnectionConfig } from './agent-config.js';
 import { renderReport } from './report.js';
 import { loadRun } from './run-record.js';
 import { hashValue } from './engine-utils.js';
@@ -102,6 +103,13 @@ program.command('workspace').option('--directory <directory>', 'Saved workspace 
 program.command('connect').argument('[pipeline]', 'Optional existing pipeline to import for editing; never runs automatically')
   .option('--directory <directory>', 'Saved workspace directory').option('--port <port>', 'Local workspace port', integer)
   .description('Connect TypeSafe and set up studies in the browser workspace').action(openWorkspace);
+
+program.command('mcp').option('--workspace-url <url>', 'Running loopback workspace URL', 'http://127.0.0.1:4180/')
+  .description('Connect an existing agent to this workspace over MCP stdio')
+  .action(async opts => { const { startResearchMcpServer } = await import('./mcp.js'); await startResearchMcpServer(opts.workspaceUrl); });
+program.command('mcp-config').option('--workspace-url <url>', 'Running loopback workspace URL', 'http://127.0.0.1:4180/')
+  .description('Print credential-free Codex, Claude Code, and MCP client configuration')
+  .action(opts => { output(agentConnectionConfig(opts.workspaceUrl)); });
 
 program.command('run').argument('<pipeline>').description('Execute pipeline, resume exact cached evaluations, and write JSON plus standalone HTML')
   .addOption(new Option('--provider <provider>', 'typesafe for live Jev, mock for a fully offline demonstration').choices(['typesafe', 'mock']).default('typesafe'))
@@ -198,5 +206,6 @@ try { await program.parseAsync(process.argv); }
 catch (error) {
   const commandError = error as { code?: string; message?: string; exitCode?: number };
   if (commandError.code === 'commander.helpDisplayed' || commandError.code === 'commander.version') { process.exitCode = 0; }
+  else if (process.argv[2] === 'mcp') { process.stderr.write(JSON.stringify({ error: { code: 'MCP_START_FAILED', message: 'Could not start the MCP server. Check arguments and use a running local workspace URL.' } }) + '\n'); process.exitCode = 1; }
   else { output({ error: { code: commandError.code ?? 'INVALID_INPUT', message: commandError.message ?? 'Operation failed' } }); process.exitCode = 1; }
 }

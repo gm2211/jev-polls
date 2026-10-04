@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
 import { authStatus, setApiKey } from './auth.js';
 import { verifyTypeSafeConnection } from './auth-check.js';
@@ -12,6 +12,7 @@ import { loadRun } from './run-record.js';
 import { writeJson, writeText } from './io.js';
 import { WorkspaceStore, workspacePlan, WorkspaceConflictError, validateWorkspaceDocument } from './workspace-store.js';
 import { renderWorkspace } from './workspace-ui.js';
+import { agentConnectionConfig } from './agent-config.js';
 import type { Provider } from './types.js';
 import type { AuthStatus } from './auth.js';
 import type { WorkspaceRun, WorkspacePlan } from './workspace-types.js';
@@ -158,12 +159,21 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
       if (request.headers.origin !== origin || request.headers['x-jev-csrf'] !== csrf) throw new HttpError(403, 'SESSION_EXPIRED', 'This workspace page expired. Reload it before saving.');
     }
     if (method === 'GET' && pathname === '/') { send(response, 200, renderWorkspace(nonce, csrf), true); return; }
+    if (method === 'GET' && pathname === '/api/agent-config') { send(response, 200, agentConnectionConfig(origin + '/')); return; }
     if (method === 'GET' && pathname === '/api/workspace') {
       send(response, 200, { ...await store.read(), auth: await getAuth(), runs: [...jobs.values()].sort((a,b) => b.createdAt.localeCompare(a.createdAt)), activeRun }); return;
     }
     if (method === 'GET' && pathname === '/status') { send(response, 200, { status: 'workspace', activeRun, configured: (await getAuth()).configured }); return; }
     if (method === 'GET' && pathname.startsWith('/api/run/')) {
-      const job = jobs.get(pathname.slice('/api/run/'.length));
+      const key = pathname.slice('/api/run/'.length);
+      if (key.endsWith('/record')) {
+        const id = key.slice(0, -'/record'.length);
+        if (!jobs.has(id)) throw new HttpError(404, 'RUN_NOT_FOUND', 'Run was not found.');
+        const reportPath = reports.get(id);
+        if (!reportPath) throw new HttpError(409, 'RUN_NOT_READY', 'A saved run record is not available yet.');
+        send(response, 200, await loadRun(join(dirname(reportPath), 'run.json'))); return;
+      }
+      const job = jobs.get(key);
       if (!job) throw new HttpError(404, 'RUN_NOT_FOUND', 'Run was not found.');
       send(response, 200, job); return;
     }

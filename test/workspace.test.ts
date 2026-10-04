@@ -35,6 +35,10 @@ test('workspace never runs on connect/save/review and requires a fresh explicit 
   assert.match(page.headers.get('content-security-policy') ?? '', /style-src 'nonce-[^']+'; style-src-attr 'unsafe-inline'/);
   const csrf = html.match(/<meta name="jev-csrf" content="([a-f0-9]+)"/)?.[1];
   assert.ok(csrf);
+  const config = await (await fetch(new URL('/api/agent-config', server.url))).json();
+  assert.equal(config.workspaceUrl, server.url);
+  assert.deepEqual(config.args.slice(-3), ['mcp', '--workspace-url', server.url]);
+  assert.doesNotMatch(JSON.stringify(config), /fake-key|TYPESAFE_API_KEY/);
   const post = (path: string, value: unknown, token = csrf) => fetch(new URL(path, server.url), { method: 'POST', headers: { origin: new URL(server.url).origin, 'content-type': 'application/json', 'x-jev-csrf': token! }, body: JSON.stringify(value) });
   const initial = await (await fetch(new URL('/api/workspace', server.url))).json();
   assert.equal(initial.document.cohorts.length, 0);
@@ -69,6 +73,10 @@ test('workspace never runs on connect/save/review and requires a fresh explicit 
   assert.doesNotMatch(await readFile(join(directory, 'workspace.json'), 'utf8'), /fake-key/);
   const runFolder = join(directory, 'runs', job.id);
   const savedRecord = JSON.parse(await readFile(join(runFolder, 'run.json'), 'utf8')) as { id: string };
+  const apiRecord = await (await fetch(new URL(`/api/run/${job.id}/record`, server.url))).json();
+  assert.equal(apiRecord.id, savedRecord.id);
+  assert.equal(apiRecord.provider, 'mock');
+  assert.equal((await fetch(new URL('/api/run/unknown/record', server.url))).status, 404);
   assert.notEqual(savedRecord.id, job.id, 'engine run IDs remain distinct from workspace folder IDs');
   assert.equal(JSON.parse(await readFile(join(runFolder, 'job.json'), 'utf8')).id, job.id);
   await server.close();
