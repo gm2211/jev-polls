@@ -4,6 +4,8 @@ Your existing coding or research agent does the preparation and interpretation. 
 
 `connect` is a long-running local server: stdout contains its connection URL, while progress and the eventual live-run result are JSON lines on stderr. Its page shows connection and study status.
 
+When handing this page to the user, keep its server alive beyond the current agent turn. Use a persistent terminal or an OS-managed user process, and verify `/status` responds after the launching command exits. A browser tab can remain visible after its server stops; that is a local availability failure, not evidence that the user's API key is invalid. After restarting the server, reload the page before entering a key so it receives the new session token.
+
 ## Start from the decision
 
 1. Turn the user's goal into a neutral question and a bounded answer set. Separate factual context supplied by the user from assumptions. Name the intended audience and the decision that the result will inform.

@@ -18,6 +18,8 @@ Open the local connection URL printed by `npm start`. Sign in to the linked Type
 
 The connection page serves only on your own computer. Keys never enter the report, project files, command arguments, or chat. Subsequent studies can reuse the saved connection. Every normal run uses TypeSafe by default, with no mock fallback.
 
+Keep the `npm start` terminal running while connecting and viewing the report. If the local server stops, restart it and open the new URL it prints; reload any page reused on the same port. A stopped server or an expired local page does not mean your TypeSafe key is invalid. TypeSafe console sign-in can happen in your usual browser; the CLI only needs the API key entered on the local connection page.
+
 To put `jev-polls` on your PATH for local use, run `npm link`. Every example also works as `node dist/cli.js ...` after building.
 
 ```sh

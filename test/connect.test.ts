@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { Script } from 'node:vm';
 import { request as httpRequest } from 'node:http';
 import { startConnectServer } from '../src/connect.js';
 
@@ -46,6 +47,27 @@ async function waitForStatus(url: string, expected: string): Promise<Record<stri
   }
   assert.fail(`Timed out waiting for ${expected} status`);
 }
+
+function clientHarness(html: string, fetcher: (url: string, init?: RequestInit) => Promise<unknown>) {
+  type Handler = (event: { preventDefault: () => void }) => unknown;
+  const element = () => ({
+    value: '', hidden: false, disabled: false, required: false, textContent: '',
+    dataset: {} as Record<string, string>, listeners: {} as Record<string, Handler>,
+    addEventListener(name: string, handler: Handler) { this.listeners[name] = handler; },
+    focus() {}, classList: { visible: false, toggle(_name: string, value: boolean) { this.visible = value; } },
+  });
+  const form=element(), key=element(), button=element(), status=element(), link=element();
+  const elements: Record<string, ReturnType<typeof element>> = { connectForm: form, apiKey: key, connectButton: button, status, reportLink: link, keyArea: element() };
+  const script = html.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/)?.[1];
+  assert.ok(script, 'The served connection page must contain its client script');
+  new Script(script).runInNewContext({
+    document: { getElementById: (id: string) => elements[id] ?? null, querySelector: () => ({ content: 'test-csrf' }) },
+    fetch: fetcher, setTimeout: (callback: () => void) => setTimeout(callback, 0),
+  });
+  return { form, key, button, status, link };
+}
+const fakeStatus = (status: string, message = status, reportAvailable = false) => ({ ok: true, status: 200, json: async () => ({ status, message, reportAvailable }) });
+const settleClient = () => new Promise(resolve => setTimeout(resolve, 10));
 
 test('serves a secure connection form, runs callback, and returns an intact standalone report without echoing secrets', async (t) => {
   const reportHtml = '<!doctype html><html><body>' + 'x'.repeat(5000) + '</body></html>';
@@ -138,9 +160,47 @@ test('shows fixed actionable provider errors, hides unknown errors, and permits 
   assert.doesNotMatch(JSON.stringify(authFailure), new RegExp(secret));
   await post(handle.url, token, { apiKey: secret });
   const unknownFailure = await waitForStatus(handle.url, 'failed');
-  assert.equal(unknownFailure.message, 'Connection failed. Check the API key and try again.');
+  assert.equal(unknownFailure.message, 'Connection setup failed. Retry, or check the local server if this continues.');
   await post(handle.url, token, { apiKey: secret });
   const complete = await waitForStatus(handle.url, 'completed');
   assert.equal(complete.message, 'Connected.');
   assert.equal(calls, 3);
+});
+
+
+test('served client distinguishes offline server and expired session, and reconnects to an accepted run', async (t) => {
+  const handle = await startConnectServer({ hasCredential: false, connect: async () => { throw Error('No real provider calls in client regression'); } });
+  t.after(() => handle.close());
+  const { html } = await tokenFrom(handle.url);
+
+  const offline = clientHarness(html, async () => { throw Error(secret); });
+  await settleClient();
+  assert.match(offline.status.textContent, /local connection server is unavailable/);
+  offline.key.value = secret;
+  await offline.form.listeners.submit!({ preventDefault() {} });
+  assert.match(offline.status.textContent, /Restart jev-polls connect/);
+  assert.doesNotMatch(offline.status.textContent, /Check the key|fake_typesafe/);
+  assert.equal(offline.key.value, '');
+  assert.equal(offline.button.disabled, false);
+
+  const stale = clientHarness(html, async url => url === '/status' ? fakeStatus('waiting') : { ok: false, status: 403 });
+  await settleClient();
+  stale.key.value = secret;
+  await stale.form.listeners.submit!({ preventDefault() {} });
+  assert.match(stale.status.textContent, /page is stale.*Reload/);
+  assert.equal(stale.button.disabled, false);
+
+  let statusReads = 0;
+  const busy = clientHarness(html, async url => {
+    if (url === '/connect') return { ok: false, status: 409 };
+    statusReads += 1;
+    return fakeStatus(statusReads === 1 ? 'waiting' : statusReads === 2 ? 'running' : 'completed', 'Existing run', statusReads >= 3);
+  });
+  await settleClient();
+  busy.key.value = secret;
+  await busy.form.listeners.submit!({ preventDefault() {} });
+  for (let i = 0; i < 20 && busy.status.dataset.state !== 'completed'; i++) await settleClient();
+  assert.equal(busy.status.dataset.state, 'completed');
+  assert.equal(busy.button.disabled, true);
+  assert.equal(busy.link.classList.visible, true);
 });
