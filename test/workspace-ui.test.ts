@@ -144,7 +144,7 @@ test('next phase wires a named output, keeps one question, and excludes downstre
   assert.equal(dataInputOptions(pipeline, next)[0].id, 'panel');
   assert.deepEqual(Array.from(projectionOptions(pipeline, next.inputs.previous_result), (x: any) => x.value), ['summary', 'responses', 'winner', 'probabilities']);
   assert.match(browser.element('app').innerHTML, /previous_result/);
-  assert.match(browser.element('app').innerHTML, /Pool of virtual people/);
+  assert.match(browser.element('app').innerHTML, /Cohort of virtual people/);
   assert.match(browser.element('app').innerHTML, /Which customer-support approach/);
   pipeline.stages[0].questions.preference = { type: 'noul', label: 'Would this work?', instructions: 'Answer yes or no.' };
   assert.deepEqual(Array.from(projectionOptions(pipeline, next.inputs.previous_result), (x: any) => x.value), ['summary', 'responses', 'mean']);
@@ -189,7 +189,7 @@ test('local assistant refuses unsaved work and stale proposals without posting m
   assert.match(browser.client.proposalReview(S.localJob), /Prepare a new proposal/);
 });
 
-test('proposal review itemizes removed pools and pipelines plus removals inside changed entities', async () => {
+test('proposal review itemizes removed cohorts and pipelines plus removals inside changed entities', async () => {
   const browser = browserHarness();
   await settle();
   const { S, proposalReview } = browser.client;
@@ -205,11 +205,11 @@ test('proposal review itemizes removed pools and pipelines plus removals inside 
   proposed.cohorts[0].personas.pop();
   proposed.pipelines[0].stages.pop();
   const html = proposalReview({ status: 'completed', revision: S.revision, proposal: { document: proposed, explanation: 'Reshape the audience and flow.' } });
-  assert.match(html, /Pools: 1 added · 1 changed · 1 removed/);
+  assert.match(html, /Cohorts: 1 added · 1 changed · 1 removed/);
   assert.match(html, /Pipelines: 0 added · 1 changed · 1 removed/);
-  assert.match(html, /Removed pool: <strong>Archived &lt;audience&gt;<\/strong> <code>\(removed-pool\)<\/code> · 1 personas removed/);
+  assert.match(html, /Removed cohort: <strong>Archived &lt;audience&gt;<\/strong> <code>\(removed-pool\)<\/code> · 1 personas removed/);
   assert.match(html, /Removed pipeline: <strong>Retired study<\/strong> <code>\(removed-pipeline\)<\/code> · 1 phases removed/);
-  assert.match(html, /Changed pool:.*1 personas removed/);
+  assert.match(html, /Changed cohort:.*1 personas removed/);
   assert.match(html, /Changed pipeline:.*1 phases removed/);
   assert.match(html, /including the removals listed below/);
   assert.match(html, /Apply proposal/);
