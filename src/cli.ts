@@ -13,7 +13,7 @@ import { createProvider } from './provider.js';
 import { authStatus, setApiKey } from './auth.js';
 import { verifyTypeSafeConnection } from './auth-check.js';
 import { startWorkspaceServer } from './workspace.js';
-import { WorkspaceStore } from './workspace-store.js';
+import { WorkspaceStore, emptyWorkspaceDocument } from './workspace-store.js';
 import { renderReport } from './report.js';
 import { loadRun } from './run-record.js';
 import { hashValue } from './engine-utils.js';
@@ -33,11 +33,19 @@ const program = new Command().name('jev-polls').description('Reusable synthetic 
 program.option('--json', 'Emit machine-readable output (already the default)').showHelpAfterError(false).exitOverride();
 program.configureOutput({ writeErr: () => {} });
 
-program.command('init').argument('[directory]', 'New study directory', 'study').description('Create an editable example pipeline and two reusable cohorts').action(async directory => {
+program.command('init').argument('[directory]', 'New workspace directory', 'study')
+  .addOption(new Option('--example <example>', 'Copy an illustrative CLI project instead of creating an empty workspace').choices(['game-naming']))
+  .description('Create an empty research workspace; examples require --example').action(async (directory, opts) => {
   const destination = resolve(directory); await absent(destination);
   await mkdir(dirname(destination), { recursive: true });
-  await cp(join(root, 'examples/game-naming'), destination, { recursive: true, force: false, errorOnExist: true });
-  output({ directory: destination, pipeline: join(destination, 'pipeline.json'), next: [`jev-polls validate ${join(destination, 'pipeline.json')}`, `jev-polls connect ${join(destination, 'pipeline.json')}`], note: 'Example names, profiles and weights are illustrative. Replace them with your brief and researched cohort.' });
+  if (opts.example) {
+    await cp(join(root, 'examples', opts.example), destination, { recursive: true, force: false, errorOnExist: true });
+    output({ directory: destination, example: opts.example, pipeline: join(destination, 'pipeline.json'), next: [`jev-polls validate ${join(destination, 'pipeline.json')}`, `jev-polls connect ${join(destination, 'pipeline.json')}`], note: 'Example names, profiles and weights are illustrative. Replace them with your brief and researched cohort.' });
+    return;
+  }
+  await mkdir(destination);
+  await new WorkspaceStore(destination).save(emptyWorkspaceDocument(), 0);
+  output({ directory: destination, workspace: join(destination, 'workspace.json'), next: [`jev-polls workspace --directory ${destination}`], note: 'Empty workspace created. Set up your own cohorts, questions and pipeline in the browser before running a study.' });
 });
 
 program.command('schema').argument('<kind>', 'pipeline or cohort').description('Print JSON Schema for an agent or editor').action(kind => {

@@ -26,12 +26,10 @@ To put `jev-polls` on your PATH for local use, run `npm link`. Every example als
 
 ```sh
 node dist/cli.js init my-study
-node dist/cli.js validate my-study/pipeline.json
-node dist/cli.js plan my-study/pipeline.json
-node dist/cli.js connect my-study/pipeline.json
-node dist/cli.js auth check
-node dist/cli.js run my-study/pipeline.json --out .jev-polls/my-study
+node dist/cli.js workspace --directory my-study
 ```
+
+`init` creates an empty workspace. Define your own research question, cohorts, options, and stages in the browser; no naming study is selected for you. To inspect the optional CLI example, explicitly run `node dist/cli.js init naming-example --example game-naming`, then `node dist/cli.js connect naming-example/pipeline.json`.
 
 `workspace` opens the browser editor. `connect <pipeline>` imports an existing CLI project into that workspace for editing, without running it. Connecting through the browser or using the `auth set` hidden terminal prompt verifies the key before saving it in macOS Keychain. `auth check` verifies a saved connection with one live request. An existing secret manager can instead inject `TYPESAFE_API_KEY` into the process environment or pipe the key to `auth set --stdin`. Keys never belong in command arguments or project files.
 
@@ -53,7 +51,7 @@ Each normal run gets a new output directory. An explicit `--out` refuses to repl
 
 Ask your existing agent to read [the workflow guide](docs/agent-guide.md), then run `jev-polls guide`. The schemas are available through `jev-polls schema pipeline` and `jev-polls schema cohort`.
 
-The bundled example follows the user's macro-RTS brief: a large industrial economy, substantial armies, underground infrastructure and orbital expansion. Its candidate names are placeholders. Audience dimensions reference primary research and official game descriptions; biographies and weights are explicitly synthetic assumptions. They are a starting hypothesis, not a representative market sample.
+The optional `game-naming` example illustrates one possible use of the general engine. It is never loaded by default. Its candidate names are placeholders; biographies and weights are explicitly synthetic assumptions, not a representative market sample. The commands below apply to a CLI pipeline prepared by your agent, with stage and question IDs chosen for that study.
 
 ```sh
 node dist/cli.js run my-study/pipeline.json --size audience=12 --repeats 3 --seed 42 --out .jev-polls/round-2

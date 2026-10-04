@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { cp, mkdtemp, readFile, rm, writeFile, access } from 'node:fs/promises';
+import { cp, mkdtemp, readFile, readdir, rm, writeFile, access } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -96,6 +96,54 @@ async function stopCli(child: ChildProcess): Promise<void> {
   }
   assert.equal(child.exitCode, 0, 'workspace CLI should exit cleanly on SIGINT');
 }
+
+test('init creates an empty workspace by default and copies examples only when requested', async (t) => {
+  const temp = await mkdtemp(join(tmpdir(), 'jev-polls-init-'));
+  t.after(async () => rm(temp, { recursive: true, force: true }));
+  const directory = join(temp, 'research');
+  const initialized = invoke(['init', directory], root);
+  assert.equal(initialized.status, 0, initialized.stderr);
+  assert.equal(initialized.stderr, '');
+  const created = output(initialized);
+  assert.equal(created.directory, directory);
+  assert.equal(created.workspace, join(directory, 'workspace.json'));
+  assert.deepEqual(created.next, [`jev-polls workspace --directory ${directory}`]);
+  assert.equal(created.pipeline, undefined);
+  assert.doesNotMatch(initialized.stdout, /game-naming|name worth|illustrative/i);
+  assert.deepEqual(await readdir(directory), ['workspace.json']);
+  const originalWorkspace = await readFile(created.workspace, 'utf8');
+  assert.deepEqual(JSON.parse(originalWorkspace), { revision: 1, document: { version: 1, cohorts: [], pipelines: [] } });
+
+  for (const args of [['init', directory], ['init', directory, '--example', 'game-naming']]) {
+    const refused = invoke(args, root);
+    assert.equal(refused.status, 1);
+    assert.match(output(refused).error.message, /Refusing to overwrite/);
+    assert.equal(await readFile(created.workspace, 'utf8'), originalWorkspace);
+  }
+
+  const exampleDirectory = join(temp, 'example');
+  const example = invoke(['init', exampleDirectory, '--example', 'game-naming'], root);
+  assert.equal(example.status, 0, example.stderr);
+  const copied = output(example);
+  assert.equal(copied.example, 'game-naming');
+  assert.equal(copied.pipeline, join(exampleDirectory, 'pipeline.json'));
+  assert.equal(await exists(join(exampleDirectory, 'workspace.json')), false);
+  const validated = invoke(['validate', copied.pipeline], root);
+  assert.equal(validated.status, 0, validated.stderr);
+  assert.equal(output(validated).valid, true);
+  assert.equal(output(validated).id, 'game-naming');
+  const originalPipeline = await readFile(copied.pipeline, 'utf8');
+  const refusedExample = invoke(['init', exampleDirectory, '--example', 'game-naming'], root);
+  assert.equal(refusedExample.status, 1);
+  assert.match(output(refusedExample).error.message, /Refusing to overwrite/);
+  assert.equal(await readFile(copied.pipeline, 'utf8'), originalPipeline);
+
+  const invalidDirectory = join(temp, 'invalid');
+  const invalidExample = invoke(['init', invalidDirectory, '--example', 'unknown'], root);
+  assert.equal(invalidExample.status, 1);
+  assert.match(output(invalidExample).error.message, /Allowed choices|invalid/i);
+  assert.equal(await exists(invalidDirectory), false);
+});
 
 test('CLI commands work offline with a temporary study and mock provider', async (t) => {
   const temp = await mkdtemp(join(tmpdir(), 'jev-polls-cli-'));
@@ -222,6 +270,8 @@ test('workspace opens empty without running; connect imports a pipeline for edit
   t.after(async () => rm(temp, { recursive: true, force: true }));
 
   const emptyDirectory = join(temp, 'empty-workspace');
+  const initialized = invoke(['init', emptyDirectory], root);
+  assert.equal(initialized.status, 0, initialized.stderr);
   const empty = await startCli(['workspace', '--directory', emptyDirectory], temp);
   t.after(() => stopCli(empty.child));
   assert.equal(empty.initialOutput.status, 'workspace-ready');

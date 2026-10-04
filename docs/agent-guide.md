@@ -9,8 +9,8 @@ When handing this page to the user, keep its server alive beyond the current age
 ## Start from the decision
 
 1. Turn the user's goal into a neutral question and a bounded answer set. Separate factual context supplied by the user from assumptions. Name the intended audience and the decision that the result will inform.
-2. Define the population and recruitment criteria before showing candidate answers to the cohort-building step. For game naming, prefer gaming motivations, genres, platform and purchasing behavior over unrelated personal characteristics. All profiles must be adults.
-3. Research relevant audience dimensions using primary studies, transparent datasets, customer research, and documented game facts. Save source URLs, retrieval dates, what each source supports, and its limitations. A game feature page is evidence about the game; it is not evidence about audience demographics or population weights.
+2. Define the population and recruitment criteria before showing candidate answers to the cohort-building step. Choose relevant experiences, needs, and behaviors for this research question rather than importing assumptions from another study. All profiles must be adults.
+3. Research relevant audience dimensions using primary studies, transparent datasets, customer research, and documented subject facts. Save source URLs, retrieval dates, what each source supports, and its limitations. A product page is evidence about that product; it is not evidence about audience demographics or population weights.
 4. Create or reuse a cohort. Source-backed traits and synthetic details must remain distinguishable. Keep profiles question-independent; do not insert an answer preference, advocacy position, candidate-specific sentiment, or a conclusion merely to influence a result. When preexisting views are relevant, record the evidence and define how they were sampled. Avoid cloning real private individuals.
 5. Use researched population weights only when the source supports this population and measurement. Otherwise mark weights `assumed` or `user`, describe assumptions, and inspect segment results. Preserve correlations in observed data when available; do not independently combine traits into implausible biographies. Record gaps rather than filling them with fabricated facts.
 6. Draft a pipeline. Use Choice for candidate selection, Score for described degrees, Noul for yes/no. Every question contains complete meaning: question IDs are not sent as instructions. Add a no-match option when the candidate set is incomplete. A closed preference comparison may intentionally require one candidate, but say so.
@@ -24,6 +24,7 @@ When handing this page to the user, keep its server alive beyond the current age
 ```sh
 jev-polls workspace
 jev-polls init study
+jev-polls workspace --directory study
 jev-polls schema cohort
 jev-polls schema pipeline
 jev-polls validate study/pipeline.json
@@ -41,6 +42,8 @@ jev-polls cohort sample study/players.json --size 12 --seed 17 --out study/playe
 ```
 
 When using a checkout without installing the CLI, replace `jev-polls` with `npm run dev --` or `node dist/cli.js` after `npm run build`.
+
+`init study` creates an empty browser workspace, not a CLI pipeline. The `validate`, `plan`, `connect <pipeline>`, and `run` commands above expect a pipeline JSON prepared separately by your agent. The naming example is opt-in only: `jev-polls init naming-example --example game-naming`. Never substitute it for the user's actual research question.
 
 ## Browser workspace
 
