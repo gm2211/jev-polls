@@ -14,6 +14,7 @@ import { WorkspaceStore, workspacePlan, WorkspaceConflictError, validateWorkspac
 import { renderWorkspace } from './workspace-ui.js';
 import { agentConnectionConfig } from './agent-config.js';
 import { LocalAgentError, LocalAgentService } from './local-agent.js';
+import { ChatGptConnection, chatGptMessage, createDraftClient, type ChatGptDraftClient } from './chatgpt.js';
 import type { Provider } from './types.js';
 import type { AuthStatus } from './auth.js';
 import type { WorkspaceRun, WorkspacePlan } from './workspace-types.js';
@@ -37,6 +38,7 @@ function validationMessage(error: unknown): string {
 
 export interface WorkspaceServerOptions {
   directory: string;
+  chatgpt?: ChatGptDraftClient;
   port?: number;
   legacyRunsDirectory?: string;
   getAuthStatus?: () => Promise<AuthStatus>;
@@ -50,7 +52,10 @@ export interface WorkspaceServerOptions {
 export async function startWorkspaceServer(options: WorkspaceServerOptions): Promise<{ url: string; close: () => Promise<void> }> {
   const directory = resolve(options.directory);
   const store = new WorkspaceStore(directory);
-  const localAgents = options.localAgents ?? new LocalAgentService();
+  const chatgpt = new ChatGptConnection(options.chatgpt ?? createDraftClient());
+  const localAgents = options.localAgents ?? new LocalAgentService({ chatgpt: chatgpt.client });
+  let activeDraftId: string | undefined;
+  let changingChatGpt = false;
   const csrf = randomBytes(32).toString('hex');
   const nonce = randomBytes(18).toString('base64');
   const getAuth = options.getAuthStatus ?? authStatus;
@@ -163,12 +168,46 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
     }
     if (method === 'GET' && pathname === '/') { send(response, 200, renderWorkspace(nonce, csrf), true); return; }
     if (method === 'GET' && pathname === '/api/agent-config') { send(response, 200, agentConnectionConfig(origin + '/')); return; }
+    if (pathname.startsWith('/api/chatgpt/')) {
+      try {
+        if (method === 'GET' && pathname === '/api/chatgpt/status') { send(response, 200, await chatgpt.snapshot()); return; }
+        if (method === 'GET' && pathname === '/api/chatgpt/models') {
+          const models = await chatgpt.client.listModels();
+          send(response, 200, { models: models.map(model => ({ id: model.id, name: model.name })) }); return;
+        }
+        if (method === 'POST') {
+          if (changingChatGpt) throw new HttpError(409, 'CHATGPT_BUSY', 'Another ChatGPT connection change is in progress.');
+          changingChatGpt = true;
+          try {
+          if (activeDraftId && localAgents.get(activeDraftId)?.status === 'running') throw new HttpError(409, 'AGENT_BUSY', 'Wait for the drafting task or cancel it before changing ChatGPT accounts.');
+          if (pathname === '/api/chatgpt/connect') {
+            const input = z.object({ accountId: z.string().min(1).max(500).optional() }).strict().parse(await body(request));
+            chatgpt.start(input.accountId); send(response, 202, { signingIn: true }); return;
+          }
+          if (pathname === '/api/chatgpt/select') {
+            const input = z.object({ accountId: z.string().min(1).max(500) }).strict().parse(await body(request));
+            await chatgpt.select(input.accountId); send(response, 200, await chatgpt.snapshot()); return;
+          }
+          if (pathname === '/api/chatgpt/cancel' || pathname === '/api/chatgpt/disconnect') {
+            z.object({}).strict().parse(await body(request));
+            if (pathname.endsWith('/cancel')) await chatgpt.cancel(); else await chatgpt.disconnect();
+            send(response, 200, await chatgpt.snapshot()); return;
+          }
+          } finally { changingChatGpt = false; }
+        }
+      } catch (error) {
+        if (error instanceof HttpError || error instanceof z.ZodError) throw error;
+        throw new HttpError(400, 'CHATGPT_REQUEST_FAILED', chatGptMessage(error));
+      }
+    }
     if (method === 'GET' && pathname === '/api/local-agents') { send(response, 200, await localAgents.availability()); return; }
     if (method === 'POST' && pathname === '/api/agent/jobs') {
-      const input = z.object({ engine: z.enum(['codex', 'claude']), prompt: z.string().trim().min(1).max(10_000), revision: z.number().int().nonnegative().safe(), cohort: z.object({ id: safeId, size: z.number().int().min(1).max(30) }).strict().optional() }).strict().parse(await body(request, 64 * 1024));
+      const input = z.object({ engine: z.enum(['codex', 'claude', 'chatgpt']), model: z.string().trim().min(1).max(200).optional(), prompt: z.string().trim().min(1).max(10_000), revision: z.number().int().nonnegative().safe(), cohort: z.object({ id: safeId, size: z.number().int().min(1).max(30) }).strict().optional() }).strict().parse(await body(request, 64 * 1024));
       const saved = await store.read();
       if (saved.revision !== input.revision) throw new WorkspaceConflictError(input.revision, saved.revision);
-      send(response, 202, localAgents.start({ ...input, document: saved.document })); return;
+      if (input.engine === 'chatgpt' && (changingChatGpt || (await chatgpt.snapshot()).signingIn || changingChatGpt)) throw new HttpError(409, 'CHATGPT_BUSY', 'Finish or cancel ChatGPT sign-in before drafting.');
+      const job = localAgents.start({ ...input, document: saved.document }); activeDraftId = job.id;
+      send(response, 202, job); return;
     }
     const agentRoute = /^\/api\/agent\/jobs\/([0-9a-f-]{36})(?:\/(cancel|apply))?$/.exec(pathname);
     if (agentRoute) {
@@ -289,6 +328,7 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
   });
   return { url: origin + '/', close: () => closePromise ??= (async () => {
     await localAgents.close();
+    await chatgpt.close();
     await new Promise<void>((resolveClose, reject) => server.close(error => error ? reject(error) : resolveClose()));
   })() };
 }

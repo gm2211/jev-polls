@@ -10,17 +10,24 @@
   "exports": "./dist/index.js",
   "scripts": {
     "start": "node --import tsx src/cli.ts workspace",
-    "build": "tsc -p tsconfig.json",
-    "check": "tsc -p tsconfig.json --noEmit",
+    "build": "npm run build:byos && tsc -p tsconfig.json",
+    "check": "npm run build:byos && tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test test/*.test.ts",
     "dev": "node --import tsx src/cli.ts",
     "demo": "node --import tsx src/cli.ts run examples/game-naming/pipeline.json --provider mock --out .jev-polls/demo --overwrite",
-    "verify": "npm run check && npm test && npm run build"
+    "verify": "npm run check && npm test && npm run build",
+    "build:byos": "tsc -p node_modules/@byos/chatgpt-local/tsconfig.json --types node --typeRoots ./node_modules/@types",
+    "sync:byos": "node scripts/sync-byos.mjs",
+    "prestart": "npm run build:byos",
+    "predev": "npm run build:byos",
+    "pretest": "npm run build:byos",
+    "predemo": "npm run build:byos"
   },
   "engines": {
-    "node": ">=22"
+    "node": ">=22.23.2"
   },
   "dependencies": {
+    "@byos/chatgpt-local": "file:vendor/byos-chatgpt-local",
     "@modelcontextprotocol/sdk": "^1.32.0",
     "@napi-rs/keyring": "^2.1.0",
     "@typesafe-ai/sdk": "^0.6.0",

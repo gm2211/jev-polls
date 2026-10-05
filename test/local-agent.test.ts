@@ -186,3 +186,38 @@ test('Missing CLI and unauthenticated status expose only fixed availability guid
   const availability = await service.availability(); assert.equal(availability.engines[0]!.installed, false); assert.equal(availability.engines[1]!.installed, true); assert.ok(availability.engines.every(item => !item.available)); assert.doesNotMatch(JSON.stringify(availability), /fake-private/);
   await service.close();
 });
+
+test('ChatGPT drafts use native transport, preserve validation, and never start CLI processes', async t => {
+  const calls: unknown[] = [];
+  const chatgpt = {
+    status: async () => ({ connected: true, planEnabled: true }),
+    generate: async (request: { input: string; model: string; signal?: AbortSignal }) => { calls.push(request); return { text: JSON.stringify(output) }; },
+  } as import('../src/chatgpt.js').ChatGptDraftClient;
+  const service = new LocalAgentService({ chatgpt, spawn: () => { throw Error('CLI must not start'); } });
+  t.after(() => service.close());
+  assert.throws(() => service.start({ engine: 'chatgpt', prompt: 'Draft', document: empty, revision: 0 }), /Choose a model/);
+  const completed = await terminal(service, service.start({ engine: 'chatgpt', model: 'eligible-model', prompt: 'Prepare synthetic adults', document: empty, revision: 7, cohort: { id: 'customers', size: 1 } }));
+  assert.equal(completed.status, 'completed'); assert.equal(completed.revision, 7);
+  assert.equal(completed.proposal?.document.cohorts[0]?.generationPrompt, 'Prepare synthetic adults');
+  assert.equal(empty.cohorts.length, 0); assert.equal(calls.length, 1);
+  assert.match(JSON.stringify(calls), /do not invent sources/);
+  chatgpt.generate = async () => ({ text: JSON.stringify(output) });
+  const wrongSize = await terminal(service, service.start({ engine: 'chatgpt', model: 'eligible-model', prompt: 'Prepare two', document: empty, revision: 7, cohort: { id: 'customers', size: 2 } }));
+  assert.equal(wrongSize.status, 'failed'); assert.equal(wrongSize.proposal, undefined);
+  chatgpt.generate = async () => { throw Object.assign(Error('private-token'), { code: 'quota' }); };
+  const limited = await terminal(service, service.start({ engine: 'chatgpt', model: 'eligible-model', prompt: 'Prepare', document: empty, revision: 7 }));
+  assert.equal(limited.status, 'failed'); assert.match(limited.message, /usage limit/); assert.doesNotMatch(JSON.stringify(limited), /private-token/);
+});
+
+test('ChatGPT cancellation aborts request and discards partial output', async t => {
+  let started!: () => void; const ready = new Promise<void>(resolve => { started = resolve; });
+  let aborted = false;
+  const chatgpt = {
+    status: async () => ({ connected: true, planEnabled: true }),
+    generate: async ({ signal }: { signal?: AbortSignal }) => new Promise<{ text: string }>((resolve) => { signal!.addEventListener('abort', () => { aborted = true; resolve({ text: JSON.stringify(output) }); }, { once: true }); started(); }),
+  } as import('../src/chatgpt.js').ChatGptDraftClient;
+  const service = new LocalAgentService({ chatgpt }); t.after(() => service.close());
+  const job = service.start({ engine: 'chatgpt', model: 'eligible-model', prompt: 'Draft', document: empty, revision: 0 });
+  await ready; service.cancel(job.id); await service.close();
+  assert.equal(aborted, true); assert.equal(service.get(job.id)?.status, 'cancelled'); assert.equal(service.get(job.id)?.proposal, undefined);
+});

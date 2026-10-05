@@ -95,3 +95,22 @@ npm run demo
 Tests exercise weighted math, DAG execution, branches, failures, cache behavior, limits, provider validation, credential handling, CLI contracts and report escaping. Live TypeSafe verification requires a configured key; offline tests never need one.
 
 See [implementation contracts](CONTRACT.md) for module responsibilities and [TypeSafe documentation](https://docs.typesafe.ai/llms.txt) for current API behavior.
+
+### ChatGPT subscription drafting
+
+In the cohort generator or Assistant, select **ChatGPT subscription**, click **Continue with ChatGPT**, approve access, and choose an available model. The local BYOS adapter calls Responses directly; no Codex installation is needed for this option. ChatGPT controls eligible plans, models, and per-app usage limits. Account switching and disconnect are available in the same controls. Tokens stay in local Keychain storage and never enter browser storage or workspace exports.
+
+Drafting proposes editable cohorts and pipelines. Review and save remain explicit; studies still run through TypeSafe with its separate credential and billing. Codex and Claude Code remain explicit alternatives using their existing CLI logins. See [the agent guide](docs/agent-guide.md) for boundaries and reconnection details.
+
+The native adapter is vendored from `gm2211/byos`; `vendor/BYOS_REVISION` records its full commit SHA. On a fresh checkout use Node 22.23.2 or newer, run `npm ci`, then `npm start`. The npm start/dev/check/build/test/demo commands build the adapter from its pinned source automatically.
+
+To update it, fetch the intended BYOS commit in a separate local checkout and run:
+
+```sh
+npm run sync:byos -- /path/to/byos FULL_40_CHARACTER_COMMIT_SHA
+npm install
+npm run verify
+npm run demo
+```
+
+The sync command runs BYOS’s exporter from that same immutable commit and exports only the native ChatGPT package and required package dependencies. Review and commit the vendor changes, revision record, and lockfile together. Make shared fixes upstream in BYOS; never patch vendored source.

@@ -156,7 +156,7 @@ test('local assistant submits saved revision and keeps proposal separate until e
   await settle();
   const { S, startLocalJob, applyLocalProposal } = browser.client;
   S.tab = 'agents';
-  S.localEngines = [{ id: 'codex', label: 'Codex', available: true }];
+  S.localEngine = 'codex'; S.localEngines = [{ id: 'codex', label: 'Codex', available: true }];
   S.localPrompt = 'Draft a pool for customer-support research using the facts I provided.';
   const proposal = browser.snapshot().document;
   proposal.cohorts[0]!.name = 'Proposed support pool';
@@ -243,7 +243,7 @@ test('cohort prompt generation scopes the request and previews personas without 
   const { S, startCohortJob, adoptCohortProposal, cohortProposalReview } = browser.client;
   S.tab = 'cohorts'; S.cohortComposer = true; S.cohortTarget = 'new-audience';
   S.cohortPrompt = 'Adult weekend museum visitors with varied experience.'; S.cohortSize = 2;
-  S.localEngines = [{ id: 'codex', label: 'Codex', available: true }];
+  S.localEngine = 'codex'; S.localEngines = [{ id: 'codex', label: 'Codex', available: true }];
   const original = structuredClone(S.doc);
   const candidate = { ...structuredClone(S.doc.cohorts[0]), id: 'new-audience', name: 'Museum visitors', generationPrompt: S.cohortPrompt };
   candidate.personas = [candidate.personas[0], { ...candidate.personas[0], id: 'second', label: 'Frequent visitor', age: 42 }];
@@ -303,4 +303,21 @@ test('late polling from a cancelled job cannot replace or block a newer generati
   await newPolling;
   assert.equal(S.localJob.id, 'second');
   assert.equal(S.localJob.status, 'completed');
+});
+
+
+test('ChatGPT drafting requires explicit model and carries selected model without changing TypeSafe connection', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, startLocalJob, canGenerateCohort, agents } = browser.client;
+  S.tab = 'agents'; S.localEngine = 'chatgpt'; S.localEngines = [{ id: 'chatgpt', label: 'ChatGPT subscription', available: true }];
+  S.chatgpt = { connected: true, planEnabled: true, account: { id: 'one', label: '<unsafe account>' }, accounts: [] };
+  S.localPrompt = 'Draft a synthetic cohort'; S.cohortPrompt = S.localPrompt; S.cohortSize = 2;
+  assert.equal(canGenerateCohort(), false); await assert.rejects(startLocalJob(), /Choose an available drafting provider/);
+  S.chatgptModels = [{ id: 'model-one', name: 'Model One' }]; S.chatgptModel = 'model-one';
+  assert.equal(canGenerateCohort(), true);
+  const html = agents(); assert.match(html, /&lt;unsafe account&gt;/); assert.match(html, /TypeSafe and its separate billing/);
+  browser.respond('/api/agent/jobs', { id: 'chatgpt-job', engine: 'chatgpt', status: 'failed', revision: S.revision, message: 'Test complete' });
+  await startLocalJob();
+  assert.deepEqual(browser.bodies.at(-1), { path: '/api/agent/jobs', body: { engine: 'chatgpt', model: 'model-one', prompt: S.localPrompt, revision: S.revision } });
+  assert.equal(S.snap.auth.configured, true); assert.equal(browser.requests.includes('/api/run'), false);
 });
