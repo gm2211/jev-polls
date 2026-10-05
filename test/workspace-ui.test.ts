@@ -21,6 +21,7 @@ function browserHarness() {
   const elements = new Map<string, any>();
   const listeners = new Map<string, Function>();
   const intervals: Function[] = [];
+  const timeouts: Function[] = [];
   const requests: string[] = [];
   const bodies: Array<{ path: string; body: unknown }> = [];
   const responses = new Map<string, unknown>();
@@ -31,18 +32,18 @@ function browserHarness() {
   const context = {
     document: { getElementById: element, querySelectorAll: () => [], visibilityState: 'visible', addEventListener: (name: string, fn: Function) => listeners.set(name, fn) },
     window: { addEventListener: (name: string, fn: Function) => listeners.set(name, fn) },
-    fetch: async (path: string, options?: { body?: string }) => { requests.push(path); if (options?.body) bodies.push({ path, body: JSON.parse(options.body) }); return { ok: true, json: async () => JSON.parse(JSON.stringify(responses.get(path) ?? snapshot)) }; },
-    setTimeout: () => 1, clearTimeout() {}, setInterval: (fn: Function) => { intervals.push(fn); return 1; },
+    fetch: async (path: string, options?: { body?: string }) => { requests.push(path); if (options?.body) bodies.push({ path, body: JSON.parse(options.body) }); return { ok: true, json: async () => JSON.parse(JSON.stringify(await (responses.get(path) ?? snapshot))) }; },
+    setTimeout: (fn: Function) => { timeouts.push(fn); return timeouts.length; }, clearTimeout() {}, setInterval: (fn: Function) => { intervals.push(fn); return 1; },
     navigator: {}, confirm: () => { throw new Error('Unexpected native confirmation'); },
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,graphEdgePath,drawStageEdges};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
   return {
     client: (context as typeof context & { clientTest: any }).clientTest,
-    element, listeners, intervals, requests, bodies, respond: (path: string, value: unknown) => responses.set(path, value),
+    element, listeners, intervals, timeouts, requests, bodies, respond: (path: string, value: unknown) => responses.set(path, value),
     setSnapshot: (value: typeof snapshot) => { snapshot = value; },
     snapshot: () => structuredClone(snapshot),
     document: context.document,
@@ -235,4 +236,71 @@ test('skip-phase edges cross reserved gutter above intermediate cards and finish
   assert.ok(points[2]!.y < middle.top && points[3]!.y < middle.top);
   assert.equal(points.at(-1)!.x, target.left - 3, 'arrowhead remains visible before the destination border');
   assert.match(browser.client.graphEdgePath(source, middle, box), / C /, 'adjacent phases retain curved direct edges');
+});
+
+test('cohort prompt generation scopes the request and previews personas without saving', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, startCohortJob, adoptCohortProposal, cohortProposalReview } = browser.client;
+  S.tab = 'cohorts'; S.cohortComposer = true; S.cohortTarget = 'new-audience';
+  S.cohortPrompt = 'Adult weekend museum visitors with varied experience.'; S.cohortSize = 2;
+  S.localEngines = [{ id: 'codex', label: 'Codex', available: true }];
+  const original = structuredClone(S.doc);
+  const candidate = { ...structuredClone(S.doc.cohorts[0]), id: 'new-audience', name: 'Museum visitors', generationPrompt: S.cohortPrompt };
+  candidate.personas = [candidate.personas[0], { ...candidate.personas[0], id: 'second', label: 'Frequent visitor', age: 42 }];
+  const job = { id: 'cohort-job', engine: 'codex', revision: S.revision, status: 'completed', cohort: { id: candidate.id, size: 2, prompt: S.cohortPrompt }, proposal: { document: { ...structuredClone(S.doc), cohorts: [...S.doc.cohorts, candidate] }, explanation: 'Fictional personas with assumed weights.' } };
+  browser.respond('/api/agent/jobs', job);
+  await startCohortJob();
+  assert.deepEqual(JSON.parse(JSON.stringify(browser.bodies.at(-1)!.body)), { engine: 'codex', prompt: S.cohortPrompt, revision: S.revision, cohort: { id: 'new-audience', size: 2 } });
+  assert.equal(JSON.stringify(S.doc), JSON.stringify(original), 'generation cannot modify the workspace draft');
+  const review = cohortProposalReview(S.localJob);
+  assert.match(review, /Frequent visitor/); assert.match(review, /Review and edit cohort/);
+  assert.doesNotMatch(review, /Apply proposal/);
+  adoptCohortProposal();
+  assert.equal(S.cohortId, 'new-audience'); assert.equal(S.dirty, true); assert.equal(S.cohortComposer, false);
+  assert.equal(JSON.stringify(S.doc.pipelines), JSON.stringify(original.pipelines)); assert.equal(JSON.stringify(S.doc.cohorts[0]), JSON.stringify(original.cohorts[0]));
+  assert.equal(S.doc.cohorts[1].generationPrompt, job.cohort.prompt);
+  assert.equal(browser.bodies.filter(x => x.path === '/api/workspace' || x.path.endsWith('/apply')).length, 0, 'review adoption stays local until explicit save');
+});
+
+test('cohort generation preserves unsaved edits and rejects stale proposal adoption', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, startCohortJob, adoptCohortProposal, canGenerateCohort } = browser.client;
+  S.cohortPrompt = 'Synthetic adult hikers'; S.cohortSize = 3; S.localEngines = [{ id: 'codex', available: true }];
+  S.dirty = true;
+  await assert.rejects(startCohortJob(), /Save your changes/);
+  assert.equal(browser.bodies.length, 0);
+  S.dirty = false; S.cohortSize = 0; assert.equal(canGenerateCohort(), false);
+  S.cohortSize = 3;
+  S.localJob = { status: 'completed', revision: S.revision, cohort: { id: 'cohort', size: 1, prompt: S.cohortPrompt }, proposal: { document: structuredClone(S.doc), explanation: 'Draft' } };
+  S.remoteRevision = S.revision + 1;
+  assert.equal(canGenerateCohort(), false);
+  await assert.rejects(startCohortJob(), /Reload the saved workspace/);
+  assert.throws(adoptCohortProposal, /Workspace changed/);
+  assert.equal(S.doc.cohorts[0].name, 'Original cohort'); assert.equal(S.dirty, false);
+});
+
+
+test('late polling from a cancelled job cannot replace or block a newer generation', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, pollLocalJob, cancelLocalJob } = browser.client;
+  const first = { id: 'first', status: 'running', revision: S.revision };
+  let finishOldPoll!: (value: unknown) => void;
+  browser.respond('/api/agent/jobs/first', new Promise(resolve => { finishOldPoll = resolve; }));
+  browser.respond('/api/agent/jobs/first/cancel', { ...first, status: 'cancelled' });
+  S.localJob = first;
+  const oldPolling = pollLocalJob('first');
+  browser.timeouts.shift()!(); await settle();
+  await cancelLocalJob();
+  assert.equal(S.localJob.status, 'cancelled');
+  const second = { id: 'second', status: 'running', revision: S.revision };
+  S.localJob = second;
+  browser.respond('/api/agent/jobs/second', { ...second, status: 'completed' });
+  const newPolling = pollLocalJob('second');
+  finishOldPoll({ ...first, status: 'running' });
+  await oldPolling;
+  assert.equal(S.localJob.id, 'second');
+  browser.timeouts.shift()!();
+  await newPolling;
+  assert.equal(S.localJob.id, 'second');
+  assert.equal(S.localJob.status, 'completed');
 });

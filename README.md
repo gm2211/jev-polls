@@ -14,7 +14,7 @@ npm run build
 npm start
 ```
 
-Open the local workspace URL printed by `npm start`. Configure virtual cohorts with source notes, weighted segments and synthetic adult profiles. Create a pipeline, give each phase a question and cohort, and use **Add next phase** for a linear flow. Named input connections also support branches and joins. Drafts are saved locally and can be reused or exported as JSON.
+Open the local workspace URL printed by `npm start`. In **Cohorts**, describe the audience in a short prompt, choose a persona count and an installed Codex or Claude agent, then choose **Generate cohort**. Review the generated personas, choose **Review and edit cohort**, adjust any details, and save. The brief stays with the cohort for later regeneration; manual creation remains available. Create a pipeline, give each phase a question and cohort, and use **Add next phase** for a linear flow. Named input connections also support branches and joins. Drafts are saved locally and can be reused or exported as JSON.
 
 Connect your TypeSafe account from the workspace when needed. The password field verifies the key with one small request and saves it in macOS Keychain. Connecting never runs a study. Review the stage plan and request budget, then choose **Run study** to start live inference. Completed and failed runs remain in **Runs**, with standalone reports.
 
@@ -37,7 +37,7 @@ Each normal run gets a new output directory. An explicit `--out` refuses to repl
 
 ## What is included
 
-- Local visual cohort workspace, persona tiles, segment composition, typed phase editors, explicit input/output connections, saved drafts, run review and history.
+- Prompt-first cohort generation, persona review and editing, segment composition, typed phase editors, explicit input/output connections, saved drafts, run review and history.
 - Local CLI drafting with installed Codex or Claude, cancellation, validated proposals, and revision-safe explicit application.
 - MCP tools for existing agents to read and update the same workspace, prepare cohorts and pipelines, review request budgets, start authorized runs, and inspect saved results.
 - Portable, validated cohort JSON with source references, synthetic-field labels, adult profiles, explicit segment weights and assumptions.
@@ -57,7 +57,7 @@ Every input source is an explicit graph dependency; cycles and incompatible proj
 
 ## Agent workflow
 
-The local assistant runs your installed Codex or Claude CLI with its existing login. Save changes first, describe the desired cohort or pipeline, then review the proposed changes before applying them. Generation never saves automatically or starts a TypeSafe study. If the saved workspace changes meanwhile, the proposal must be regenerated against the new revision. The assistant cannot browse for evidence: supplied sources and synthetic assumptions remain distinct.
+The local assistant runs your installed Codex or Claude CLI with its existing login. Save changes first. Cohort generation accepts a brief and 1–30 personas, validates only the selected cohort can change, and opens an editable draft after review. Other cohorts and pipelines stay intact. The Assistant tab can propose broader workspace changes for explicit application. Generation never saves automatically or starts a TypeSafe study. If the saved workspace changes meanwhile, the proposal must be regenerated against the new revision. The assistant cannot browse for evidence: supplied sources and synthetic assumptions remain distinct.
 
 Advanced MCP connection settings also support Codex, Claude Code, or another client. Keep the workspace server running. The adapter uses local stdio and the same revision checks and run controls as the browser; it never asks the agent to copy your TypeSafe key. Start a new agent session after registering the server so its tools are loaded.
 

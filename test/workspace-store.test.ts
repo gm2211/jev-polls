@@ -50,6 +50,7 @@ test('reads empty defaults and atomically saves revisioned JSON', async (t) => {
   const store = new WorkspaceStore(directory);
   assert.deepEqual(await store.read(), { revision: 0, document: { version: 1, cohorts: [], pipelines: [] } });
   const document = documentWith();
+  document.cohorts[0]!.generationPrompt = 'Adults who recently chose a meal kit';
   assert.deepEqual(await store.save(document, 0), { revision: 1, document });
   assert.deepEqual(await store.read(), { revision: 1, document });
 });

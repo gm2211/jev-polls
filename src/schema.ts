@@ -11,7 +11,7 @@ const date = z.string().datetime({ offset: true });
 const source = z.object({ id, title: text, url: z.string().url().refine(value => { const u = new URL(value); return ['http:', 'https:'].includes(u.protocol) && !u.username && !u.password; }, 'Use an HTTP(S) URL without credentials'), retrievedAt: date, notes: text }).strict();
 const segment = z.object({ id, label: text, description: text, weight: z.number().finite().nonnegative(), weightBasis: z.enum(['sourced', 'assumed', 'user']), sourceIds: z.array(id) }).strict();
 const persona = z.object({ id, label: text, segment: id, age: z.number().int().min(18).max(120), background: text, attributes: z.record(safeKey, z.json()), sourceIds: z.array(id), syntheticFields: z.array(text), weight: positive }).strict();
-export const cohortSchema = z.object({ version: z.literal(1), id, name: text, description: text, population: text, createdAt: date, sources: z.array(source), segments: z.array(segment).min(1), personas: z.array(persona).min(1), assumptions: z.array(text) }).strict();
+export const cohortSchema = z.object({ version: z.literal(1), id, name: text, description: text, population: text, createdAt: date, sources: z.array(source), segments: z.array(segment).min(1), personas: z.array(persona).min(1), assumptions: z.array(text), generationPrompt: text.max(10_000).optional() }).strict();
 export const questionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('choice'), label: text, instructions: text, criteria: z.record(safeKey, z.string().nullable()).refine(v => Object.keys(v).length >= 2 && Object.keys(v).length <= 255, 'Choice requires 2–255 options') }).strict(),
   z.object({ type: z.literal('noul'), label: text, instructions: text }).strict(),

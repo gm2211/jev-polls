@@ -83,6 +83,53 @@ test('Claude draft disables tools/customizations and reads structured result wit
   await service.close(); assert.deepEqual(await readdir(root), []);
 });
 
+test('cohort draft replaces only its requested cohort, preserves unrelated workspace data, and records the prompt', async t => {
+  const root = await setup(t);
+  const current: WorkspaceDocument = { version: 1, cohorts: [structuredClone(proposed.cohorts[0]!), { ...structuredClone(proposed.cohorts[0]!), id: 'other', name: 'Keep this cohort' }], pipelines: [{ version: 1, id: 'study', name: 'Keep this study', description: '', context: {}, cohorts: {}, stages: [] }] };
+  const generated = structuredClone(proposed);
+  generated.cohorts[0]!.personas.push({ ...structuredClone(generated.cohorts[0]!.personas[0]!), id: 'sam', label: 'Sam', age: 42 });
+  const data = { ...output, documentJson: JSON.stringify({ ...current, cohorts: [generated.cohorts[0]!, current.cohorts[1]!] }) };
+  const service = new LocalAgentService({ temporaryRoot: root, spawn: fakeSpawner(async ({ args, child }) => {
+    assert.match(child.input, /Never run a study, invoke TypeSafe/);
+    assert.match(child.input, /do not invent sources/);
+    assert.match(child.input, /Create or replace only the cohort whose ID is customers/);
+    await writeFile(args[args.indexOf('--output-last-message') + 1]!, JSON.stringify(data)); child.finish();
+  }) });
+  t.after(() => service.close());
+  const request = 'Create adults who compare budget meal kits';
+  const started = service.start({ engine: 'codex', prompt: request, revision: 7, document: current, cohort: { id: 'customers', size: 2 } });
+  assert.deepEqual(started.cohort, { id: 'customers', size: 2, prompt: request });
+  const completed = await terminal(service, started);
+  assert.equal(completed.status, 'completed');
+  assert.deepEqual(completed.proposal?.document.cohorts[1], current.cohorts[1]);
+  assert.deepEqual(completed.proposal?.document.pipelines, current.pipelines);
+  assert.equal(completed.proposal?.document.cohorts[0]?.personas.length, 2);
+  assert.equal(completed.proposal?.document.cohorts[0]?.generationPrompt, request);
+});
+
+test('cohort drafts reject scope changes, wrong counts, and invalid targets', async t => {
+  const root = await setup(t);
+  const current: WorkspaceDocument = { version: 1, cohorts: [{ ...structuredClone(proposed.cohorts[0]!), id: 'other' }], pipelines: [] };
+  const expectedTarget = structuredClone(proposed.cohorts[0]!);
+  expectedTarget.personas.push({ ...structuredClone(expectedTarget.personas[0]!), id: 'sam', label: 'Sam', age: 42 });
+  const cases: Array<{ name: string; document: WorkspaceDocument }> = [
+    { name: 'unrelated cohort mutation', document: { ...current, cohorts: [{ ...current.cohorts[0]!, name: 'Changed' }, expectedTarget] } },
+    { name: 'extra cohort', document: { ...current, cohorts: [...current.cohorts, expectedTarget, { ...expectedTarget, id: 'unexpected' }] } },
+    { name: 'pipeline mutation', document: { ...current, cohorts: [...current.cohorts, expectedTarget], pipelines: [{ version: 1, id: 'study', name: 'Changed', description: '', context: {}, cohorts: {}, stages: [] }] } },
+    { name: 'missing target', document: current },
+    { name: 'wrong target count', document: { ...current, cohorts: [...current.cohorts, { ...expectedTarget, personas: expectedTarget.personas.slice(0, 1) }] } },
+    { name: 'invalid target cohort', document: { ...current, cohorts: [...current.cohorts, { ...expectedTarget, segments: [] }] } },
+  ];
+  for (const item of cases) {
+    const service = new LocalAgentService({ temporaryRoot: root, spawn: fakeSpawner(async ({ args, child }) => { await writeFile(args[args.indexOf('--output-last-message') + 1]!, JSON.stringify({ ...output, documentJson: JSON.stringify(item.document) })); child.finish(); }) });
+    const started = service.start({ engine: 'codex', prompt: 'Create two people', revision: 0, document: current, cohort: { id: 'customers', size: 2 } });
+    const completed = await terminal(service, started);
+    assert.equal(completed.status, 'failed', item.name);
+    assert.equal(completed.proposal, undefined, item.name);
+    await service.close();
+  }
+});
+
 test('Failed or invalid CLI output never leaks diagnostics and always removes temporary files', async t => {
   const root = await setup(t);
   for (const mode of ['exit', 'invalid', 'underage'] as const) {
