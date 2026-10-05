@@ -55,6 +55,8 @@ The browser lists past `.jev-polls/runs` reports alongside workspace runs. Faile
 
 ## Drafting from the local UI
 
+In Cohorts, start with a short audience prompt and a count of 1–30 personas. The selected local agent generates a cohort for review, including segments, weights, assumptions and synthetic-field labels. Expand persona cards to inspect details, then choose **Review and edit cohort** to adopt it into the browser draft. Edit or remove personas and save explicitly. The cohort retains its optional `generationPrompt` for future regeneration. Regeneration replaces only the selected cohort; validation rejects changes to other cohorts or pipelines and rejects a different persona count. Manual creation and editing remain available.
+
 The local assistant invokes installed Codex or Claude CLIs using their existing login. The saved workspace and user brief go to the selected CLI through stdin. Drafting runs in an isolated temporary directory, with tool access disabled or constrained, and does not receive TypeSafe credentials. Its structured output is validated as a workspace proposal, then shown for explicit application. Only the original saved revision can accept that proposal. Cancellation, failures, or invalid JSON leave the saved workspace unchanged. No TypeSafe study runs from this flow.
 
 The drafting assistant has no research tools. Treat new personas, weights, and traits as synthetic assumptions unless supported by sources already supplied in the brief or workspace. Research sources through the existing agent/MCP flow when needed.

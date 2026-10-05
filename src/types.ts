@@ -2,7 +2,7 @@ export type Json = null | boolean | number | string | Json[] | { [key: string]: 
 export interface Source { id: string; title: string; url: string; retrievedAt: string; notes: string }
 export interface Segment { id: string; label: string; description: string; weight: number; weightBasis: 'sourced' | 'assumed' | 'user'; sourceIds: string[] }
 export interface Persona { id: string; label: string; segment: string; age: number; background: string; attributes: Record<string, Json>; sourceIds: string[]; syntheticFields: string[]; weight: number }
-export interface Cohort { version: 1; id: string; name: string; description: string; population: string; createdAt: string; sources: Source[]; segments: Segment[]; personas: Persona[]; assumptions: string[] }
+export interface Cohort { version: 1; id: string; name: string; description: string; population: string; createdAt: string; sources: Source[]; segments: Segment[]; personas: Persona[]; assumptions: string[]; generationPrompt?: string }
 export interface ChoiceQuestion { type: 'choice'; label: string; instructions: string; criteria: Record<string, string | null> }
 export interface NoulQuestion { type: 'noul'; label: string; instructions: string }
 export interface ScoreQuestion { type: 'score'; label: string; instructions: string; criteria: string[] }

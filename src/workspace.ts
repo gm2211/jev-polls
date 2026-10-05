@@ -165,7 +165,7 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
     if (method === 'GET' && pathname === '/api/agent-config') { send(response, 200, agentConnectionConfig(origin + '/')); return; }
     if (method === 'GET' && pathname === '/api/local-agents') { send(response, 200, await localAgents.availability()); return; }
     if (method === 'POST' && pathname === '/api/agent/jobs') {
-      const input = z.object({ engine: z.enum(['codex', 'claude']), prompt: z.string().trim().min(1).max(10_000), revision: z.number().int().nonnegative().safe() }).strict().parse(await body(request, 64 * 1024));
+      const input = z.object({ engine: z.enum(['codex', 'claude']), prompt: z.string().trim().min(1).max(10_000), revision: z.number().int().nonnegative().safe(), cohort: z.object({ id: safeId, size: z.number().int().min(1).max(30) }).strict().optional() }).strict().parse(await body(request, 64 * 1024));
       const saved = await store.read();
       if (saved.revision !== input.revision) throw new WorkspaceConflictError(input.revision, saved.revision);
       send(response, 202, localAgents.start({ ...input, document: saved.document })); return;

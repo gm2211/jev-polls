@@ -18,7 +18,7 @@ test('local assistant proposals require explicit application at the original sav
     start(input) {
       starts++;
       assert.deepEqual(input.document, emptyWorkspaceDocument(), 'server supplies the saved document');
-      const job: LocalAgentJob = { id: randomUUID(), engine: input.engine, revision: input.revision, status: 'running', message: 'Drafting' };
+      const job: LocalAgentJob = { id: randomUUID(), engine: input.engine, revision: input.revision, status: 'running', message: 'Drafting', ...(input.cohort ? { cohort: { ...input.cohort, prompt: input.prompt } } : {}) };
       jobs.set(job.id, job); return structuredClone(job);
     },
     get: id => jobs.get(id),
@@ -39,10 +39,13 @@ test('local assistant proposals require explicit application at the original sav
   assert.equal((await post('/api/agent/jobs', input, 'wrong')).status, 403);
   assert.equal((await post('/api/agent/jobs', { ...input, revision: 8 })).status, 409);
   assert.equal((await post('/api/agent/jobs', { ...input, document: {} })).status, 400);
+  assert.equal((await post('/api/agent/jobs', { ...input, cohort: { id: '__proto__', size: 2 } })).status, 400);
+  assert.equal((await post('/api/agent/jobs', { ...input, cohort: { id: 'fresh-panel', size: 31 } })).status, 400);
   assert.equal(starts, 0);
-  const created = await post('/api/agent/jobs', input);
+  const created = await post('/api/agent/jobs', { ...input, cohort: { id: 'fresh-panel', size: 2 } });
   assert.equal(created.status, 202);
   const job = jobs.get((await created.json()).id)!;
+  assert.deepEqual(job.cohort, { id: 'fresh-panel', size: 2, prompt: input.prompt });
   assert.equal((await post(`/api/agent/jobs/${job.id}/apply`, { revision: 0 })).status, 409);
   job.status = 'completed';
   job.proposal = { explanation: 'Proposed empty research pipeline for editing.', document: { version: 1, cohorts: [], pipelines: [{ version: 1, id: 'new-study', name: 'Customer study', description: '', context: {}, cohorts: {}, stages: [] }] } };
