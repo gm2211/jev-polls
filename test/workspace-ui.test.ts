@@ -49,12 +49,12 @@ function browserHarness(openExistingProject = true) {
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
   if (openExistingProject) (context as any).clientTest.S.projectId = 'existing-research';
   return {
-    client: (context as typeof context & { clientTest: any }).clientTest,
+    client: (context as typeof context & { clientTest: any }).clientTest, window: context.window,
     element, listeners, intervals, timeouts, requests, bodies, storage, respond: (path: string, value: unknown) => responses.set(path, value),
     setSnapshot: (value: typeof snapshot) => { snapshot = value; },
     snapshot: () => structuredClone(snapshot),
@@ -63,6 +63,112 @@ function browserHarness(openExistingProject = true) {
 }
 
 const settle = () => new Promise<void>(resolve => setImmediate(resolve));
+
+test('collection pages clamp after deletion and stay independent across projects', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, pageItems } = browser.client;
+  const items = Array.from({ length: 15 }, (_, i) => i);
+  S.listPages['existing-research:cohorts'] = 2;
+  assert.deepEqual(Array.from(pageItems(items, 'cohorts', 6).items), [12, 13, 14]);
+  assert.equal(pageItems(items.slice(0, 8), 'cohorts', 6).index, 1);
+  S.projectId = 'another-project';
+  assert.deepEqual(Array.from(pageItems(items, 'cohorts', 6).items), [0, 1, 2, 3, 4, 5]);
+  assert.equal(S.dirty, false);
+});
+
+test('section navigation flushes typed persona fields without replacing the separate weight', async () => {
+  const browser = browserHarness(); await settle();
+  const { S } = browser.client;
+  S.cohortId = 'cohort'; S.personId = 'person'; S.personaOpen = true;
+  S.doc.cohorts[0].personas[0].weight = 2.5;
+  const form: any = { dataset: { form: 'persona' }, reportValidity: () => true, values: {
+    personaId: 'person', personaLabel: 'Edited before tabbing', age: '31', segment: 'general',
+    background: 'Unsaved full story', attributes: '{"country":"Italy"}', syntheticFields: 'background\nattributes', sourceIds: [],
+  } };
+  const submit = browser.listeners.get('submit')!;
+  form.requestSubmit = () => submit({ target: { closest: () => form }, preventDefault() {} });
+  browser.element('app').querySelectorAll = (selector: string) => selector === '[data-form]' ? [form] : [];
+  S.dirty = true;
+  const button = { dataset: { act: 'section-view', sectionKey: 'persona-detail', sectionId: 'attributes' } };
+  browser.listeners.get('click')!({ target: { closest: () => button }, preventDefault() {} });
+  const persona = S.doc.cohorts[0].personas[0];
+  assert.equal(persona.label, 'Edited before tabbing');
+  assert.equal(persona.background, 'Unsaved full story');
+  assert.equal(persona.attributes.country, 'Italy');
+  assert.equal(persona.weight, 2.5);
+  assert.equal(S.sections['persona-detail'], 'attributes');
+  assert.equal(S.dirty, true);
+  assert.equal(browser.bodies.length, 0, 'tabbing does not save or call a model');
+});
+
+test('invalid form blocks a tab change and hidden field validation reveals every containing section', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, revealSectionField } = browser.client;
+  S.sections['persona-detail'] = 'edit'; S.dirty = true;
+  browser.element('app').querySelectorAll = (selector: string) => selector === '[data-form]' ? [{ dataset: { form: 'persona' }, reportValidity: () => false }] : [];
+  const button = { dataset: { act: 'section-view', sectionKey: 'persona-detail', sectionId: 'background' } };
+  browser.listeners.get('click')!({ target: { closest: () => button }, preventDefault() {} });
+  assert.equal(S.sections['persona-detail'], 'edit');
+  const outer: any = { dataset: { sectionKey: 'persona-detail', sectionId: 'edit' }, hidden: true };
+  const inner: any = { dataset: { sectionKey: 'persona-edit', sectionId: 'attributes' }, hidden: true, parentElement: { closest: () => outer } };
+  browser.element('app').querySelectorAll = (selector: string) => selector === '[data-section-panel]' ? [outer, inner] : [];
+  revealSectionField({ closest: () => inner });
+  assert.equal(outer.hidden, false); assert.equal(inner.hidden, false);
+  assert.equal(S.sections['persona-edit'], 'attributes');
+});
+
+test('phase editor retains all submitted controls while separating questions, cohort, inputs and rules', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, stageForm } = browser.client;
+  S.pipelineId = 'study'; S.stageId = 'panel';
+  const pipeline = S.doc.pipelines[0], html = stageForm(pipeline, pipeline.stages[0]);
+  assert.equal((html.match(/data-form="stage"/g) ?? []).length, 1);
+  for (const name of ['label', 'phasePool', 'size', 'questionId', 'questionInstructions', 'criteria', 'repeats', 'stageContext']) {
+    assert.match(html, new RegExp(`name="${name}"`));
+  }
+  assert.match(html, /data-section-id="question" >/);
+  assert.match(html, /data-section-id="cohort" hidden/);
+  assert.match(html, /data-section-id="inputs" hidden/);
+  assert.match(html, /data-section-id="rules" hidden/);
+});
+
+test('target fields survive cohort section switches and persona filters reset pagination', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, explorerAction } = browser.client;
+  S.cohortId = 'cohort'; S.cohortSection = 'distributions';
+  S.targetDraft = { field: 'age', kind: 'numeric', buckets: [{ label: 'Adults', min: 18, max: 121, percent: 100 }] };
+  const form = { values: { targetField: 'age', targetKind: 'numeric', targetLabel0: 'Edited age group', targetMin0: '20', targetMax0: '40', targetPercent0: '100' } };
+  browser.element('app').querySelector = (selector: string) => selector === '[data-form=distribution-target]' ? form : null;
+  explorerAction('cohort-section', { dataset: { section: 'people' } });
+  assert.equal(S.targetDraft.buckets[0].label, 'Edited age group');
+  assert.equal(S.targetDraft.buckets[0].min, 20);
+  assert.equal(S.doc.cohorts[0].distributionTargets, undefined, 'tab switching does not apply a target');
+  S.listPages['existing-research:personas'] = 30;
+  explorerAction('distribution-drill', { dataset: { index: '0' } });
+  assert.equal(S.listPages['existing-research:personas'], 0);
+  S.listPages['existing-research:personas'] = 30;
+  explorerAction('persona-clear-filter', { dataset: {} });
+  assert.equal(S.listPages['existing-research:personas'], 0);
+});
+
+test('segment paging preserves temporarily non-totaling inputs without applying or rerendering them', async () => {
+  const browser = browserHarness(); await settle();
+  const { S } = browser.client;
+  S.cohortId = 'cohort'; S.cohortSection = 'weights'; S.dirty = true;
+  S.doc.cohorts[0].segments = Array.from({ length: 7 }, (_, i) => ({ id: `s${i}`, label: `Group ${i}`, weight: 1, weightBasis: 'assumed', sourceIds: [] }));
+  const rows = Array.from({ length: 7 }, () => ({ hidden: false }));
+  const pager = { outerHTML: '' }, draft = { value: '30' };
+  const shares = { querySelectorAll: () => rows, querySelector: (selector: string) => selector === '.pagination' ? pager : null };
+  const button: any = { dataset: { act: 'page-action', pageKey: 'existing-research:segments', page: '1' }, closest: (selector: string) => selector === '[data-form=segment-shares]' ? shares : button };
+  browser.element('app').querySelectorAll = (selector: string) => { if (selector === '[data-form]') throw Error('must not flush partially rebalanced shares'); return []; };
+  browser.element('app').innerHTML = 'existing editable DOM';
+  browser.listeners.get('click')!({ target: { closest: () => button }, preventDefault() {} });
+  assert.equal(browser.element('app').innerHTML, 'existing editable DOM');
+  assert.deepEqual(rows.map(r => r.hidden), [true, true, true, true, false, false, false]);
+  assert.equal(draft.value, '30');
+  assert.match(pager.outerHTML, /5–7 of 7/);
+  assert.equal(S.doc.cohorts[0].segments[0].weight, 1);
+});
 
 test('agent saves refresh clean drafts and preserve valid editor selection without redrawing unchanged forms', async () => {
   const browser = browserHarness();
@@ -556,19 +662,19 @@ test('persona grouping, filtering, and pagination operate on the full cohort', a
   S.cohortId = cohort.id; S.personaGroup = 'attributes.region';
   let html = cohortExplorer(cohort);
   assert.match(html, /Group personas by/); assert.match(html, /North/); assert.doesNotMatch(html, /South/);
-  assert.match(html, /1–24 of 50 personas/);
-  explorerAction('persona-page', { dataset: { delta: '1' } });
+  assert.match(html, /1–3 of 50/);
+  browser.client.act(null, { dataset: { act: 'page-action', pageKey: 'existing-research:personas', page: '8' } });
   html = browser.element('app').innerHTML;
-  assert.match(html, /25–48 of 50 personas/);
+  assert.match(html, /25–27 of 50/);
   assert.match(html, /South/);
   S.personaFilter = { field: 'attributes.region', bucket: { label: 'North', value: 'North' } };
-  S.personaPage = 0; html = cohortExplorer(cohort);
+  S.personaPage = 0; S.listPages['existing-research:personas'] = 0; html = cohortExplorer(cohort);
   assert.match(html, /Showing Region: North/);
-  assert.match(html, /1–24 of 25 personas/);
+  assert.match(html, /1–3 of 25/);
   assert.doesNotMatch(html, /Person 2</);
   explorerAction('persona-clear-filter', { dataset: {} });
   assert.equal(S.personaFilter, null);
-  assert.match(browser.element('app').innerHTML, /of 50 personas/);
+  assert.match(browser.element('app').innerHTML, /of 50/);
 });
 
 test('explorer controls stay transient and target validation plus positive persona weights gate edits', async () => {
