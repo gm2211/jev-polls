@@ -497,3 +497,103 @@ test('late run plan cannot land after switching projects', async () => {
   assert.equal(S.plan, null);
   assert.equal(S.projectId, 'other');
 });
+
+test('cohort editor has an explicit path back to the library and keeps unsaved edits', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, act, cohorts } = browser.client;
+  S.tab = 'cohorts'; S.cohortId = null;
+  assert.match(cohorts(), /role="tablist"/);
+  act(null, { dataset: { act: 'open-cohort', id: 'cohort' } });
+  assert.doesNotMatch(browser.element('app').innerHTML, /role="tablist"|role="tabpanel"/);
+  assert.match(browser.element('app').innerHTML, /Back to cohorts/);
+  assert.match(browser.element('app').innerHTML, /Original cohort/);
+  const input = { name: 'description', closest: () => ({ dataset: { form: 'cohort' } }) };
+  browser.listeners.get('input')!({ target: input });
+  assert.match(cohorts(), /Unsaved changes/);
+  S.doc.cohorts[0].name = 'Unsaved audience edit'; S.dirty = true;
+  assert.match(cohorts(), /Unsaved changes/);
+  act(null, { dataset: { act: 'back-cohorts' } });
+  assert.match(browser.element('app').innerHTML, /role="tablist"/);
+  assert.match(browser.element('app').innerHTML, /Unsaved audience edit/);
+  assert.equal(S.doc.cohorts[0].name, 'Unsaved audience edit');
+});
+
+test('cohort generation is entered explicitly and its return action restores the right editor', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, act, cohorts } = browser.client;
+  S.tab = 'cohorts'; S.cohortId = null; S.personId = null;
+  S.doc.cohorts = [];
+  assert.match(cohorts(), /role="tablist"/);
+  assert.doesNotMatch(cohorts(), /cohort-generator/);
+  act(null, { dataset: { act: 'new-cohort' } });
+  assert.match(browser.element('app').innerHTML, /cohort-generator/);
+  assert.doesNotMatch(browser.element('app').innerHTML, /role="tablist"/);
+  assert.match(browser.element('app').innerHTML, /Back to cohorts/);
+  act(null, { dataset: { act: 'cohort-generator-close' } });
+  assert.match(browser.element('app').innerHTML, /role="tablist"/);
+  assert.doesNotMatch(browser.element('app').innerHTML, /cohort-generator/);
+  S.doc.cohorts = browser.snapshot().document.cohorts;
+  act(null, { dataset: { act: 'new-cohort' } });
+  S.cohortPrompt = 'New audience brief';
+  act(null, { dataset: { act: 'cohort-generator-close' } });
+  assert.match(browser.element('app').innerHTML, /role="tablist"/);
+  assert.equal(S.cohortPrompt, 'New audience brief');
+
+  act(null, { dataset: { act: 'open-cohort', id: 'cohort' } });
+  S.doc.cohorts[0].description = 'Unsaved cohort detail'; S.dirty = true;
+  act(null, { dataset: { act: 'generate-personas' } });
+  assert.match(browser.element('app').innerHTML, /Back to cohort/);
+  act(null, { dataset: { act: 'cohort-generator-close' } });
+  assert.match(browser.element('app').innerHTML, /Unsaved cohort detail/);
+  assert.equal(S.dirty, true);
+});
+
+test('phase cohort entry returns to the same pipeline stage while direct cohort entry clears that context', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, act } = browser.client;
+  S.tab = 'studies'; S.pipelineId = 'study'; S.stageId = 'panel'; S.cohortId = null;
+  act(null, { dataset: { act: 'phase-pool', id: 'cohort' } });
+  assert.deepEqual(JSON.parse(JSON.stringify(S.cohortReturn)), { pipelineId: 'study', stageId: 'panel' });
+  assert.match(browser.element('app').innerHTML, /data-act="back-cohort-pipeline"/);
+  S.doc.cohorts[0].description = 'Unsaved from pipeline'; S.dirty = true;
+  act(null, { dataset: { act: 'back-cohort-pipeline' } });
+  assert.equal(S.pipelineId, 'study'); assert.equal(S.stageId, 'panel');
+  assert.equal(S.doc.cohorts[0].description, 'Unsaved from pipeline');
+  assert.equal(S.dirty, true);
+  act(null, { dataset: { act: 'open-cohort', id: 'cohort' } });
+  assert.equal(S.cohortReturn, null);
+  assert.doesNotMatch(browser.element('app').innerHTML, /back-cohort-pipeline/);
+});
+
+test('cohort editor keeps management controls without study execution or inference review asides', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, cohorts } = browser.client;
+  S.cohortId = 'cohort'; S.personId = 'person'; S.dirty = true;
+  const html = cohorts();
+  assert.match(html, /Unsaved changes/);
+  assert.match(html, /data-act="save"/);
+  assert.match(html, /data-act="pool-study"/);
+  assert.match(html, /data-act="delete-cohort"/);
+  assert.match(html, /management/i);
+  assert.doesNotMatch(html, /running this study|Review before inference/i);
+});
+
+test('workspace tabs clear cohort selections and open the project pipeline while preserving the draft', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, act } = browser.client;
+  const draft = structuredClone(S.doc);
+  S.tab = 'cohorts'; S.cohortId = 'cohort'; S.personId = 'person';
+  act(null, { dataset: { act: 'pool-study', id: 'cohort' } });
+  act(null, { dataset: { act: 'tab', tab: 'cohorts' } });
+  assert.match(browser.element('app').innerHTML, /role="tablist"/);
+  assert.doesNotMatch(browser.element('app').innerHTML, /Back to cohorts|Back to cohort/);
+  assert.equal(S.cohortId, null); assert.equal(S.personId, null);
+  assert.equal(S.cohortComposer, false); assert.equal(S.cohortReturn, null);
+  assert.deepEqual(JSON.parse(JSON.stringify(S.doc)), JSON.parse(JSON.stringify(draft)));
+
+  S.pipelineId = 'study'; S.stageId = 'panel';
+  act(null, { dataset: { act: 'tab', tab: 'studies' } });
+  assert.equal(S.pipelineId, 'study'); assert.equal(S.stageId, 'panel');
+  assert.match(browser.element('app').innerHTML, /role="tablist"/);
+  assert.deepEqual(JSON.parse(JSON.stringify(S.doc)), JSON.parse(JSON.stringify(draft)));
+});
