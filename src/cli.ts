@@ -9,6 +9,7 @@ import { Writable } from 'node:stream';
 import { parseCohort, parsePipeline, loadProject, stageOrder, jsonSchema } from './schema.js';
 import { runPipeline, selectPersonas } from './engine.js';
 import { compareRuns, simulateVotes } from './analysis.js';
+import { GLINER_MODEL } from './gliner-provider.js';
 import { createProvider } from './provider.js';
 import { authStatus, setApiKey } from './auth.js';
 import { verifyTypeSafeConnection } from './auth-check.js';
@@ -139,10 +140,10 @@ program.command('mcp-config').option('--workspace-url <url>', 'Running loopback 
   .action(opts => { output(agentConnectionConfig(opts.workspaceUrl)); });
 
 program.command('run').argument('<pipeline>').description('Execute pipeline, resume exact cached evaluations, and write JSON plus standalone HTML')
-  .addOption(new Option('--provider <provider>', 'typesafe for live Jev, mock for a fully offline demonstration').choices(['typesafe', 'mock']).default('typesafe'))
+  .addOption(new Option('--provider <provider>', 'typesafe for hosted Jev, gliner for local GLiNER2.5-Decide, mock for demonstrations').choices(['typesafe', 'gliner', 'mock']).default('typesafe'))
   .option('--out <directory>', 'Output directory (contains run.json and report.html)')
   .option('--overwrite', 'Replace run artifacts already present in the output directory')
-  .option('--model <model>', 'TypeSafe model/version (pin versions for reproducibility)', 'jev-1.13.0')
+  .option('--model <model>', 'Provider model/version; defaults to Jev or the pinned GLiNER model')
   .option('--seed <seed>', 'Reproducible profile sampling and option order', '1')
   .option('--concurrency <count>', 'Maximum in-flight evaluations across all stages', integer, 8)
   .option('--max-requests <count>', 'Maximum new evaluations (SDK retries may add HTTP attempts)', integer, 1000)
@@ -169,7 +170,9 @@ program.command('run').argument('<pipeline>').description('Execute pipeline, res
       await absent(join(directory, 'run.json'));
       await absent(join(directory, 'report.html'));
     }
-    const run = await runPipeline(project.pipeline, project.cohorts, { provider: createProvider(opts.provider), model: opts.model, seed: opts.seed, concurrency: opts.concurrency, maxRequests: opts.maxRequests, cacheDir: resolve(opts.cache), refresh: !!opts.refresh, onProgress: event => process.stderr.write(JSON.stringify({ event: 'progress', ...event }) + '\n') });
+    const provider = createProvider(opts.provider);
+    const model = opts.model ?? (opts.provider === 'gliner' ? GLINER_MODEL : 'jev-1.13.0');
+    const run = await runPipeline(project.pipeline, project.cohorts, { provider, model, seed: opts.seed, concurrency: opts.concurrency, maxRequests: opts.maxRequests, cacheDir: resolve(opts.cache), refresh: !!opts.refresh, onProgress: event => process.stderr.write(JSON.stringify({ event: 'progress', ...event }) + '\n') }).finally(() => provider.close?.());
     await writeJson(join(directory, 'run.json'), run);
     await writeText(join(directory, 'report.html'), renderReport(run));
     output({ status: run.status, id: run.id, provider: run.provider, usage: run.usage, stages: Object.fromEntries(Object.entries(run.stages).map(([id, s]) => [id, { status: s.status, reason: s.reason, summaries: s.summaries }])), warnings: run.warnings, files: { run: join(directory, 'run.json'), report: join(directory, 'report.html') } });

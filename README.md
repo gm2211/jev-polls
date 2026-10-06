@@ -104,6 +104,8 @@ Drafting proposes editable cohorts and studies. Review and save remain explicit;
 
 The native adapter is vendored from `gm2211/byos`; `vendor/BYOS_REVISION` records its full commit SHA. On a fresh checkout use Node 22.23.2 or newer, run `npm ci`, then `npm start`. The npm start/dev/check/build/test/demo commands build the adapter from its pinned source automatically. `npm run verify` builds and type-checks once, then runs the full test suite without repeating the standalone test command's build hook. Integration tests require permission to bind loopback ports.
 
+For optional local study evaluation, run `npm run setup:gliner` once with Python 3.10–3.13 installed. Select **AI → Study evaluations → GLiNER2.5-Decide · local** in the browser, or use `jev-polls run <pipeline> --provider gliner`. No TypeSafe key is needed for local runs. This English classifier does not generate personas and its label scores are not calibrated survey probabilities. See [local setup and limits](docs/gliner.md).
+
 To update it, fetch the intended BYOS commit in a separate local checkout and run:
 
 ```sh

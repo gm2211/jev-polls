@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { authStatus, setApiKey } from './auth.js';
 import { verifyTypeSafeConnection } from './auth-check.js';
 import { createProvider, ProviderError } from './provider.js';
+import { GLINER_MODEL, glinerStatus } from './gliner-provider.js';
 import { runPipeline } from './engine.js';
 import { renderReport } from './report.js';
 import { loadRun } from './run-record.js';
@@ -23,12 +24,14 @@ import type { WorkspaceDocument, WorkspaceRun, WorkspacePlan } from './workspace
 const MODEL = 'jev-1.13.0';
 const WORKSPACE_RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const safeId = z.string().regex(/^[a-z][a-z0-9_-]*$/).max(160);
-const runInput = z.object({ pipelineId: safeId, projectId: safeId.optional(), revision: z.number().int().nonnegative(), planToken: z.string(), seed: z.string().min(1).max(200), concurrency: z.number().int().min(1).max(16), maxRequests: z.number().int().min(1).max(100_000) }).strict();
+const evaluationProvider = z.enum(['typesafe', 'gliner']);
+const runInput = z.object({ pipelineId: safeId, projectId: safeId.optional(), provider: evaluationProvider.default('typesafe'), revision: z.number().int().nonnegative(), planToken: z.string(), seed: z.string().min(1).max(200), concurrency: z.number().int().min(1).max(16), maxRequests: z.number().int().min(1).max(100_000) }).strict();
 const savedJobSchema = z.object({
   id: z.string().regex(WORKSPACE_RUN_ID), projectId: safeId, pipelineId: safeId, pipelineName: z.string().max(100_000),
   status: z.enum(['running', 'completed', 'failed']), createdAt: z.string().max(100), message: z.string().max(100_000),
+  provider: evaluationProvider.optional(),
   progress: z.object({ stage: safeId, completed: z.number().int().nonnegative(), total: z.number().int().nonnegative() }).strict().optional(),
-  usage: z.object({ inputTokens: z.number().finite().nonnegative(), outputTokens: z.number().finite().nonnegative(), requests: z.number().int().nonnegative(), cacheHits: z.number().int().nonnegative() }).strict().optional(),
+  usage: z.object({ inputTokens: z.number().finite().nonnegative(), outputTokens: z.number().finite().nonnegative(), requests: z.number().int().nonnegative(), cacheHits: z.number().int().nonnegative(), tokenUsage: z.literal('unreported').optional(), measuredInputTokens: z.number().int().nonnegative().optional() }).strict().optional(),
   reportUrl: z.string().regex(/^\/reports\/[0-9a-f-]{36}$/).optional(),
 }).strict();
 class HttpError extends Error { constructor(readonly status: number, readonly code: string, message: string) { super(message); } }
@@ -43,7 +46,8 @@ export interface WorkspaceServerOptions {
   port?: number;
   getAuthStatus?: () => Promise<AuthStatus>;
   connectAccount?: (key: string) => Promise<unknown>;
-  providerFactory?: () => Provider;
+  providerFactory?: (name: 'typesafe' | 'gliner') => Provider;
+  getGlinerStatus?: () => Promise<{ ready: boolean; model: string; message?: string }>;
   emit?: (event: Record<string, unknown>) => void;
   localAgents?: Pick<LocalAgentService, 'availability' | 'start' | 'get' | 'cancel' | 'close'>;
 }
@@ -59,11 +63,15 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
   const csrf = randomBytes(32).toString('hex');
   const nonce = randomBytes(18).toString('base64');
   const getAuth = options.getAuthStatus ?? authStatus;
+  const getGliner = options.getGlinerStatus ?? glinerStatus;
   const connectAccount = options.connectAccount ?? (async (key: string) => { const result = await verifyTypeSafeConnection(key); await setApiKey(key); return result; });
   const jobs = new Map<string, WorkspaceRun>();
   const runRecords = new Map<string, string>();
-  const plans = new Map<string, { pipelineId: string; revision: number; expires: number }>();
+  const plans = new Map<string, { pipelineId: string; revision: number; provider: 'typesafe' | 'gliner'; expires: number }>();
   let activeRun: WorkspaceRun | null = null;
+  let activeProvider: Provider | undefined;
+  let execution: Promise<void> | undefined;
+  let closing = false;
   let authenticating = false;
   let origin = '';
   let expectedHost = '';
@@ -114,7 +122,7 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
           } catch { /* Ownerless artifacts are not workspace runs. */ }
         }
         if (!persistedProjectId || !existingProjects.has(persistedProjectId)) continue;
-        const summary: WorkspaceRun = { projectId: persistedProjectId, id, pipelineId: record.pipeline.id, pipelineName: record.pipeline.name, status: record.status, createdAt: record.createdAt, message, usage: record.usage, reportUrl: `/reports/${id}`, ...(persistedProgress ? { progress: persistedProgress } : {}) };
+        const summary: WorkspaceRun = { ...(record.provider !== 'mock' ? { provider: record.provider } : {}), projectId: persistedProjectId, id, pipelineId: record.pipeline.id, pipelineName: record.pipeline.name, status: record.status, createdAt: record.createdAt, message, usage: record.usage, reportUrl: `/reports/${id}`, ...(persistedProgress ? { progress: persistedProgress } : {}) };
         jobs.set(summary.id, summary); runRecords.set(summary.id, join(path, 'run.json'));
       } catch {
         try {
@@ -174,10 +182,14 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
   }
   async function execute(job: WorkspaceRun, project: ReturnType<typeof workspacePlan>, input: z.infer<typeof runInput>) {
     const runDirectory = join(directory, 'runs', job.id);
+    let provider: Provider | undefined;
     try {
       await writeJson(join(runDirectory, 'pending.json'), job);
+      if (closing) throw new Error('Workspace is closing');
+      provider = (options.providerFactory ?? createProvider)(input.provider);
+      activeProvider = provider;
       const record = await runPipeline(project.pipeline, project.cohorts, {
-        provider: (options.providerFactory ?? (() => createProvider('typesafe')))(), model: MODEL,
+        provider, model: input.provider === 'gliner' ? GLINER_MODEL : MODEL,
         seed: input.seed, concurrency: input.concurrency, maxRequests: input.maxRequests,
         cacheDir: join(directory, 'cache'),
         onProgress: event => { job.progress = event; job.message = `${event.stage}: ${event.completed} of ${event.total} evaluations processed`; options.emit?.({ event: 'progress', runId: job.id, ...event }); },
@@ -196,10 +208,10 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
       Object.assign(job, finished);
       runRecords.set(job.id, join(runDirectory, 'run.json'));
       options.emit?.({ event: 'workspace-run', ...job });
-    } catch {
-      job.status = 'failed'; job.message = 'Run could not complete. Check study configuration and TypeSafe access, then review and retry.';
+    } catch (error) {
+      job.status = 'failed'; job.message = error instanceof ProviderError ? error.message : 'Run could not complete. Check study configuration and the selected evaluation provider, then review and retry.';
       options.emit?.({ event: 'workspace-run', runId: job.id, status: 'failed' });
-    } finally { activeRun = null; }
+    } finally { try { await provider?.close?.(); } finally { activeProvider = undefined; activeRun = null; } }
   }
 
   async function handle(request: IncomingMessage, response: ServerResponse) {
@@ -273,7 +285,8 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
     }
     if (method === 'GET' && pathname === '/api/workspace') {
       const saved = await store.read(); const runs = ownedRuns(saved.document);
-      send(response, 200, { ...saved, auth: await getAuth(), runs: runs.sort((a,b) => b.createdAt.localeCompare(a.createdAt)), activeRun: runs.find(job => job.id === activeRun?.id) ?? null }); return;
+      const [auth, gliner] = await Promise.all([getAuth(), getGliner()]);
+      send(response, 200, { ...saved, auth, gliner: { ready: gliner.ready, model: gliner.model, message: gliner.message }, runs: runs.sort((a,b) => b.createdAt.localeCompare(a.createdAt)), activeRun: runs.find(job => job.id === activeRun?.id) ?? null }); return;
     }
     if (method === 'GET' && pathname === '/status') { send(response, 200, { status: 'workspace', activeRun: ownedRuns((await store.read()).document).find(job => job.id === activeRun?.id) ?? null, configured: (await getAuth()).configured }); return; }
     if (method === 'GET' && pathname.startsWith('/api/run/')) {
@@ -314,7 +327,7 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
       return;
     }
     if (method === 'POST' && pathname === '/api/plan') {
-      const input = z.object({ pipelineId: safeId, projectId: safeId.optional() }).strict().parse(await body(request));
+      const input = z.object({ pipelineId: safeId, projectId: safeId.optional(), provider: evaluationProvider.default('typesafe') }).strict().parse(await body(request));
       const saved = await store.read();
       let project;
       try { project = workspacePlan(saved.document, input.pipelineId); }
@@ -322,21 +335,28 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
       if (input.projectId && input.projectId !== project.projectId) throw new HttpError(400, 'INVALID_STUDY', 'Pipeline does not belong to the selected project.');
       const planToken = randomBytes(24).toString('hex');
       if (plans.size >= 50) plans.delete(plans.keys().next().value!);
-      plans.set(planToken, { pipelineId: input.pipelineId, revision: saved.revision, expires: Date.now() + 15 * 60_000 });
-      const plan: WorkspacePlan = { projectId: project.projectId, pipelineId: input.pipelineId, revision: saved.revision, planToken, model: MODEL, maxRequests: project.maxRequests, warnings: project.warnings, stages: project.stages };
+      plans.set(planToken, { pipelineId: input.pipelineId, revision: saved.revision, provider: input.provider, expires: Date.now() + 15 * 60_000 });
+      const warnings = [...project.warnings];
+      if (input.provider === 'gliner') warnings.push('GLiNER is a local English classifier. Its normalized label scores are not calibrated human response probabilities; persona simulation quality has not been established. Inputs above 512 combined text and question tokens are rejected.');
+      const plan: WorkspacePlan = { projectId: project.projectId, pipelineId: input.pipelineId, provider: input.provider, revision: saved.revision, planToken, model: input.provider === 'gliner' ? GLINER_MODEL : MODEL, maxRequests: project.maxRequests, warnings, stages: project.stages };
       send(response, 200, plan); return;
     }
     if (method === 'POST' && pathname === '/api/run') {
+      if (closing) throw new HttpError(503, 'WORKSPACE_CLOSING', 'Workspace is closing. Restart it before running a study.');
       const input = runInput.parse(await body(request));
       const saved = await store.read();
       const reviewed = plans.get(input.planToken);
-      if (!reviewed || reviewed.expires < Date.now() || reviewed.pipelineId !== input.pipelineId || reviewed.revision !== input.revision || saved.revision !== input.revision) throw new HttpError(409, 'REVIEW_REQUIRED', 'Study changed or review expired. Review it again before running.');
-      if (!(await getAuth()).configured) throw new HttpError(400, 'CONNECT_REQUIRED', 'Connect your TypeSafe account before running this study.');
+      if (!reviewed || reviewed.expires < Date.now() || reviewed.pipelineId !== input.pipelineId || reviewed.provider !== input.provider || reviewed.revision !== input.revision || saved.revision !== input.revision) throw new HttpError(409, 'REVIEW_REQUIRED', 'Study or provider changed, or review expired. Review it again before running.');
+      if (input.provider === 'typesafe' && !(await getAuth()).configured) throw new HttpError(400, 'CONNECT_REQUIRED', 'Connect your TypeSafe account before running this study.');
+      if (input.provider === 'gliner') {
+        const status = await getGliner();
+        if (!status.ready) throw new HttpError(400, 'GLINER_NOT_READY', status.message ?? 'Set up GLiNER locally before running this study.');
+      }
       // Serialize the final revision check and launch with save commits, not slow authentication.
       const { job, project } = await withWorkspaceMutation(async () => {
         const latest = await store.read();
         const currentReview = plans.get(input.planToken);
-        if (!currentReview || currentReview.expires < Date.now() || currentReview.pipelineId !== input.pipelineId || currentReview.revision !== input.revision || latest.revision !== input.revision) {
+        if (!currentReview || currentReview.expires < Date.now() || currentReview.pipelineId !== input.pipelineId || currentReview.provider !== input.provider || currentReview.revision !== input.revision || latest.revision !== input.revision) {
           throw new HttpError(409, 'REVIEW_REQUIRED', 'Study changed or review expired. Review it again before running.');
         }
         const project = workspacePlan(latest.document, input.pipelineId);
@@ -345,11 +365,11 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
         if (activeRun) throw new HttpError(409, 'RUN_IN_PROGRESS', 'A study is already running. Wait for it to finish.');
         // No await between consuming the review and taking the execution lock.
         if (!plans.delete(input.planToken)) throw new HttpError(409, 'REVIEW_REQUIRED', 'This review was already used. Review the study again.');
-        const job: WorkspaceRun = { projectId: project.projectId, id: randomUUID(), pipelineId: project.pipeline.id, pipelineName: project.pipeline.name, status: 'running', createdAt: new Date().toISOString(), message: 'Starting your reviewed study…' };
+        const job: WorkspaceRun = { projectId: project.projectId, provider: input.provider, id: randomUUID(), pipelineId: project.pipeline.id, pipelineName: project.pipeline.name, status: 'running', createdAt: new Date().toISOString(), message: input.provider === 'gliner' ? 'Loading local GLiNER model…' : 'Starting your reviewed study…' };
         jobs.set(job.id, job); activeRun = job;
         return { job, project };
       });
-      send(response, 202, job); void execute(job, project, input); return;
+      send(response, 202, job); execution = execute(job, project, input); void execution.catch(() => undefined); return;
     }
     throw new HttpError(404, 'NOT_FOUND', 'Page was not found.');
   }
@@ -373,6 +393,9 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
     });
   });
   return { url: origin + '/', close: () => closePromise ??= (async () => {
+    closing = true;
+    await activeProvider?.close?.();
+    await execution?.catch(() => undefined);
     await localAgents.close();
     await chatgpt.close();
     await new Promise<void>((resolveClose, reject) => server.close(error => error ? reject(error) : resolveClose()));

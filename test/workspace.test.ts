@@ -22,6 +22,40 @@ const document: WorkspaceDocument = {
   ] }],
 };
 
+test('local GLiNER runs need no TypeSafe account and cannot replace the reviewed provider', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'jev-gliner-workspace-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  let ready = false; let closed = 0; const chosen: string[] = [];
+  const server = await startWorkspaceServer({ directory,
+    getAuthStatus: async () => ({ configured: false, source: 'none' }),
+    getGlinerStatus: async () => ({ ready, model: 'fastino/GLiNER2.5-Decide', message: 'Setup required' }),
+    // A transport-only fixture proves routing/lifecycle; real model inference has a separate smoke check.
+    providerFactory: name => { chosen.push(name); return { ...createProvider('mock'), close: async () => { closed++; } }; },
+  });
+  t.after(() => server.close());
+  const html = await (await fetch(server.url)).text();
+  const csrf = html.match(/<meta name="jev-csrf" content="([a-f0-9]+)"/)![1];
+  const post = (path: string, value: unknown) => fetch(new URL(path, server.url), { method: 'POST', headers: { origin: new URL(server.url).origin, 'content-type': 'application/json', 'x-jev-csrf': csrf }, body: JSON.stringify(value) });
+  assert.equal((await post('/api/workspace', { document, revision: 0 })).status, 200);
+  const plan = await (await post('/api/plan', { pipelineId: 'study', provider: 'gliner' })).json();
+  assert.equal(plan.provider, 'gliner'); assert.equal(plan.model, 'fastino/GLiNER2.5-Decide');
+  assert.match(plan.warnings.join(' '), /not calibrated/);
+  const input = { pipelineId: 'study', provider: 'gliner', revision: plan.revision, planToken: plan.planToken, seed: 'test', concurrency: 1, maxRequests: 1 };
+  assert.equal((await post('/api/run', { ...input, provider: 'typesafe' })).status, 409);
+  const unavailable = await post('/api/run', input); assert.equal(unavailable.status, 400);
+  assert.equal((await unavailable.json()).error.code, 'GLINER_NOT_READY'); assert.deepEqual(chosen, []);
+  ready = true;
+  const accepted = await post('/api/run', input); assert.equal(accepted.status, 202);
+  let job = await accepted.json() as WorkspaceRun;
+  for (let i = 0; i < 100 && job.status === 'running'; i++) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+    job = await (await fetch(new URL(`/api/run/${job.id}`, server.url))).json() as WorkspaceRun;
+  }
+  assert.equal(job.status, 'completed'); assert.equal(job.provider, 'gliner');
+  assert.deepEqual(chosen, ['gliner']); assert.equal(closed, 1);
+  assert.equal((await post('/api/run', input)).status, 409);
+});
+
 test('workspace never runs on connect/save/review and requires a fresh explicit run request', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'jev-workspace-http-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
