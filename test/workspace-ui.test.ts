@@ -933,3 +933,18 @@ test('submitting segment metadata preserves untouched raw weights and skips subm
   assert.equal(S.segmentId, 'general');
   assert.equal(activeFormSubmits, 0);
 });
+
+test('invalid active share submission preserves pending segment ID edits for correction', async () => {
+const browser = browserHarness(); await settle(); const {S}=browser.client;
+const c=S.doc.cohorts[0];c.segments=[{id:'general',label:'General',description:'',weight:1,weightBasis:'assumed',sourceIds:[]},{id:'other',label:'Other',description:'',weight:1,weightBasis:'assumed',sourceIds:[]}];S.tab='cohorts';S.cohortId=c.id;S.segmentId='general';S.cohortSection='weights';S.dirty=true;
+const submit=browser.listeners.get('submit')!;
+const shares:any={dataset:{form:'segment-shares'},values:{segmentShare0:'60',segmentShare1:'30'},reportValidity:()=>true};
+const details:any={dataset:{form:'segment',id:'general',weightBasis:'assumed'},values:{segmentId:'renamed',segmentLabel:'General',segmentDescription:'',weightBasis:'assumed'},reportValidity:()=>true,querySelector:()=>({value:'renamed'})};
+for(const f of [shares,details])f.requestSubmit=()=>submit({target:{closest:()=>f},preventDefault(){}});
+browser.element('app').querySelectorAll=(selector:string)=>selector==='[data-form]'?[shares,details]:selector==='[data-form=segment]'?[details]:[];
+submit({target:{closest:()=>shares},preventDefault(){}});
+assert.match(S.formError,/100/);
+shares.values.segmentShare1='40';submit({target:{closest:()=>shares},preventDefault(){}});
+assert.equal(S.formError,null);
+assert.equal(S.doc.cohorts[0].segments[0].weight,.6);
+});
