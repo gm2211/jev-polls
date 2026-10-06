@@ -82,21 +82,48 @@ async function openWorkspace(file: string | undefined, opts: { directory?: strin
     const store = new WorkspaceStore(directory);
     const saved = await store.read();
     const draft = structuredClone(saved.document);
-    for (const cohort of Object.values(project.cohorts)) {
-      const existing = draft.cohorts.find(c => c.id === cohort.id);
-      if (existing && hashValue(existing) !== hashValue(cohort)) throw new Error(`Cohort ${cohort.id} already exists with different content. Import under a new id to preserve it.`);
-      if (!existing) draft.cohorts.push(cohort);
-    }
     const pipeline = { ...project.pipeline, cohorts: Object.fromEntries(Object.entries(project.cohorts).map(([alias, cohort]) => [alias, cohort.id])) };
     const existing = draft.pipelines.find(p => p.id === pipeline.id);
-    if (existing && hashValue(existing) !== hashValue(pipeline)) throw new Error(`Study ${pipeline.id} already exists with different content. Import under a new id to preserve it.`);
-    if (!existing) draft.pipelines.push(pipeline);
-    await store.save(draft, saved.revision);
+    if (existing) {
+      // Reimport is idempotent even when this project's cohorts were cloned on first import.
+      const sameCohorts = Object.keys(project.cohorts).length === Object.keys(existing.cohorts).length && Object.entries(project.cohorts).every(([alias, cohort]) => {
+        const savedCohort = draft.cohorts.find(c => c.id === existing.cohorts[alias]);
+        return savedCohort && hashValue(savedCohort) === hashValue({ ...cohort, id: savedCohort.id });
+      });
+      if (!sameCohorts || hashValue(existing) !== hashValue({ ...pipeline, cohorts: existing.cohorts })) {
+        throw new Error(`Study ${pipeline.id} already exists with different content. Import under a new id to preserve it.`);
+      }
+    } else {
+      const freshId = (base: string, used: Set<string>) => {
+        let candidate = base.slice(0, 160), suffix = 2;
+        while (used.has(candidate)) {
+          const tail = `-${suffix++}`;
+          candidate = `${base.slice(0, 160 - tail.length)}${tail}`;
+        }
+        used.add(candidate); return candidate;
+      };
+      const used = new Set(draft.cohorts.map(c => c.id));
+      const imported = new Map<string, { id: string; hash: string }>();
+      for (const [alias, cohort] of Object.entries(project.cohorts)) {
+        let copy = imported.get(cohort.id);
+        if (copy && copy.hash !== hashValue(cohort)) throw new Error(`Imported cohort ${cohort.id} has conflicting content across aliases.`);
+        if (!copy) {
+          copy = { id: freshId(cohort.id, used), hash: hashValue(cohort) };
+          imported.set(cohort.id, copy); draft.cohorts.push({ ...cohort, id: copy.id });
+        }
+        pipeline.cohorts[alias] = copy.id;
+      }
+      const projects = draft.projects ?? [];
+      projects.push({ id: freshId(`project-${pipeline.id}`, new Set(projects.map(p => p.id))), name: pipeline.name, description: pipeline.description, cohortIds: [...imported.values()].map(c => c.id), pipelineIds: [pipeline.id] });
+      draft.projects = projects;
+      draft.pipelines.push(pipeline);
+      await store.save(draft, saved.revision);
+    }
   }
   const workspace = await startWorkspaceServer({ directory, port: opts.port, legacyRunsDirectory: resolve('.jev-polls/runs'), emit: event => process.stderr.write(JSON.stringify(event) + '\n') });
-  output({ status: 'workspace-ready', url: workspace.url, directory, note: 'Create cohorts and a pipeline, then review before choosing Run study. Opening the workspace or connecting an account never runs a study.' });
   const shutdown = () => { void workspace.close().then(() => { process.exitCode = 0; }); };
   process.once('SIGINT', shutdown); process.once('SIGTERM', shutdown);
+  output({ status: 'workspace-ready', url: workspace.url, directory, note: 'Create or open a project, add its cohorts and pipeline, then review before choosing Run study. Opening the workspace or connecting an account never runs a study.' });
 }
 program.command('workspace').option('--directory <directory>', 'Saved workspace directory').option('--port <port>', 'Local workspace port', integer)
   .description('Open the cohort builder, visual pipeline editor, and run history').action(opts => openWorkspace(undefined, opts));

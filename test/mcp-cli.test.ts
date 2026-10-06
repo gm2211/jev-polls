@@ -36,7 +36,7 @@ test('an agent connects through the CLI stdio protocol without triggering infere
   assert.equal(result.isError, undefined);
   const content = result.content as Array<{ type: string; text: string }>;
   const snapshot = JSON.parse(content.find(item => item.type === 'text')!.text);
-  assert.deepEqual(snapshot.document, { version: 1, cohorts: [], pipelines: [] });
+  assert.deepEqual(snapshot.document, { version: 1, cohorts: [], pipelines: [], projects: [] });
   assert.equal(snapshot.activeRun, null);
   assert.equal(snapshot.auth.configured, false);
   assert.equal(stderr, '');

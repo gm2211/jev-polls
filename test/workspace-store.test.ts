@@ -48,11 +48,11 @@ async function temporaryDirectory(): Promise<string> { return mkdtemp(join(tmpdi
 test('reads empty defaults and atomically saves revisioned JSON', async (t) => {
   const directory = await temporaryDirectory(); t.after(() => rm(directory, { recursive: true, force: true }));
   const store = new WorkspaceStore(directory);
-  assert.deepEqual(await store.read(), { revision: 0, document: { version: 1, cohorts: [], pipelines: [] } });
+  assert.deepEqual(await store.read(), { revision: 0, document: { version: 1, cohorts: [], pipelines: [], projects: [] } });
   const document = documentWith();
   document.cohorts[0]!.generationPrompt = 'Adults who recently chose a meal kit';
-  assert.deepEqual(await store.save(document, 0), { revision: 1, document });
-  assert.deepEqual(await store.read(), { revision: 1, document });
+  assert.deepEqual(await store.save(document, 0), { revision: 1, document: validateWorkspaceDocument(document) });
+  assert.deepEqual(await store.read(), { revision: 1, document: validateWorkspaceDocument(document) });
 });
 
 test('serializes competing saves and rejects a stale expected revision', async (t) => {
@@ -192,4 +192,53 @@ test('a valid pipeline is not blocked by an unrelated incomplete cohort draft', 
   const resolved = resolveWorkspaceProject(doc, 'study');
   assert.deepEqual(Object.keys(resolved.cohorts), ['panel']);
   assert.equal(workspacePlan(doc, 'study').maxRequests, 6);
+});
+
+
+test('legacy migration is deterministic, preserves drafts, and does not rewrite on read', async t => {
+  const directory = await temporaryDirectory(); t.after(() => rm(directory, { recursive: true, force: true }));
+  const legacy = documentWith();
+  legacy.pipelines.push(pipeline({ id: 'second-study', cohorts: { panel: 'not-yet-created' } }));
+  const original = JSON.stringify({ revision: 7, document: legacy });
+  await writeFile(join(directory, 'workspace.json'), original);
+  const store = new WorkspaceStore(directory);
+  const saved = await store.read();
+  assert.equal(saved.revision, 7);
+  assert.deepEqual(saved.document.projects, [{ id: 'existing-research', name: 'Existing research', description: '', cohortIds: ['people'], pipelineIds: ['study', 'second-study'] }]);
+  assert.deepEqual(saved.document.cohorts, legacy.cohorts);
+  assert.deepEqual(saved.document.pipelines, legacy.pipelines);
+  assert.deepEqual(await store.read(), saved);
+  assert.equal(await readFile(join(directory, 'workspace.json'), 'utf8'), original);
+  assert.throws(() => workspacePlan(saved.document, 'second-study'), /missing cohort id/);
+  assert.equal((await store.save(saved.document, 7)).revision, 8);
+});
+
+test('projects own every entity exactly once and enforce pipeline boundaries at save and plan', () => {
+  const doc = documentWith();
+  doc.cohorts.push({ ...cohort(), id: 'other-people' });
+  doc.projects = [
+    { id: 'first-project', name: 'First', description: '', cohortIds: ['people'], pipelineIds: ['study'] },
+    { id: 'second-project', name: 'Second', description: '', cohortIds: ['other-people'], pipelineIds: [] },
+  ];
+  assert.equal(workspacePlan(doc, 'study').projectId, 'first-project');
+  const crossProject = structuredClone(doc); crossProject.pipelines[0]!.cohorts.panel = 'other-people';
+  assert.throws(() => validateWorkspaceDocument(crossProject), /another project/);
+  assert.throws(() => workspacePlan(crossProject, 'study'), /another project/);
+  for (const mutate of [
+    (d: WorkspaceDocument) => { d.projects![0]!.cohortIds = []; },
+    (d: WorkspaceDocument) => { d.projects![1]!.cohortIds.push('people'); },
+    (d: WorkspaceDocument) => { d.projects![0]!.pipelineIds.push('study'); },
+  ]) {
+    const invalid = structuredClone(doc); mutate(invalid);
+    assert.throws(() => validateWorkspaceDocument(invalid), /exactly one project/);
+  }
+  const missing = structuredClone(doc); missing.projects![0]!.cohortIds.push('ghost');
+  assert.throws(() => validateWorkspaceDocument(missing), /missing cohort/);
+  const duplicate = structuredClone(doc); duplicate.projects![1]!.id = 'first-project';
+  assert.throws(() => validateWorkspaceDocument(duplicate), /duplicate project/);
+  assert.throws(() => validateWorkspaceDocument({ ...doc, projects: null }), /must be an array/);
+  assert.throws(() => validateWorkspaceDocument({ ...doc, projects: [] }), /exactly one project/);
+  const unfinished = structuredClone(doc); unfinished.pipelines[0]!.cohorts.panel = '';
+  assert.equal(validateWorkspaceDocument(unfinished).projects!.length, 2);
+  assert.throws(() => workspacePlan(unfinished, 'study'));
 });
