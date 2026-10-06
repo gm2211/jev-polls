@@ -813,6 +813,34 @@ test('failed project creation exposes the inserted draft and Save changes for re
   assert.equal(browser.bodies.filter(r => r.path === '/api/workspace').length, 1);
 });
 
+test('run navigation requires recorded project ownership and opens reports without replacing the draft', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, projectRuns, projects, render, cohortGenerator, aiSettingsContent } = browser.client;
+  S.snap.runs = [
+    { id: 'owned', projectId: 'existing-research', pipelineId: 'study', pipelineName: 'Owned run', createdAt: '2026-10-06', status: 'completed', message: 'Complete', reportUrl: '/reports/owned' },
+    { id: 'legacy', pipelineId: 'study', pipelineName: 'Legacy run' },
+    { id: 'other', projectId: 'another-project', pipelineId: 'study', pipelineName: 'Other run' },
+  ];
+  assert.deepEqual(Array.from(projectRuns(), (r: any) => r.id), ['owned']);
+  assert.deepEqual(Array.from(projectRuns('missing-project')), []);
+  assert.doesNotMatch(projects(), /Earlier runs|Legacy run|Other run/);
+  S.tab = 'runs'; S.dirty = true;
+  const before = JSON.stringify(S.doc);
+  render();
+  assert.match(browser.element('app').innerHTML, /href="[^"]*\/reports\/owned" target="_blank" rel="noopener noreferrer"/);
+  assert.equal(S.dirty, true);
+  assert.equal(JSON.stringify(S.doc), before);
+  S.localEngine = 'chatgpt';
+  S.chatgpt = { connected: true, planEnabled: true, account: { id: 'account', label: 'Test account' } };
+  const settings = aiSettingsContent();
+  assert.match(settings, /data-act="chatgpt-disconnect"/);
+  const generator = cohortGenerator();
+  assert.match(generator, /data-act="manual-cohort"/);
+  for (const html of [settings, generator]) {
+    for (const details of html.matchAll(/<details\b[^>]*>([\s\S]*?)<\/details>/g)) assert.doesNotMatch(details[1]!, /<(?:button|input|select|a)\b/);
+  }
+});
+
 test('manual cohort creation and deletion update only selected project membership', async () => {
   const browser = browserHarness(); await settle();
   const { S, act, deleteCohortFromDraft } = browser.client;
@@ -1195,7 +1223,8 @@ test('weights show compact shares and only the selected segment details editor',
   assert.equal((html.match(/data-form="segment"/g) ?? []).length, 1);
   assert.match(html, /Other audience details/);
   assert.doesNotMatch(html, /name="segmentWeight"/);
-  assert.match(html, /<details[\s\S]*name="segmentId"/);
+  assert.match(html, /name="segmentId"/);
+  for (const details of html.matchAll(/<details\b[^>]*>([\s\S]*?)<\/details>/g)) assert.doesNotMatch(details[1]!, /<(?:button|input|select)\b/);
   act(null, { dataset: { act: 'close-segment' } });
   assert.doesNotMatch(browser.element('app').innerHTML, /data-form="segment"/);
 });

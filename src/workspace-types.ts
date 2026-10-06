@@ -6,7 +6,7 @@ export interface WorkspaceProject { id: string; name: string; description: strin
 export interface WorkspaceDocument { version: 1; cohorts: Cohort[]; pipelines: Pipeline[]; projects?: WorkspaceProject[] }
 export interface WorkspaceSaved { revision: number; document: WorkspaceDocument }
 export interface WorkspaceRun {
-  id: string; projectId?: string; pipelineId: string; pipelineName: string; status: 'running' | 'completed' | 'failed';
+  id: string; projectId: string; pipelineId: string; pipelineName: string; status: 'running' | 'completed' | 'failed';
   createdAt: string; message: string; progress?: { stage: string; completed: number; total: number };
   usage?: Usage; reportUrl?: string;
 }

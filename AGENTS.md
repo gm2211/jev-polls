@@ -30,3 +30,6 @@ Prefer focused tabs and pagination over long pages or stacked editors. Keep
 navigation, save actions, and page controls easy to reach. Preserve unsaved fields
 when switching sections or pages; retain natural overflow for zoom, narrow
 screens, and unusually long content rather than clipping controls.
+
+Keep buttons and editable controls outside collapsible disclosures. Use visible
+actions or focused tabs; reserve disclosures for explanatory text.

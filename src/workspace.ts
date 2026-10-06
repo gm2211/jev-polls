@@ -2,7 +2,7 @@ import { MAX_COHORT_PERSONAS } from './limits.js';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
-import { dirname, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { z } from 'zod';
 import { authStatus, setApiKey } from './auth.js';
 import { verifyTypeSafeConnection } from './auth-check.js';
@@ -18,14 +18,14 @@ import { LocalAgentError, LocalAgentService } from './local-agent.js';
 import { ChatGptConnection, chatGptMessage, createDraftClient, type ChatGptDraftClient } from './chatgpt.js';
 import type { Provider } from './types.js';
 import type { AuthStatus } from './auth.js';
-import type { WorkspaceRun, WorkspacePlan } from './workspace-types.js';
+import type { WorkspaceDocument, WorkspaceRun, WorkspacePlan } from './workspace-types.js';
 
 const MODEL = 'jev-1.13.0';
 const WORKSPACE_RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const safeId = z.string().regex(/^[a-z][a-z0-9_-]*$/).max(160);
 const runInput = z.object({ pipelineId: safeId, projectId: safeId.optional(), revision: z.number().int().nonnegative(), planToken: z.string(), seed: z.string().min(1).max(200), concurrency: z.number().int().min(1).max(16), maxRequests: z.number().int().min(1).max(100_000) }).strict();
 const savedJobSchema = z.object({
-  id: z.string().regex(WORKSPACE_RUN_ID), projectId: safeId.optional(), pipelineId: safeId, pipelineName: z.string().max(100_000),
+  id: z.string().regex(WORKSPACE_RUN_ID), projectId: safeId, pipelineId: safeId, pipelineName: z.string().max(100_000),
   status: z.enum(['running', 'completed', 'failed']), createdAt: z.string().max(100), message: z.string().max(100_000),
   progress: z.object({ stage: safeId, completed: z.number().int().nonnegative(), total: z.number().int().nonnegative() }).strict().optional(),
   usage: z.object({ inputTokens: z.number().finite().nonnegative(), outputTokens: z.number().finite().nonnegative(), requests: z.number().int().nonnegative(), cacheHits: z.number().int().nonnegative() }).strict().optional(),
@@ -41,7 +41,6 @@ export interface WorkspaceServerOptions {
   directory: string;
   chatgpt?: ChatGptDraftClient;
   port?: number;
-  legacyRunsDirectory?: string;
   getAuthStatus?: () => Promise<AuthStatus>;
   connectAccount?: (key: string) => Promise<unknown>;
   providerFactory?: () => Provider;
@@ -62,60 +61,89 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
   const getAuth = options.getAuthStatus ?? authStatus;
   const connectAccount = options.connectAccount ?? (async (key: string) => { const result = await verifyTypeSafeConnection(key); await setApiKey(key); return result; });
   const jobs = new Map<string, WorkspaceRun>();
-  const reports = new Map<string, string>();
+  const runRecords = new Map<string, string>();
   const plans = new Map<string, { pipelineId: string; revision: number; expires: number }>();
   let activeRun: WorkspaceRun | null = null;
   let authenticating = false;
   let origin = '';
   let expectedHost = '';
   let closePromise: Promise<void> | undefined;
+  let mutationTail = Promise.resolve();
 
-  async function discoverRuns(parent: string, workspace: boolean) {
+  function withWorkspaceMutation<T>(action: () => Promise<T>): Promise<T> {
+    const result = mutationTail.then(action);
+    mutationTail = result.then(() => undefined, () => undefined);
+    return result;
+  }
+  function saveWorkspace(document: unknown, revision: number) {
+    return withWorkspaceMutation(async () => {
+      const validated = validateWorkspaceDocument(document);
+      if (activeRun && !validated.projects?.some(project => project.id === activeRun!.projectId)) {
+        throw new HttpError(409, 'PROJECT_RUN_IN_PROGRESS', 'Wait for the active study to finish before deleting its project.');
+      }
+      const saved = await store.save(validated, revision);
+      plans.clear();
+      return saved;
+    });
+  }
+
+  const initialDocument = (await store.read()).document;
+  const existingProjects = new Set(initialDocument.projects?.map(project => project.id));
+  async function discoverRuns(parent: string) {
     let entries;
     try { entries = await readdir(parent, { withFileTypes: true }); } catch { return; }
     for (const entry of entries.filter(e => e.isDirectory()).slice(-200)) {
-      if (workspace && !WORKSPACE_RUN_ID.test(entry.name)) continue;
-      const id = workspace ? entry.name : undefined;
+      if (!WORKSPACE_RUN_ID.test(entry.name)) continue;
+      const id = entry.name;
       const path = join(parent, entry.name);
       try {
         const record = await loadRun(join(path, 'run.json'));
-        const stableId = id ?? record.id;
         const message = record.status === 'completed' ? 'Study complete.' : 'Study ended with failures. Inspect the report before interpreting results.';
         let persistedProgress: WorkspaceRun['progress'];
         let persistedProjectId: string | undefined;
-        if (workspace) {
-          try {
-            const parsed = savedJobSchema.parse(JSON.parse(await readFile(join(path, 'job.json'), 'utf8')));
-            if (parsed.id === stableId && parsed.pipelineId === record.pipeline.id && parsed.status === record.status) {
-              persistedProgress = parsed.progress; persistedProjectId = parsed.projectId;
-            }
-          } catch { /* The run record remains authoritative if optional job metadata is absent or damaged. */ }
-          if (!persistedProjectId) {
-            try {
-              const pending = savedJobSchema.parse(JSON.parse(await readFile(join(path, 'pending.json'), 'utf8')));
-              if (pending.id === stableId && pending.pipelineId === record.pipeline.id && pending.status === 'running') persistedProjectId = pending.projectId;
-            } catch { /* Legacy records can have no ownership metadata. */ }
+        try {
+          const parsed = savedJobSchema.parse(JSON.parse(await readFile(join(path, 'job.json'), 'utf8')));
+          if (parsed.id === id && parsed.pipelineId === record.pipeline.id && parsed.status === record.status) {
+            persistedProgress = parsed.progress; persistedProjectId = parsed.projectId;
           }
+        } catch { /* A persisted launch record can recover missing completion metadata. */ }
+        if (!persistedProjectId) {
+          try {
+            const pending = savedJobSchema.parse(JSON.parse(await readFile(join(path, 'pending.json'), 'utf8')));
+            if (pending.id === id && pending.pipelineId === record.pipeline.id && pending.status === 'running') persistedProjectId = pending.projectId;
+          } catch { /* Ownerless artifacts are not workspace runs. */ }
         }
-        const summary: WorkspaceRun = { ...(persistedProjectId ? { projectId: persistedProjectId } : {}), id: stableId, pipelineId: record.pipeline.id, pipelineName: record.pipeline.name, status: record.status, createdAt: record.createdAt, message, usage: record.usage, reportUrl: `/reports/${stableId}`, ...(persistedProgress ? { progress: persistedProgress } : {}) };
-        jobs.set(summary.id, summary); reports.set(summary.id, join(path, 'report.html'));
+        if (!persistedProjectId || !existingProjects.has(persistedProjectId)) continue;
+        const summary: WorkspaceRun = { projectId: persistedProjectId, id, pipelineId: record.pipeline.id, pipelineName: record.pipeline.name, status: record.status, createdAt: record.createdAt, message, usage: record.usage, reportUrl: `/reports/${id}`, ...(persistedProgress ? { progress: persistedProgress } : {}) };
+        jobs.set(summary.id, summary); runRecords.set(summary.id, join(path, 'run.json'));
       } catch {
-        if (!workspace) continue;
         try {
           const pending = savedJobSchema.parse(JSON.parse(await readFile(join(path, 'pending.json'), 'utf8')));
-          if (pending.id !== id || pending.status !== 'running') continue;
-          jobs.set(id!, { ...pending, id: id!, status: 'failed', message: 'Server stopped before this run finished. Review and run again to reuse completed cached responses.', reportUrl: undefined });
+          if (pending.id !== id || pending.status !== 'running' || !existingProjects.has(pending.projectId)) continue;
+          jobs.set(id, { ...pending, status: 'failed', message: 'Server stopped before this run finished. Review and run again to reuse completed cached responses.', reportUrl: undefined });
         } catch { /* An incomplete/corrupt artifact is not presented as a completed run. */ }
       }
     }
   }
-  await discoverRuns(join(directory, 'runs'), true);
-  if (options.legacyRunsDirectory) await discoverRuns(resolve(options.legacyRunsDirectory), false);
-  const initialDocument = (await store.read()).document;
-  for (const job of jobs.values()) {
-    if (job.projectId) continue; // Recorded ownership survives later pipeline moves/deletion.
-    const owner = initialDocument.projects?.find(project => project.pipelineIds.includes(job.pipelineId));
-    if (owner) job.projectId = owner.id;
+  await discoverRuns(join(directory, 'runs'));
+
+  function ownedRuns(document: WorkspaceDocument): WorkspaceRun[] {
+    const projectIds = new Set(document.projects?.map(project => project.id));
+    return [...jobs.values()].filter(job => projectIds.has(job.projectId));
+  }
+  async function ownedRun(id: string): Promise<WorkspaceRun> {
+    const job = ownedRuns((await store.read()).document).find(item => item.id === id);
+    if (!job) throw new HttpError(404, 'RUN_NOT_FOUND', 'Run was not found in an existing project.');
+    return job;
+  }
+  async function savedRunRecord(job: WorkspaceRun) {
+    const path = runRecords.get(job.id);
+    if (!path) throw new HttpError(409, 'RUN_NOT_READY', 'A saved run record is not available yet.');
+    try {
+      const record = await loadRun(path);
+      if (record.pipeline.id !== job.pipelineId) throw Error();
+      return record;
+    } catch { throw new HttpError(404, 'RUN_RECORD_UNAVAILABLE', 'The saved run record is missing or invalid. Run the study again to create a report.'); }
   }
 
   function headers(response: ServerResponse, report = false) {
@@ -154,8 +182,9 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
         cacheDir: join(directory, 'cache'),
         onProgress: event => { job.progress = event; job.message = `${event.stage}: ${event.completed} of ${event.total} evaluations processed`; options.emit?.({ event: 'progress', runId: job.id, ...event }); },
       });
-      await writeText(join(runDirectory, 'report.html'), renderReport(record));
       await writeJson(join(runDirectory, 'run.json'), record);
+      // The validated record is authoritative; HTML is a rebuildable export.
+      try { await writeText(join(runDirectory, 'report.html'), renderReport(record)); } catch { /* The report route renders from run.json. */ }
       const finished: WorkspaceRun = {
         ...job,
         status: record.status,
@@ -163,9 +192,9 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
         message: record.status === 'completed' ? 'Study complete.' : 'Study ended with failures. Inspect the report before interpreting results.',
         reportUrl: `/reports/${job.id}`,
       };
-      try { await writeJson(join(runDirectory, 'job.json'), finished); } catch { /* run.json and report.html remain the authoritative artifacts */ }
+      try { await writeJson(join(runDirectory, 'job.json'), finished); } catch { /* pending.json retains explicit launch ownership. */ }
       Object.assign(job, finished);
-      reports.set(job.id, join(runDirectory, 'report.html'));
+      runRecords.set(job.id, join(runDirectory, 'run.json'));
       options.emit?.({ event: 'workspace-run', ...job });
     } catch {
       job.status = 'failed'; job.message = 'Run could not complete. Check study configuration and TypeSafe access, then review and retry.';
@@ -238,34 +267,29 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
         const input = z.object({ revision: z.number().int().nonnegative().safe() }).strict().parse(await body(request));
         if (job.status !== 'completed' || !job.proposal) throw new HttpError(409, 'AGENT_PROPOSAL_NOT_READY', 'A completed proposal is required before applying changes.');
         if (input.revision !== job.revision) throw new WorkspaceConflictError(job.revision, input.revision);
-        const saved = await store.save(job.proposal.document, input.revision);
-        plans.clear(); send(response, 200, saved); return;
+        const saved = await saveWorkspace(job.proposal.document, input.revision);
+        send(response, 200, saved); return;
       }
     }
     if (method === 'GET' && pathname === '/api/workspace') {
-      send(response, 200, { ...await store.read(), auth: await getAuth(), runs: [...jobs.values()].sort((a,b) => b.createdAt.localeCompare(a.createdAt)), activeRun }); return;
+      const saved = await store.read(); const runs = ownedRuns(saved.document);
+      send(response, 200, { ...saved, auth: await getAuth(), runs: runs.sort((a,b) => b.createdAt.localeCompare(a.createdAt)), activeRun: runs.find(job => job.id === activeRun?.id) ?? null }); return;
     }
-    if (method === 'GET' && pathname === '/status') { send(response, 200, { status: 'workspace', activeRun, configured: (await getAuth()).configured }); return; }
+    if (method === 'GET' && pathname === '/status') { send(response, 200, { status: 'workspace', activeRun: ownedRuns((await store.read()).document).find(job => job.id === activeRun?.id) ?? null, configured: (await getAuth()).configured }); return; }
     if (method === 'GET' && pathname.startsWith('/api/run/')) {
       const key = pathname.slice('/api/run/'.length);
       if (key.endsWith('/record')) {
         const id = key.slice(0, -'/record'.length);
-        if (!jobs.has(id)) throw new HttpError(404, 'RUN_NOT_FOUND', 'Run was not found.');
-        const reportPath = reports.get(id);
-        if (!reportPath) throw new HttpError(409, 'RUN_NOT_READY', 'A saved run record is not available yet.');
-        send(response, 200, await loadRun(join(dirname(reportPath), 'run.json'))); return;
+        send(response, 200, await savedRunRecord(await ownedRun(id))); return;
       }
-      const job = jobs.get(key);
-      if (!job) throw new HttpError(404, 'RUN_NOT_FOUND', 'Run was not found.');
-      send(response, 200, job); return;
+      send(response, 200, await ownedRun(key)); return;
     }
     if (method === 'GET' && pathname.startsWith('/reports/')) {
-      const path = reports.get(pathname.slice('/reports/'.length));
-      if (!path) throw new HttpError(404, 'REPORT_NOT_FOUND', 'Report is not available yet.');
-      send(response, 200, await readFile(path, 'utf8'), true, true); return;
+      const job = await ownedRun(pathname.slice('/reports/'.length));
+      send(response, 200, renderReport(await savedRunRecord(job)), true, true); return;
     }
     if (method === 'GET' && pathname === '/report') {
-      const latest = [...jobs.values()].sort((a,b) => b.createdAt.localeCompare(a.createdAt)).find(job => job.reportUrl);
+      const latest = ownedRuns((await store.read()).document).sort((a,b) => b.createdAt.localeCompare(a.createdAt)).find(job => job.reportUrl);
       headers(response); response.writeHead(302, { Location: latest?.reportUrl ?? '/' }); response.end(); return;
     }
     if (method === 'POST' && pathname === '/api/auth') {
@@ -285,8 +309,8 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
     }
     if (method === 'POST' && pathname === '/api/workspace') {
       const input = z.object({ document: z.unknown(), revision: z.number().int().nonnegative() }).strict().parse(await body(request));
-      try { const saved = await store.save(input.document, input.revision); plans.clear(); send(response, 200, saved); }
-      catch (error) { if (error instanceof WorkspaceConflictError) throw error; throw new HttpError(400, 'INVALID_DRAFT', validationMessage(error)); }
+      try { const saved = await saveWorkspace(input.document, input.revision); send(response, 200, saved); }
+      catch (error) { if (error instanceof WorkspaceConflictError || error instanceof HttpError) throw error; throw new HttpError(400, 'INVALID_DRAFT', validationMessage(error)); }
       return;
     }
     if (method === 'POST' && pathname === '/api/plan') {
@@ -308,19 +332,23 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
       const reviewed = plans.get(input.planToken);
       if (!reviewed || reviewed.expires < Date.now() || reviewed.pipelineId !== input.pipelineId || reviewed.revision !== input.revision || saved.revision !== input.revision) throw new HttpError(409, 'REVIEW_REQUIRED', 'Study changed or review expired. Review it again before running.');
       if (!(await getAuth()).configured) throw new HttpError(400, 'CONNECT_REQUIRED', 'Connect your TypeSafe account before running this study.');
-      const latest = await store.read();
-      const currentReview = plans.get(input.planToken);
-      if (!currentReview || currentReview.expires < Date.now() || currentReview.pipelineId !== input.pipelineId || currentReview.revision !== input.revision || latest.revision !== input.revision) {
-        throw new HttpError(409, 'REVIEW_REQUIRED', 'Study changed or review expired. Review it again before running.');
-      }
-      const project = workspacePlan(latest.document, input.pipelineId);
-      if (input.projectId && input.projectId !== project.projectId) throw new HttpError(400, 'INVALID_STUDY', 'Pipeline does not belong to the selected project.');
-      if (input.maxRequests < project.maxRequests) throw new HttpError(400, 'BUDGET_TOO_SMALL', 'Request budget must cover the reviewed upper bound. Reduce sample sizes or repeats first.');
-      if (activeRun) throw new HttpError(409, 'RUN_IN_PROGRESS', 'A study is already running. Wait for it to finish.');
-      // No await between consuming the review and taking the execution lock.
-      if (!plans.delete(input.planToken)) throw new HttpError(409, 'REVIEW_REQUIRED', 'This review was already used. Review the study again.');
-      const job: WorkspaceRun = { projectId: project.projectId, id: randomUUID(), pipelineId: project.pipeline.id, pipelineName: project.pipeline.name, status: 'running', createdAt: new Date().toISOString(), message: 'Starting your reviewed study…' };
-      jobs.set(job.id, job); activeRun = job;
+      // Serialize the final revision check and launch with save commits, not slow authentication.
+      const { job, project } = await withWorkspaceMutation(async () => {
+        const latest = await store.read();
+        const currentReview = plans.get(input.planToken);
+        if (!currentReview || currentReview.expires < Date.now() || currentReview.pipelineId !== input.pipelineId || currentReview.revision !== input.revision || latest.revision !== input.revision) {
+          throw new HttpError(409, 'REVIEW_REQUIRED', 'Study changed or review expired. Review it again before running.');
+        }
+        const project = workspacePlan(latest.document, input.pipelineId);
+        if (input.projectId && input.projectId !== project.projectId) throw new HttpError(400, 'INVALID_STUDY', 'Pipeline does not belong to the selected project.');
+        if (input.maxRequests < project.maxRequests) throw new HttpError(400, 'BUDGET_TOO_SMALL', 'Request budget must cover the reviewed upper bound. Reduce sample sizes or repeats first.');
+        if (activeRun) throw new HttpError(409, 'RUN_IN_PROGRESS', 'A study is already running. Wait for it to finish.');
+        // No await between consuming the review and taking the execution lock.
+        if (!plans.delete(input.planToken)) throw new HttpError(409, 'REVIEW_REQUIRED', 'This review was already used. Review the study again.');
+        const job: WorkspaceRun = { projectId: project.projectId, id: randomUUID(), pipelineId: project.pipeline.id, pipelineName: project.pipeline.name, status: 'running', createdAt: new Date().toISOString(), message: 'Starting your reviewed study…' };
+        jobs.set(job.id, job); activeRun = job;
+        return { job, project };
+      });
       send(response, 202, job); void execute(job, project, input); return;
     }
     throw new HttpError(404, 'NOT_FOUND', 'Page was not found.');

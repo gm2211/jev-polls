@@ -269,6 +269,11 @@ test('workspace opens empty without running; connect imports a pipeline for edit
   const temp = await mkdtemp(join(tmpdir(), 'jev-polls-workspace-cli-'));
   t.after(async () => rm(temp, { recursive: true, force: true }));
 
+  const standaloneDirectory = join(temp, '.jev-polls', 'runs', 'legacy-standalone');
+  const standalone = invoke(['run', join(fixture, 'pipeline.json'), '--provider', 'mock', '--out', standaloneDirectory, '--cache', join(temp, 'standalone-cache')], root);
+  assert.equal(standalone.status, 0, standalone.stderr);
+  assert.equal(parseRun(JSON.parse(await readFile(join(standaloneDirectory, 'run.json'), 'utf8'))).status, 'completed');
+
   const emptyDirectory = join(temp, 'empty-workspace');
   const initialized = invoke(['init', emptyDirectory], root);
   assert.equal(initialized.status, 0, initialized.stderr);
@@ -285,7 +290,7 @@ test('workspace opens empty without running; connect imports a pipeline for edit
   assert.equal(emptyStateResponse.status, 200);
   const emptyState = await emptyStateResponse.json() as { document: { version: number; cohorts: unknown[]; pipelines: unknown[] }; runs: unknown[]; activeRun: unknown };
   assert.deepEqual(emptyState.document, { version: 1, cohorts: [], pipelines: [], projects: [] });
-  assert.deepEqual(emptyState.runs, []);
+  assert.deepEqual(emptyState.runs, [], 'Standalone runs never become workspace history without recorded project ownership');
   assert.equal(emptyState.activeRun, null);
   await delay(100);
   assert.equal(empty.child.exitCode, null, 'workspace remains open for user actions');
@@ -312,7 +317,7 @@ test('workspace opens empty without running; connect imports a pipeline for edit
   assert.equal(saved.document.pipelines[0]?.id, 'game-naming');
   assert.deepEqual(saved.document.pipelines[0]?.cohorts, { players: 'strategy-players', reviewers: 'review-panel' });
   const importedState = await (await fetch(new URL('/api/workspace', imported.initialOutput.url))).json() as { runs: unknown[]; activeRun: unknown };
-  assert.deepEqual(importedState.runs, []);
+  assert.deepEqual(importedState.runs, [], 'Importing the same pipeline must not adopt legacy standalone runs');
   assert.equal(importedState.activeRun, null);
   await delay(100);
   assert.equal(imported.child.exitCode, null);
