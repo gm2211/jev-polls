@@ -7,8 +7,9 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { ChildProcessWithoutNullStreams, SpawnOptionsWithoutStdio } from 'node:child_process';
 import { LocalAgentError, LocalAgentService, type LocalAgentJob, type LocalAgentSpawner } from '../src/local-agent.js';
-import { validateWorkspaceDocument } from '../src/workspace-store.js';
 import type { ChatGptDraftClient } from '../src/chatgpt.js';
+import type { Cohort, DistributionTargetBucket, Persona } from '../src/types.js';
+import { validateWorkspaceDocument } from '../src/workspace-store.js';
 import type { WorkspaceDocument } from '../src/workspace-types.js';
 
 const empty: WorkspaceDocument = { version: 1, cohorts: [], pipelines: [] };
@@ -311,6 +312,175 @@ test('ChatGPT cancellation aborts request and discards partial output', async t 
   assert.equal(aborted, true); assert.equal(service.get(job.id)?.status, 'cancelled'); assert.equal(service.get(job.id)?.proposal, undefined);
 });
 
+
+function personaWorkspace(size = 4): WorkspaceDocument {
+  const document = structuredClone(proposed);
+  const cohort = document.cohorts[0]!;
+  cohort.generationPrompt = 'Saved question-independent audience brief';
+  cohort.personas = Array.from({ length: size }, (_, index) => ({ ...structuredClone(cohort.personas[0]!), id: `saved-${index}`, label: `Saved person ${index}`, attributes: { preserved: index }, background: `Saved background ${index}`, weight: index + 1 }));
+  document.cohorts.push({ ...structuredClone(cohort), id: 'unrelated', name: 'Keep exact cohort' });
+  document.pipelines.push({ version: 1, id: 'study', name: 'Keep exact pipeline', description: '', context: { retained: true }, cohorts: { audience: cohort.id }, stages: [] });
+  return document;
+}
+
+function nativeDraft(generate: (input: string, signal?: AbortSignal) => Promise<string> | string): ChatGptDraftClient {
+  return { status: async () => ({ connected: true, planEnabled: true }), generate: async ({ input, signal }: { input: string; signal?: AbortSignal }) => ({ text: await generate(input, signal) }) } as ChatGptDraftClient;
+}
+const personaRequest = { engine: 'chatgpt' as const, model: 'draft-model', prompt: 'Regenerate this whole synthetic persona', revision: 19, persona: { cohortId: 'customers', personaId: 'saved-1' } };
+
+function requestData(input: string): any { const marker = 'Request data:\n'; return JSON.parse(input.slice(input.lastIndexOf(marker) + marker.length)); }
+
+test('whole-person regeneration replaces only the selected persona and supplies bounded context for large cohorts', async t => {
+  const original = personaWorkspace(800);
+  const replacement: Persona = { ...structuredClone(original.cohorts[0]!.personas[1]!), label: 'New synthetic person', age: 52, background: 'A newly assumed and neutral background', attributes: { work: { schedule: 'evenings' } }, syntheticFields: ['label', 'age', 'background', 'attributes'] };
+  let calls = 0;
+  const service = new LocalAgentService({ chatgpt: nativeDraft(input => {
+    calls++;
+    const context = requestData(input);
+    assert.equal(context.selectedPersona.id, 'saved-1');
+    assert.ok(context.neighboringExamples.length <= 4);
+    assert.equal(context.cohortMetadata.personas, undefined);
+    assert.doesNotMatch(input, /saved-799|Keep exact pipeline|Keep exact cohort/);
+    assert.ok(Buffer.byteLength(input) < 120_000);
+    return JSON.stringify({ documentJson: JSON.stringify(replacement), explanation: 'Replaced this whole synthetic persona with new assumed details.' });
+  }) }); t.after(() => service.close());
+  const job = service.start({ ...personaRequest, document: original });
+  assert.deepEqual(job.persona, personaRequest.persona);
+  const completed = await terminal(service, job);
+  assert.equal(completed.status, 'completed'); assert.equal(completed.revision, 19); assert.equal(calls, 1);
+  const expected = structuredClone(original); expected.cohorts[0]!.personas[1] = replacement;
+  assert.deepEqual(completed.proposal?.document, validateWorkspaceDocument(expected));
+  assert.equal(original.cohorts[0]!.personas[1]!.label, 'Saved person 1');
+});
+
+test('persona regeneration rejects malformed, underage, mismatched and unrelated responses without proposals', async t => {
+  const original = personaWorkspace();
+  const selected = original.cohorts[0]!.personas[1]!;
+  const cases: unknown[] = [null, original, original.cohorts[0], { ...selected, id: 'another' }, { ...selected, segment: 'other' }, { ...selected, weight: 9 }, { ...selected, age: 17 }, { ...selected, age: 122 }, { ...selected, sourceIds: ['invented'] }, { ...selected, cohorts: [] }];
+  for (const candidate of cases) {
+    const service = new LocalAgentService({ chatgpt: nativeDraft(() => JSON.stringify({ documentJson: JSON.stringify(candidate), explanation: 'Replacement proposal' })) });
+    const completed = await terminal(service, service.start({ ...personaRequest, document: original }));
+    assert.equal(completed.status, 'failed', JSON.stringify(candidate)); assert.equal(completed.proposal, undefined);
+    await service.close();
+  }
+  const service = new LocalAgentService({ chatgpt: nativeDraft(() => { throw Error('must not run'); }) }); t.after(() => service.close());
+  assert.throws(() => service.start({ ...personaRequest, document: original, cohort: { id: 'customers', size: 4 } }), /valid cohort metadata/);
+  assert.throws(() => service.start({ ...personaRequest, document: original, persona: { cohortId: 'missing', personaId: 'saved-1' } }), /existing persona/);
+  assert.throws(() => service.start({ ...personaRequest, document: original, persona: { cohortId: 'customers', personaId: 'missing' } }), /existing persona/);
+});
+
+test('persona regeneration accepts existing evidence and rejects provider failure and late cancellation output', async t => {
+  const document = personaWorkspace();
+  document.cohorts[0]!.sources = [{ id: 'existing', title: 'Existing evidence', url: 'https://example.org/evidence', retrievedAt: '2026-10-04T12:00:00Z', notes: 'Supports this supplied context only.' }];
+  const selected = { ...document.cohorts[0]!.personas[1]!, sourceIds: ['existing'] };
+  const service = new LocalAgentService({ chatgpt: nativeDraft(() => JSON.stringify({ documentJson: JSON.stringify(selected), explanation: 'Reuses supplied evidence without a research claim.' })) }); t.after(() => service.close());
+  assert.equal((await terminal(service, service.start({ ...personaRequest, document }))).status, 'completed');
+  const failing = new LocalAgentService({ chatgpt: nativeDraft(() => { throw Object.assign(Error('private account detail'), { code: 'quota' }); }) });
+  const failed = await terminal(failing, failing.start({ ...personaRequest, document }));
+  assert.equal(failed.status, 'failed'); assert.match(failed.message, /usage limit/); assert.doesNotMatch(JSON.stringify(failed), /private account/); assert.equal(failed.proposal, undefined); await failing.close();
+  let started!: () => void; const ready = new Promise<void>(resolve => { started = resolve; });
+  const cancelled = new LocalAgentService({ chatgpt: nativeDraft((_input, signal) => new Promise(resolve => { signal!.addEventListener('abort', () => resolve(JSON.stringify({ documentJson: JSON.stringify(selected), explanation: 'Late output' })), { once: true }); started(); })) });
+  const job = cancelled.start({ ...personaRequest, document }); await ready; cancelled.cancel(job.id); await cancelled.close();
+  assert.equal(cancelled.get(job.id)?.status, 'cancelled'); assert.equal(cancelled.get(job.id)?.proposal, undefined);
+});
+
+function targetedBatchResponse(input: string, mutate?: (cohort: Cohort, data: any) => void): string {
+  const data = requestData(input);
+  const cohort = { ...structuredClone(data.originalCohortMetadata), personas: [] } as Cohort;
+  cohort.personas = data.distributionAssignments.map((slot: any, index: number) => {
+    const persona = { ...structuredClone(proposed.cohorts[0]!.personas[0]!), id: `batch-${data.batch.number}-${index}`, attributes: {} } as Persona;
+    slot.assignments.forEach(({ field, kind, bucket }: { field: string; kind: string; bucket: DistributionTargetBucket }) => {
+      const value = kind === 'numeric' ? (bucket.min ?? ((bucket.max ?? 100) - 1)) : bucket.value;
+      if (field === 'age') persona.age = value as number;
+      else if (field === 'segment') persona.segment = value as string;
+      else { const parts = field.slice('attributes.'.length).split('.'); let target: any = persona.attributes; for (const part of parts.slice(0, -1)) target = target[part] ??= {}; target[parts.at(-1)!] = value; }
+    });
+    return persona;
+  });
+  mutate?.(cohort, data);
+  return JSON.stringify({ documentJson: JSON.stringify(cohort), explanation: 'Synthetic personas follow supplied slots.' });
+}
+
+test('cohort regeneration honors exact categorical and numeric target quotas across batches and preserves provenance', async t => {
+  const document = personaWorkspace();
+  const cohort = document.cohorts[0]!;
+  cohort.segments.push({ ...cohort.segments[0]!, id: 'occasional', label: 'Occasional', weight: 0.3, weightBasis: 'user' });
+  cohort.sources = [{ id: 'existing', title: 'Existing evidence', url: 'https://example.org/evidence', retrievedAt: '2026-10-04T12:00:00Z', notes: 'Supplied source limitations remain.' }];
+  cohort.distributionTargets = [
+    { field: 'age', kind: 'numeric', buckets: [{ label: 'Younger', percent: 33.3, min: 18, max: 40 }, { label: 'Older', percent: 66.7, min: 40, max: 121 }] },
+    { field: 'segment', kind: 'categorical', buckets: [{ label: 'Customers', percent: 70, value: 'customers' }, { label: 'Occasional', percent: 30, value: 'occasional' }] },
+    { field: 'attributes.location.region', kind: 'categorical', buckets: [{ label: 'East', percent: 50, value: 'east' }, { label: 'West', percent: 50, value: 'west' }] },
+  ];
+  const calls: any[] = [];
+  const service = new LocalAgentService({ chatgpt: nativeDraft(input => { calls.push(requestData(input)); return targetedBatchResponse(input); }) }); t.after(() => service.close());
+  const completed = await terminal(service, service.start({ ...personaRequest, persona: undefined, cohort: { id: 'customers', size: 101 }, document }));
+  assert.equal(completed.status, 'completed', completed.message); assert.equal(calls.length, 5);
+  const result = completed.proposal!.document.cohorts[0]!;
+  assert.equal(result.personas.length, 101); assert.equal(result.personas.filter(p => p.age < 40).length, 34);
+  assert.equal(result.personas.filter(p => p.segment === 'customers').length, 71); assert.equal(result.personas.filter(p => p.segment === 'occasional').length, 30);
+  assert.equal(result.personas.filter(p => (p.attributes.location as any).region === 'east').length, 51);
+  assert.deepEqual(result.sources, cohort.sources); assert.deepEqual(result.segments, cohort.segments); assert.deepEqual(result.distributionTargets, cohort.distributionTargets);
+  assert.deepEqual(completed.proposal!.document.cohorts[1], document.cohorts[1]); assert.deepEqual(completed.proposal!.document.pipelines, document.pipelines);
+  assert.match(completed.proposal!.explanation, /whole-person quotas/);
+  assert.deepEqual(calls.flatMap(data => data.distributionAssignments.map((slot: any) => slot.position)), Array.from({ length: 101 }, (_, index) => index + 1));
+});
+
+test('cohort regeneration rejects target mismatches, changed provenance and exclusive numeric upper bounds', async t => {
+  const document = personaWorkspace();
+  document.cohorts[0]!.distributionTargets = [{ field: 'age', kind: 'numeric', buckets: [{ label: 'Young', percent: 100, min: 18, max: 40 }] }];
+  const mutations = [
+    (cohort: Cohort) => { cohort.personas[0]!.age = 40; },
+    (cohort: Cohort) => { cohort.sources = [{ id: 'invented', title: 'Invented', url: 'https://example.org/imaginary', retrievedAt: '2026-10-04T12:00:00Z', notes: 'Invented claims' }]; },
+    (cohort: Cohort) => { cohort.segments[0]!.weightBasis = 'user'; },
+    (cohort: Cohort) => { cohort.distributionTargets = []; },
+  ];
+  for (const mutate of mutations) {
+    const service = new LocalAgentService({ chatgpt: nativeDraft(input => targetedBatchResponse(input, mutate)) });
+    const failed = await terminal(service, service.start({ ...personaRequest, persona: undefined, document, cohort: { id: 'customers', size: 30 } }));
+    assert.equal(failed.status, 'failed'); assert.equal(failed.proposal, undefined); assert.match(failed.message, /distribution target|metadata or provenance/); await service.close();
+  }
+});
+
+
+test('targeted cohort regeneration never publishes partial quotas after later provider failure or cancellation', async () => {
+  const document = personaWorkspace();
+  document.cohorts[0]!.distributionTargets = [{ field: 'age', kind: 'numeric', buckets: [{ label: 'Adults', percent: 100, min: 18, max: 121 }] }];
+  let calls = 0;
+  const failing = new LocalAgentService({ chatgpt: nativeDraft(input => { calls++; if (calls === 2) throw Object.assign(Error('private transport detail'), { code: 'quota' }); return targetedBatchResponse(input); }) });
+  const failed = await terminal(failing, failing.start({ ...personaRequest, persona: undefined, document, cohort: { id: 'customers', size: 30 } }));
+  assert.equal(failed.status, 'failed'); assert.equal(calls, 2); assert.equal(failed.proposal, undefined); assert.match(failed.message, /usage limit/); await failing.close();
+  let started!: () => void; const ready = new Promise<void>(resolve => { started = resolve; }); let cancelCalls = 0;
+  const cancelled = new LocalAgentService({ chatgpt: nativeDraft((input, signal) => { cancelCalls++; if (cancelCalls === 1) return targetedBatchResponse(input); started(); return new Promise(resolve => signal!.addEventListener('abort', () => resolve(targetedBatchResponse(input)), { once: true })); }) });
+  const job = cancelled.start({ ...personaRequest, persona: undefined, document, cohort: { id: 'customers', size: 30 } }); await ready;
+  assert.match(cancelled.get(job.id)!.message, /25\/30 personas/); cancelled.cancel(job.id); await cancelled.close();
+  assert.equal(cancelled.get(job.id)?.status, 'cancelled'); assert.equal(cancelled.get(job.id)?.proposal, undefined); assert.equal(cancelCalls, 2);
+});
+
+
+test('segment target quotas fail before provider drafting when positive segments receive zero people or unknown IDs', async () => {
+  const document = personaWorkspace();
+  const cohort = document.cohorts[0]!;
+  cohort.segments.push({ ...cohort.segments[0]!, id: 'second', label: 'Second', weight: 1 });
+  const cases = [
+    { size: 2, buckets: [{ label: 'Only first', value: 'customers', percent: 100 }], message: /positive-weight segment "second".*target share or cohort size/ },
+    { size: 2, buckets: [{ label: 'First', value: 'customers', percent: 99 }, { label: 'Second', value: 'second', percent: 1 }], message: /positive-weight segment "second"/ },
+    { size: 2, buckets: [{ label: 'Unknown', value: 'unknown', percent: 100 }], message: /existing segment IDs/ },
+    { size: 1, buckets: [{ label: 'First', value: 'customers', percent: 50 }, { label: 'Second', value: 'second', percent: 50 }], message: /smaller than.*positive-weight segments/ },
+  ];
+  for (const item of cases) {
+    cohort.distributionTargets = [{ field: 'segment', kind: 'categorical', buckets: item.buckets }]; let calls = 0;
+    const service = new LocalAgentService({ chatgpt: nativeDraft(() => { calls++; throw Error('No provider request for impossible quotas'); }) });
+    const failed = await terminal(service, service.start({ ...personaRequest, persona: undefined, document, cohort: { id: 'customers', size: item.size } }));
+    assert.equal(failed.status, 'failed'); assert.equal(failed.proposal, undefined); assert.match(failed.message, item.message); assert.equal(calls, 0); await service.close();
+  }
+});
+
+test('final missing positive segment reports how to fix the cohort instead of an opaque parse failure', async () => {
+  const document = personaWorkspace(); document.cohorts[0]!.segments.push({ ...document.cohorts[0]!.segments[0]!, id: 'second', label: 'Second', weight: 1 });
+  const service = new LocalAgentService({ chatgpt: nativeDraft(input => targetedBatchResponse(input)) });
+  const failed = await terminal(service, service.start({ ...personaRequest, persona: undefined, document, cohort: { id: 'customers', size: 2 } }));
+  assert.equal(failed.status, 'failed'); assert.equal(failed.proposal, undefined); assert.match(failed.message, /No personas were generated for positive-weight segment "second"/); assert.match(failed.message, /Increase.*revise segment target shares/); await service.close();
+});
 function projectWorkspace(): WorkspaceDocument {
   return { version: 1,
     cohorts: [structuredClone(proposed.cohorts[0]!), { ...structuredClone(proposed.cohorts[0]!), id: 'private-cohort', name: 'Unrelated private cohort', description: 'unrelated-private-research-sentinel' }],
@@ -452,4 +622,51 @@ test('project drafts keep a single pipeline while preserving legacy multi-pipeli
       }
     }
   }
+});
+
+test('project persona regeneration transmits only the selected profile context and preserves project ownership', async t => {
+  const document = projectWorkspace();
+  const selected = document.cohorts[0]!.personas[0]!;
+  const replacement = { ...selected, label: 'New assumed profile', background: 'New synthetic background' };
+  const service = projectDraftService(t, prompt => {
+    assert.doesNotMatch(prompt, /private-cohort|private-study|private-project|unrelated-private-research-sentinel/);
+    assert.match(prompt, /Selected research/);
+    const context = requestData(prompt);
+    assert.equal(context.selectedPersona.id, selected.id);
+    assert.equal(context.cohortMetadata.id, document.cohorts[0]!.id);
+    return replacement;
+  });
+  const completed = await terminal(service, service.start({ ...projectRequest, document, persona: { cohortId: 'customers', personaId: selected.id } }));
+  assert.equal(completed.status, 'completed'); assert.equal(completed.projectId, 'selected');
+  const expected = structuredClone(document); expected.cohorts[0]!.personas[0] = replacement;
+  assert.deepEqual(completed.proposal!.document, expected);
+});
+
+test('project-scoped persona requests reject another project cohort or missing project before drafting', t => {
+  let calls = 0;
+  const service = projectDraftService(t, () => { calls++; throw Error('Must not draft outside selected project'); });
+  const document = projectWorkspace();
+  for (const input of [
+    { ...projectRequest, document, persona: { cohortId: 'private-cohort', personaId: 'alex' } },
+    { ...projectRequest, projectId: undefined, document, persona: { cohortId: 'customers', personaId: 'alex' } },
+  ]) assert.throws(() => service.start(input), (error: unknown) => error instanceof LocalAgentError && error.code === 'INVALID_AGENT_REQUEST');
+  assert.equal(calls, 0);
+});
+
+test('existing project cohort regeneration keeps saved targets and all project ownership intact', async t => {
+  const document = projectWorkspace();
+  document.cohorts[0]!.distributionTargets = [{ field: 'age', kind: 'numeric', buckets: [{ label: 'Younger', percent: 50, min: 18, max: 40 }, { label: 'Older', percent: 50, min: 40, max: 70 }] }];
+  const before = structuredClone(document);
+  const service = new LocalAgentService({ chatgpt: nativeDraft(input => {
+    assert.doesNotMatch(input, /private-cohort|private-study|private-project|unrelated-private-research-sentinel/);
+    assert.equal(requestData(input).selectedProject.name, 'Selected research');
+    return targetedBatchResponse(input);
+  }) }); t.after(() => service.close());
+  const result = await terminal(service, service.start({ ...projectRequest, document, cohort: { id: 'customers', size: 2 } }));
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(result.proposal!.document.projects, before.projects);
+  assert.deepEqual(result.proposal!.document.cohorts[1], before.cohorts[1]);
+  assert.deepEqual(result.proposal!.document.pipelines, before.pipelines);
+  assert.deepEqual(result.proposal!.document.cohorts[0]!.distributionTargets, before.cohorts[0]!.distributionTargets);
+  assert.equal(result.proposal!.document.cohorts[0]!.personas.filter(persona => persona.age < 40).length, 1);
 });

@@ -53,3 +53,17 @@ test('Score schemas match TypeSafe’s 2–10 level limit in validation and JSON
   const scoreVariant = questionVariants.find((variant: any) => variant.properties?.type?.const === 'score');
   assert.equal(scoreVariant?.properties?.criteria?.maxItems, 10);
 });
+
+test('cohorts validate optional regeneration distribution targets', () => {
+  const c: any = { version: 1, id: 'people', name: 'People', description: 'Example', population: 'Adult gamers', createdAt: '2026-10-03T12:00:00Z', sources: [], segments: [{ id: 'players', label: 'Players', description: 'Players', weight: 1, weightBasis: 'assumed', sourceIds: [] }], personas: [{ id: 'p1', label: 'Person', segment: 'players', age: 22, background: 'Plays games', attributes: { residence: { region: 'north' } }, sourceIds: [], syntheticFields: ['background'], weight: 1 }], assumptions: [] };
+  c.distributionTargets = [
+    { field: 'age', kind: 'numeric', buckets: [{ label: '18–39', min: 18, max: 40, percent: 35 }, { label: '40+', min: 40, max: 121, percent: 65 }] },
+    { field: 'attributes.residence.region', kind: 'categorical', buckets: [{ label: 'North', value: 'north', percent: 80 }, { label: 'Unknown', value: null, percent: 20 }] },
+  ];
+  assert.equal(parseCohort(c).distributionTargets?.length, 2);
+  c.distributionTargets[0].buckets[1].min = 39;
+  assert.throws(() => parseCohort(c), /overlapping/);
+  c.distributionTargets[0].buckets[1].min = 40;
+  c.distributionTargets[1].field = 'attributes.residence.__proto__';
+  assert.throws(() => parseCohort(c), /safe attributes/);
+});

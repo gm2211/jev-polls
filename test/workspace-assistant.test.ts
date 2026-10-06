@@ -6,8 +6,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { startWorkspaceServer, type WorkspaceServerOptions } from '../src/workspace.js';
-import type { LocalAgentJob } from '../src/local-agent.js';
-import { emptyWorkspaceDocument } from '../src/workspace-store.js';
+import { LocalAgentService, type LocalAgentJob } from '../src/local-agent.js';
+import { emptyWorkspaceDocument, validateWorkspaceDocument } from '../src/workspace-store.js';
 
 test('local assistant proposals require explicit application at the original saved revision', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'jev-assistant-http-'));
@@ -42,6 +42,8 @@ test('local assistant proposals require explicit application at the original sav
   assert.equal((await post('/api/agent/jobs', { ...input, document: {} })).status, 400);
   assert.equal((await post('/api/agent/jobs', { ...input, cohort: { id: '__proto__', size: 2 } })).status, 400);
   assert.equal((await post('/api/agent/jobs', { ...input, cohort: { id: 'fresh-panel', size: MAX_COHORT_PERSONAS + 1 } })).status, 400);
+  assert.equal((await post('/api/agent/jobs', { ...input, persona: { cohortId: 'customers', personaId: '__proto__' } })).status, 400);
+  assert.equal((await post('/api/agent/jobs', { ...input, persona: { cohortId: 'customers', personaId: 'alex' }, cohort: { id: 'customers', size: 1 } })).status, 400);
   assert.equal(starts, 0);
   const created = await post('/api/agent/jobs', { ...input, cohort: { id: 'fresh-panel', size: 100 } });
   assert.equal(created.status, 202);
@@ -70,4 +72,37 @@ test('local assistant proposals require explicit application at the original sav
   assert.equal((await post(`/api/agent/jobs/${pending.id}/apply`, { revision: 3 })).status, 409);
   assert.equal(inference, 0);
   await server.close(); assert.equal(closed, true);
+});
+
+
+test('persona regeneration HTTP proposals retain saved data and cannot replace a newer revision', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'jev-persona-http-')); t.after(() => rm(directory, { recursive: true, force: true }));
+  const cohort = { version: 1 as const, id: 'customers', name: 'Customers', description: 'Synthetic adults', population: 'Adults', createdAt: '2026-10-04T12:00:00Z', sources: [], assumptions: ['Synthetic sample'], segments: [{ id: 'customers', label: 'Customers', description: 'Assumed audience', weight: 1, weightBasis: 'assumed' as const, sourceIds: [] }], personas: [{ id: 'alex', label: 'Alex', segment: 'customers', age: 35, background: 'Uses delivery services', attributes: {}, sourceIds: [], syntheticFields: ['background'], weight: 1 }, { id: 'sam', label: 'Sam', segment: 'customers', age: 41, background: 'Uses grocery shops', attributes: {}, sourceIds: [], syntheticFields: ['background'], weight: 2 }] };
+  let calls = 0; let inference = 0;
+  const chatgpt = { status: async () => ({ connected: true, planEnabled: true }), accounts: async () => [], generate: async ({ input }: { input: string }) => {
+    calls++; assert.match(input, /selectedPersona/); assert.doesNotMatch(input, /Kept pipeline/);
+    return { text: JSON.stringify({ documentJson: JSON.stringify({ ...cohort.personas[0], label: 'Jordan', age: 48, background: 'A new synthetic biography' }), explanation: 'New synthetic details for the selected persona.' }) };
+  } } as import('../src/chatgpt.js').ChatGptDraftClient;
+  const localAgents = new LocalAgentService({ chatgpt });
+  const server = await startWorkspaceServer({ directory, chatgpt, localAgents, getAuthStatus: async () => ({ configured: false, source: 'none' }), providerFactory: () => { inference++; throw Error('No study inference'); } }); t.after(() => server.close());
+  const csrf = (await (await fetch(server.url)).text()).match(/<meta name="jev-csrf" content="([a-f0-9]+)"/)![1]!;
+  const post = (path: string, value: unknown) => fetch(new URL(path, server.url), { method: 'POST', headers: { origin: new URL(server.url).origin, 'content-type': 'application/json', 'x-jev-csrf': csrf }, body: JSON.stringify(value) });
+  const document = { version: 1, cohorts: [cohort, { ...structuredClone(cohort), id: 'other' }], pipelines: [{ version: 1, id: 'study', name: 'Kept pipeline', description: '', context: {}, cohorts: {}, stages: [] }] };
+  assert.equal((await post('/api/workspace', { revision: 0, document })).status, 200);
+  const input = { projectId: 'existing-research', engine: 'chatgpt', model: 'draft-model', prompt: 'Regenerate this entire persona', revision: 1, persona: { cohortId: 'customers', personaId: 'alex' } };
+  assert.equal((await post('/api/agent/jobs', { ...input, persona: { ...input.persona, personaId: 'missing' } })).status, 400);
+  const response = await post('/api/agent/jobs', input); assert.equal(response.status, 202); const job = await response.json(); assert.deepEqual(job.persona, input.persona);
+  for (let index = 0; index < 100 && localAgents.get(job.id)?.status === 'running'; index++) await new Promise(resolve => setTimeout(resolve, 5));
+  const proposal = localAgents.get(job.id)!; assert.equal(proposal.status, 'completed');
+  const actual = proposal.proposal!.document; assert.deepEqual(actual.cohorts[0]!.personas[1], cohort.personas[1]); assert.deepEqual(actual.cohorts[1], document.cohorts[1]); assert.deepEqual(actual.pipelines, document.pipelines);
+  assert.equal((await (await fetch(new URL('/api/workspace', server.url))).json()).revision, 1);
+  const edited = structuredClone(document); edited.cohorts[0]!.name = 'Newer saved edit';
+  assert.equal((await post('/api/workspace', { revision: 1, document: edited })).status, 200);
+  assert.equal((await post(`/api/agent/jobs/${job.id}/apply`, { revision: 1 })).status, 409);
+  assert.deepEqual((await (await fetch(new URL('/api/workspace', server.url))).json()).document, validateWorkspaceDocument(edited));
+  const retry = await (await post('/api/agent/jobs', { ...input, revision: 2 })).json();
+  for (let index = 0; index < 100 && localAgents.get(retry.id)?.status === 'running'; index++) await new Promise(resolve => setTimeout(resolve, 5));
+  const applied = await post(`/api/agent/jobs/${retry.id}/apply`, { revision: 2 }); assert.equal(applied.status, 200);
+  assert.equal((await applied.json()).document.cohorts[0].personas[0].label, 'Jordan');
+  assert.equal(calls, 2); assert.equal(inference, 0);
 });

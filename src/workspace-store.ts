@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path';
 import type { Cohort, Json, Pipeline } from './types.js';
 import type { WorkspaceDocument, WorkspaceProject, WorkspaceSaved } from './workspace-types.js';
 import { parseCohort, parsePipeline, stageOrder } from './schema.js';
+import { validateTargets } from './cohort-insights.js';
 
 const FILE_NAME = 'workspace.json';
 const MAX_DOCUMENT_BYTES = MAX_WORKSPACE_BYTES;
@@ -228,12 +229,16 @@ export function workspacePlan(document: WorkspaceDocument, pipelineId: string): 
 }
 
 function validateCohortDraft(value: unknown, path: string): void {
-  const c = object(value, path, ['version', 'id', 'name', 'description', 'population', 'createdAt', 'sources', 'segments', 'personas', 'assumptions', 'generationPrompt'], ['version', 'id', 'name', 'description', 'population', 'createdAt', 'sources', 'segments', 'personas', 'assumptions']);
+  const c = object(value, path, ['version', 'id', 'name', 'description', 'population', 'createdAt', 'sources', 'segments', 'personas', 'assumptions', 'generationPrompt', 'distributionTargets'], ['version', 'id', 'name', 'description', 'population', 'createdAt', 'sources', 'segments', 'personas', 'assumptions']);
   versionOne(c.version, `${path}.version`); id(c.id, `${path}.id`);
   for (const key of ['name', 'description', 'population', 'createdAt'] as const) string(c[key], `${path}.${key}`);
   if (c.generationPrompt !== undefined) {
     string(c.generationPrompt, `${path}.generationPrompt`);
     if ((c.generationPrompt as string).length > 10_000) throw new Error(`${path}.generationPrompt exceeds 10000 characters`);
+  }
+  if (c.distributionTargets !== undefined) {
+    const targets = array(c.distributionTargets, `${path}.distributionTargets`, 100);
+    validateTargets(targets);
   }
   array(c.sources, `${path}.sources`, MAX_SOURCES).forEach((entry, index) => {
     const p = `${path}.sources[${index}]`;
