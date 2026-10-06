@@ -57,7 +57,7 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,draftProgress,updateDraftClocks,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,draftProgress,updateDraftClocks,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,applyStage};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
   if (openExistingProject) (context as any).clientTest.S.projectId = 'existing-research';
@@ -127,7 +127,7 @@ test('invalid form blocks a tab change and hidden field validation reveals every
   assert.equal(S.sections['persona-edit'], 'attributes');
 });
 
-test('phase editor retains all submitted controls while separating questions, cohort, inputs and rules', async () => {
+test('phase editor keeps question and cohort together with advanced controls in tabs', async () => {
   const browser = browserHarness(); await settle();
   const { S, stageForm } = browser.client;
   S.pipelineId = 'study'; S.stageId = 'panel';
@@ -137,7 +137,11 @@ test('phase editor retains all submitted controls while separating questions, co
     assert.match(html, new RegExp(`name="${name}"`));
   }
   assert.match(html, /data-section-id="question" >/);
-  assert.match(html, /data-section-id="cohort" hidden/);
+  assert.doesNotMatch(html, /data-section-id="cohort"/);
+  for (const name of ['label', 'phasePool']) {
+    assert.equal((html.match(new RegExp(`name="${name}"`, 'g')) ?? []).length, 1);
+    assert.ok(html.indexOf(`name="${name}"`) < html.indexOf('data-section-panel'));
+  }
   assert.match(html, /data-section-id="inputs" hidden/);
   assert.match(html, /data-section-id="rules" hidden/);
 });
@@ -274,7 +278,7 @@ test('next phase wires a named output, keeps one question, and excludes downstre
   assert.equal(dataInputOptions(pipeline, next)[0].id, 'panel');
   assert.deepEqual(Array.from(projectionOptions(pipeline, next.inputs.previous_result), (x: any) => x.value), ['summary', 'responses', 'winner', 'probabilities']);
   assert.match(browser.element('app').innerHTML, /previous_result/);
-  assert.match(browser.element('app').innerHTML, /Cohort of virtual people/);
+  assert.match(browser.element('app').innerHTML, /Who answers this question/);
   assert.match(browser.element('app').innerHTML, /Which customer-support approach/);
   pipeline.stages[0].questions.preference = { type: 'noul', label: 'Would this work?', instructions: 'Answer yes or no.' };
   assert.deepEqual(Array.from(projectionOptions(pipeline, next.inputs.previous_result), (x: any) => x.value), ['summary', 'responses', 'mean']);
@@ -1058,6 +1062,8 @@ test('project detail submission saves metadata and pipeline creation assigns own
   assert.equal(S.doc.pipelines.length, 1);
   assert.equal(S.doc.projects[0].pipelineIds[0], S.doc.pipelines[0].id);
   assert.equal(S.doc.pipelines[0].name, 'Renamed project study');
+  assert.equal(S.sections.pipeline, 'phase');
+  assert.equal(S.sections['phase-' + S.stageId], 'question');
   submit('new-pipeline', { question: 'Second pipeline?' });
   assert.equal(S.doc.pipelines.length, 1, 'new project keeps one pipeline');
 });
@@ -1303,4 +1309,53 @@ test('poll errors stay with their project and clear when a matching response suc
   browser.timeouts.at(-1)!(); await settle();
   assert.equal(S.localJob.status, 'completed'); assert.equal(S.localPollError, null);
   await pollLocalJob('resume');
+});
+
+
+test('changing an intermediate cohort keeps other phase cohorts and inputs independent', async () => {
+  for (const mapping of [{ audience: 'cohort' }, { audience: '' }, { audience: 'cohort', experts: 'reviewers' }]) {
+    const browser = browserHarness(); await settle();
+    const { S, applyStage, act } = browser.client;
+    const pipeline = S.doc.pipelines[0];
+    S.doc.cohorts.push({ ...structuredClone(S.doc.cohorts[0]), id: 'reviewers', name: 'Reviewers' });
+    S.doc.projects[0].cohortIds.push('reviewers');
+    pipeline.cohorts = structuredClone(mapping);
+    const first = pipeline.stages[0];
+    const middle = { ...structuredClone(first), id: 'middle', label: 'Review',
+      dependsOn: ['panel'], inputs: { evidence: { stage: 'panel', question: 'answer', select: 'summary' } } };
+    const last = { ...structuredClone(first), id: 'last' };
+    pipeline.stages.push(middle, last);
+    S.tab = 'studies'; S.pipelineId = pipeline.id; S.stageId = 'panel';
+    S.sections.pipeline = 'flow'; S.sections['phase-middle'] = 'rules';
+    act(null, { dataset: { act: 'stage', id: 'middle' } });
+    assert.equal(S.sections.pipeline, 'phase');
+    assert.equal(S.sections['phase-middle'], 'question');
+    const before = JSON.stringify([first, last]);
+    const values: Record<string, string> = {
+      label: 'Expert review', phasePool: 'reviewers', size: '', repeats: '1', join: 'all', stageContext: '{}',
+      bindingName0: 'evidence', bindingStage0: 'panel', bindingQuestion0: 'answer', bindingSelect0: 'summary',
+      questionId: 'answer', questionLabel: 'Which option should advance?', questionInstructions: 'Evaluate the earlier evidence.',
+      questionType: 'choice', criteria: 'a: A\nb: B',
+    };
+    const question = { querySelector: (selector: string) => ({ value: values[selector.match(/name="(.+)"/)![1]!] }) };
+    const form = { values, querySelector: () => null, querySelectorAll: (selector: string) =>
+      selector === '[name=dependsOn]:checked' ? [{ value: 'panel' }] :
+      selector === '[data-phase-input]' ? [{}] : selector === '.question-card' ? [question] : [] };
+    applyStage(form);
+    assert.equal(pipeline.cohorts[middle.cohort], 'reviewers');
+    assert.equal(pipeline.cohorts.audience, mapping.audience);
+    if ('experts' in mapping) assert.equal(middle.cohort, 'experts');
+    assert.equal(JSON.stringify([first, last]), before);
+    assert.deepEqual(JSON.parse(JSON.stringify(middle.inputs)), { evidence: { stage: 'panel', question: 'answer', select: 'summary' } });
+    assert.equal(middle.questions.answer.label, 'Which option should advance?');
+    assert.equal(middle.questions.answer.instructions, 'Evaluate the earlier evidence.');
+    if (mapping.audience === '') {
+      for (const stage of [first, last]) {
+        S.stageId = stage.id;
+        applyStage({ ...form, querySelectorAll: (selector: string) => selector === '.question-card' ? [question] : [] });
+      }
+      assert.equal(Object.values(pipeline.cohorts).includes(''), false, 'completed assignments leave no unresolved unused aliases');
+      assert.ok(pipeline.stages.every((stage: any) => pipeline.cohorts[stage.cohort] === 'reviewers'));
+    }
+  }
 });
