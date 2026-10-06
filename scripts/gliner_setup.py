@@ -50,8 +50,8 @@ def main():
             emit({"event": "gliner_download", "model": MODEL, "revision": REVISION}, sys.stderr)
             download_and_check(runtime_dir)
             return 0
-        if not (3, 10) <= sys.version_info[:2] <= (3, 13):
-            emit({"ready": False, "error": "Use Python 3.10–3.13; Python 3.11 recommended."})
+        if not (3, 11) <= sys.version_info[:2] <= (3, 13):
+            emit({"ready": False, "error": "Use Python 3.11–3.13; Python 3.11 recommended."})
             return 1
         emit({"event": "gliner_install", "runtimeDir": str(runtime_dir)}, sys.stderr)
         python = runtime_dir / ("Scripts/python.exe" if os.name == "nt" else "bin/python")

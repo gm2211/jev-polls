@@ -4,7 +4,7 @@ GLiNER is an optional local provider for synthetic research judgments. It runs
 Fastino's English specialist classifier, not a general chat model. Synthetic
 persona responses remain model judgments, never observed human survey data.
 
-Install Python 3.10–3.13 (3.11 recommended), then run:
+Install Python 3.11–3.13 (3.11 recommended), then run:
 
 ```sh
 npm run setup:gliner
