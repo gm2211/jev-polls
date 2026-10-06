@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { startWorkspaceServer, type WorkspaceServerOptions } from '../src/workspace.js';
 import { LocalAgentService, type LocalAgentJob } from '../src/local-agent.js';
-import { emptyWorkspaceDocument } from '../src/workspace-store.js';
+import { emptyWorkspaceDocument, validateWorkspaceDocument } from '../src/workspace-store.js';
 
 test('local assistant proposals require explicit application at the original saved revision', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'jev-assistant-http-'));
@@ -89,7 +89,7 @@ test('persona regeneration HTTP proposals retain saved data and cannot replace a
   const post = (path: string, value: unknown) => fetch(new URL(path, server.url), { method: 'POST', headers: { origin: new URL(server.url).origin, 'content-type': 'application/json', 'x-jev-csrf': csrf }, body: JSON.stringify(value) });
   const document = { version: 1, cohorts: [cohort, { ...structuredClone(cohort), id: 'other' }], pipelines: [{ version: 1, id: 'study', name: 'Kept pipeline', description: '', context: {}, cohorts: {}, stages: [] }] };
   assert.equal((await post('/api/workspace', { revision: 0, document })).status, 200);
-  const input = { engine: 'chatgpt', model: 'draft-model', prompt: 'Regenerate this entire persona', revision: 1, persona: { cohortId: 'customers', personaId: 'alex' } };
+  const input = { projectId: 'existing-research', engine: 'chatgpt', model: 'draft-model', prompt: 'Regenerate this entire persona', revision: 1, persona: { cohortId: 'customers', personaId: 'alex' } };
   assert.equal((await post('/api/agent/jobs', { ...input, persona: { ...input.persona, personaId: 'missing' } })).status, 400);
   const response = await post('/api/agent/jobs', input); assert.equal(response.status, 202); const job = await response.json(); assert.deepEqual(job.persona, input.persona);
   for (let index = 0; index < 100 && localAgents.get(job.id)?.status === 'running'; index++) await new Promise(resolve => setTimeout(resolve, 5));
@@ -99,7 +99,7 @@ test('persona regeneration HTTP proposals retain saved data and cannot replace a
   const edited = structuredClone(document); edited.cohorts[0]!.name = 'Newer saved edit';
   assert.equal((await post('/api/workspace', { revision: 1, document: edited })).status, 200);
   assert.equal((await post(`/api/agent/jobs/${job.id}/apply`, { revision: 1 })).status, 409);
-  assert.deepEqual((await (await fetch(new URL('/api/workspace', server.url))).json()).document, edited);
+  assert.deepEqual((await (await fetch(new URL('/api/workspace', server.url))).json()).document, validateWorkspaceDocument(edited));
   const retry = await (await post('/api/agent/jobs', { ...input, revision: 2 })).json();
   for (let index = 0; index < 100 && localAgents.get(retry.id)?.status === 'running'; index++) await new Promise(resolve => setTimeout(resolve, 5));
   const applied = await post(`/api/agent/jobs/${retry.id}/apply`, { revision: 2 }); assert.equal(applied.status, 200);

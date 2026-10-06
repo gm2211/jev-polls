@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { Cohort, Json, Pipeline } from './types.js';
-import type { WorkspaceDocument, WorkspaceSaved } from './workspace-types.js';
+import type { WorkspaceDocument, WorkspaceProject, WorkspaceSaved } from './workspace-types.js';
 import { parseCohort, parsePipeline, stageOrder } from './schema.js';
 import { validateTargets } from './cohort-insights.js';
 
@@ -89,7 +89,7 @@ export class WorkspaceConflictError extends Error {
 }
 
 export function emptyWorkspaceDocument(): WorkspaceDocument {
-  return { version: 1, cohorts: [], pipelines: [] };
+  return { version: 1, cohorts: [], pipelines: [], projects: [] };
 }
 
 /** Strict structural validation for drafts; semantic requirements are enforced at review/run time. */
@@ -99,7 +99,7 @@ export function validateWorkspaceDocument(input: unknown): WorkspaceDocument {
   catch { throw new Error('Workspace document must be JSON-serializable'); }
   if (serialized === undefined) throw new Error('Workspace document must be a JSON object');
   if (Buffer.byteLength(serialized, 'utf8') > MAX_DOCUMENT_BYTES) throw new Error('Workspace document exceeds the maximum size');
-  const root = object(input, 'workspace document', ['version', 'cohorts', 'pipelines'], ['version', 'cohorts', 'pipelines']);
+  const root = object(input, 'workspace document', ['version', 'cohorts', 'pipelines', 'projects'], ['version', 'cohorts', 'pipelines']);
   if (root.version !== 1) throw new Error('Workspace document version must be 1');
   const cohorts = array(root.cohorts, 'workspace cohorts', MAX_COHORTS);
   const pipelines = array(root.pipelines, 'workspace pipelines', MAX_PIPELINES);
@@ -107,10 +107,56 @@ export function validateWorkspaceDocument(input: unknown): WorkspaceDocument {
   pipelines.forEach((item, index) => validatePipelineDraft(item, `pipelines[${index}]`));
   uniqueIds(cohorts, 'cohort', 'cohorts');
   uniqueIds(pipelines, 'pipeline', 'pipelines');
-  return JSON.parse(serialized) as WorkspaceDocument;
+  const document = JSON.parse(serialized) as WorkspaceDocument;
+  // Migration is in memory until the next ordinary revisioned save; existing files
+  // and their revision numbers are not rewritten merely by opening a workspace.
+  if (document.projects === undefined) document.projects = cohorts.length || pipelines.length ? [{
+    id: 'existing-research', name: 'Existing research', description: '',
+    cohortIds: document.cohorts.map(cohort => cohort.id), pipelineIds: document.pipelines.map(pipeline => pipeline.id),
+  }] : [];
+  validateProjectOwnership(document);
+  return document;
 }
 
-export function resolveWorkspaceProject(document: WorkspaceDocument, pipelineId: string): { pipeline: Pipeline; cohorts: Record<string, Cohort> } {
+function validateProjectOwnership(document: WorkspaceDocument): void {
+  const projects = array(document.projects, 'workspace projects', 100);
+  const cohortOwners = new Map<string, string>();
+  const pipelineOwners = new Map<string, string>();
+  const cohortIds = new Set(document.cohorts.map(cohort => cohort.id));
+  const pipelineIds = new Set(document.pipelines.map(pipeline => pipeline.id));
+  projects.forEach((entry, index) => {
+    const path = `projects[${index}]`;
+    const project = object(entry, path, ['id', 'name', 'description', 'cohortIds', 'pipelineIds'], ['id', 'name', 'description', 'cohortIds', 'pipelineIds']);
+    id(project.id, `${path}.id`);
+    string(project.name, `${path}.name`); string(project.description, `${path}.description`);
+    for (const [field, existing, owners] of [
+      ['cohortIds', cohortIds, cohortOwners], ['pipelineIds', pipelineIds, pipelineOwners],
+    ] as const) {
+      array(project[field], `${path}.${field}`, 100).forEach((reference, referenceIndex) => {
+        id(reference, `${path}.${field}[${referenceIndex}]`);
+        if (!existing.has(reference)) throw new Error(`${path}.${field} references missing ${field === 'cohortIds' ? 'cohort' : 'pipeline'} id '${reference}'`);
+        if (owners.has(reference)) throw new Error(`${field} '${reference}' must belong to exactly one project`);
+        owners.set(reference, project.id as string);
+      });
+    }
+  });
+  uniqueIds(projects, 'project', 'projects');
+  for (const cohort of document.cohorts) if (!cohortOwners.has(cohort.id)) throw new Error(`Cohort '${cohort.id}' must belong to exactly one project`);
+  for (const pipeline of document.pipelines) {
+    const owner = pipelineOwners.get(pipeline.id);
+    if (!owner) throw new Error(`Pipeline '${pipeline.id}' must belong to exactly one project`);
+    for (const cohortId of Object.values(pipeline.cohorts)) {
+      if (cohortId === '') continue; // Editable unselected reference; planning rejects it.
+      if (cohortOwners.has(cohortId) && cohortOwners.get(cohortId) !== owner) throw new Error(`Pipeline '${pipeline.id}' references cohort '${cohortId}' from another project`);
+    }
+  }
+}
+
+export function workspaceProjectForPipeline(document: WorkspaceDocument, pipelineId: string): WorkspaceProject | undefined {
+  return validateWorkspaceDocument(document).projects!.find(project => project.pipelineIds.includes(pipelineId));
+}
+
+export function resolveWorkspaceProject(document: WorkspaceDocument, pipelineId: string): { projectId: string; pipeline: Pipeline; cohorts: Record<string, Cohort> } {
   const validated = validateWorkspaceDocument(document);
   const draftPipeline = validated.pipelines.find((pipeline) => pipeline.id === pipelineId);
   if (!draftPipeline) throw new Error(`Unknown workspace pipeline '${pipelineId}'`);
@@ -143,17 +189,18 @@ export function resolveWorkspaceProject(document: WorkspaceDocument, pipelineId:
     if (size > available) throw new Error(`Stage '${stage.id}': sample size ${size} exceeds ${available} distinct positive-weight profiles`);
     if (size < positive.length) throw new Error(`Stage '${stage.id}': sample size ${size} cannot cover all ${positive.length} positive-weight segments`);
   }
-  return { pipeline, cohorts };
+  return { projectId: validated.projects!.find(project => project.pipelineIds.includes(pipelineId))!.id, pipeline, cohorts };
 }
 
 export function workspacePlan(document: WorkspaceDocument, pipelineId: string): {
+  projectId: string;
   pipeline: Pipeline;
   cohorts: Record<string, Cohort>;
   maxRequests: number;
   stages: Array<{ id: string; label: string; kind: string; dependsOn: string[]; cohort?: string; profiles?: number; repeats?: number; requests: number }>;
   warnings: string[];
 } {
-  const { pipeline, cohorts } = resolveWorkspaceProject(document, pipelineId);
+  const { projectId, pipeline, cohorts } = resolveWorkspaceProject(document, pipelineId);
   let maxRequests = 0;
   const stages = stageOrder(pipeline).map((stage) => {
     if (stage.kind !== 'poll') return { id: stage.id, label: stage.label, kind: stage.kind, dependsOn: [...stage.dependsOn], requests: 0 };
@@ -178,7 +225,7 @@ export function workspacePlan(document: WorkspaceDocument, pipelineId: string): 
     const noProfileSources = cohort.personas.filter((persona) => persona.sourceIds.length === 0).length;
     if (noProfileSources) warnings.add(`Cohort '${cohort.name}' has ${noProfileSources} profile(s) without linked source records.`);
   }
-  return { pipeline, cohorts, maxRequests, stages, warnings: [...warnings] };
+  return { projectId, pipeline, cohorts, maxRequests, stages, warnings: [...warnings] };
 }
 
 function validateCohortDraft(value: unknown, path: string): void {

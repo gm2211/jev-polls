@@ -23,9 +23,9 @@ import type { WorkspaceRun, WorkspacePlan } from './workspace-types.js';
 const MODEL = 'jev-1.13.0';
 const WORKSPACE_RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const safeId = z.string().regex(/^[a-z][a-z0-9_-]*$/).max(160);
-const runInput = z.object({ pipelineId: safeId, revision: z.number().int().nonnegative(), planToken: z.string(), seed: z.string().min(1).max(200), concurrency: z.number().int().min(1).max(16), maxRequests: z.number().int().min(1).max(100_000) }).strict();
+const runInput = z.object({ pipelineId: safeId, projectId: safeId.optional(), revision: z.number().int().nonnegative(), planToken: z.string(), seed: z.string().min(1).max(200), concurrency: z.number().int().min(1).max(16), maxRequests: z.number().int().min(1).max(100_000) }).strict();
 const savedJobSchema = z.object({
-  id: z.string().regex(WORKSPACE_RUN_ID), pipelineId: safeId, pipelineName: z.string().max(100_000),
+  id: z.string().regex(WORKSPACE_RUN_ID), projectId: safeId.optional(), pipelineId: safeId, pipelineName: z.string().max(100_000),
   status: z.enum(['running', 'completed', 'failed']), createdAt: z.string().max(100), message: z.string().max(100_000),
   progress: z.object({ stage: safeId, completed: z.number().int().nonnegative(), total: z.number().int().nonnegative() }).strict().optional(),
   usage: z.object({ inputTokens: z.number().finite().nonnegative(), outputTokens: z.number().finite().nonnegative(), requests: z.number().int().nonnegative(), cacheHits: z.number().int().nonnegative() }).strict().optional(),
@@ -82,13 +82,22 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
         const stableId = id ?? record.id;
         const message = record.status === 'completed' ? 'Study complete.' : 'Study ended with failures. Inspect the report before interpreting results.';
         let persistedProgress: WorkspaceRun['progress'];
+        let persistedProjectId: string | undefined;
         if (workspace) {
           try {
             const parsed = savedJobSchema.parse(JSON.parse(await readFile(join(path, 'job.json'), 'utf8')));
-            if (parsed.id === stableId && parsed.pipelineId === record.pipeline.id && parsed.status === record.status) persistedProgress = parsed.progress;
+            if (parsed.id === stableId && parsed.pipelineId === record.pipeline.id && parsed.status === record.status) {
+              persistedProgress = parsed.progress; persistedProjectId = parsed.projectId;
+            }
           } catch { /* The run record remains authoritative if optional job metadata is absent or damaged. */ }
+          if (!persistedProjectId) {
+            try {
+              const pending = savedJobSchema.parse(JSON.parse(await readFile(join(path, 'pending.json'), 'utf8')));
+              if (pending.id === stableId && pending.pipelineId === record.pipeline.id && pending.status === 'running') persistedProjectId = pending.projectId;
+            } catch { /* Legacy records can have no ownership metadata. */ }
+          }
         }
-        const summary: WorkspaceRun = { id: stableId, pipelineId: record.pipeline.id, pipelineName: record.pipeline.name, status: record.status, createdAt: record.createdAt, message, usage: record.usage, reportUrl: `/reports/${stableId}`, ...(persistedProgress ? { progress: persistedProgress } : {}) };
+        const summary: WorkspaceRun = { ...(persistedProjectId ? { projectId: persistedProjectId } : {}), id: stableId, pipelineId: record.pipeline.id, pipelineName: record.pipeline.name, status: record.status, createdAt: record.createdAt, message, usage: record.usage, reportUrl: `/reports/${stableId}`, ...(persistedProgress ? { progress: persistedProgress } : {}) };
         jobs.set(summary.id, summary); reports.set(summary.id, join(path, 'report.html'));
       } catch {
         if (!workspace) continue;
@@ -102,6 +111,12 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
   }
   await discoverRuns(join(directory, 'runs'), true);
   if (options.legacyRunsDirectory) await discoverRuns(resolve(options.legacyRunsDirectory), false);
+  const initialDocument = (await store.read()).document;
+  for (const job of jobs.values()) {
+    if (job.projectId) continue; // Recorded ownership survives later pipeline moves/deletion.
+    const owner = initialDocument.projects?.find(project => project.pipelineIds.includes(job.pipelineId));
+    if (owner) job.projectId = owner.id;
+  }
 
   function headers(response: ServerResponse, report = false) {
     response.setHeader('Cache-Control', 'no-store');
@@ -203,7 +218,7 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
     }
     if (method === 'GET' && pathname === '/api/local-agents') { send(response, 200, await localAgents.availability()); return; }
     if (method === 'POST' && pathname === '/api/agent/jobs') {
-      const input = z.object({ engine: z.enum(['codex', 'claude', 'chatgpt']), model: z.string().trim().min(1).max(200).optional(), prompt: z.string().trim().min(1).max(10_000), revision: z.number().int().nonnegative().safe(), cohort: z.object({ id: safeId, size: z.number().int().min(1).max(MAX_COHORT_PERSONAS) }).strict().optional(), persona: z.object({ cohortId: safeId, personaId: safeId }).strict().optional() }).strict().refine(value => !(value.cohort && value.persona), 'Choose either a cohort or a persona').parse(await body(request, 64 * 1024));
+      const input = z.object({ projectId: safeId.optional(), engine: z.enum(['codex', 'claude', 'chatgpt']), model: z.string().trim().min(1).max(200).optional(), prompt: z.string().trim().min(1).max(10_000), revision: z.number().int().nonnegative().safe(), cohort: z.object({ id: safeId, size: z.number().int().min(1).max(MAX_COHORT_PERSONAS) }).strict().optional(), persona: z.object({ cohortId: safeId, personaId: safeId }).strict().optional() }).strict().refine(value => !(value.cohort && value.persona), 'Choose either a cohort or a persona').parse(await body(request, 64 * 1024));
       const saved = await store.read();
       if (saved.revision !== input.revision) throw new WorkspaceConflictError(input.revision, saved.revision);
       if (input.engine === 'chatgpt' && (changingChatGpt || (await chatgpt.snapshot()).signingIn || changingChatGpt)) throw new HttpError(409, 'CHATGPT_BUSY', 'Finish or cancel ChatGPT sign-in before drafting.');
@@ -275,15 +290,16 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
       return;
     }
     if (method === 'POST' && pathname === '/api/plan') {
-      const input = z.object({ pipelineId: safeId }).strict().parse(await body(request));
+      const input = z.object({ pipelineId: safeId, projectId: safeId.optional() }).strict().parse(await body(request));
       const saved = await store.read();
       let project;
       try { project = workspacePlan(saved.document, input.pipelineId); }
       catch (error) { throw new HttpError(400, 'INVALID_STUDY', validationMessage(error)); }
+      if (input.projectId && input.projectId !== project.projectId) throw new HttpError(400, 'INVALID_STUDY', 'Pipeline does not belong to the selected project.');
       const planToken = randomBytes(24).toString('hex');
       if (plans.size >= 50) plans.delete(plans.keys().next().value!);
       plans.set(planToken, { pipelineId: input.pipelineId, revision: saved.revision, expires: Date.now() + 15 * 60_000 });
-      const plan: WorkspacePlan = { pipelineId: input.pipelineId, revision: saved.revision, planToken, model: MODEL, maxRequests: project.maxRequests, warnings: project.warnings, stages: project.stages };
+      const plan: WorkspacePlan = { projectId: project.projectId, pipelineId: input.pipelineId, revision: saved.revision, planToken, model: MODEL, maxRequests: project.maxRequests, warnings: project.warnings, stages: project.stages };
       send(response, 200, plan); return;
     }
     if (method === 'POST' && pathname === '/api/run') {
@@ -298,11 +314,12 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
         throw new HttpError(409, 'REVIEW_REQUIRED', 'Study changed or review expired. Review it again before running.');
       }
       const project = workspacePlan(latest.document, input.pipelineId);
+      if (input.projectId && input.projectId !== project.projectId) throw new HttpError(400, 'INVALID_STUDY', 'Pipeline does not belong to the selected project.');
       if (input.maxRequests < project.maxRequests) throw new HttpError(400, 'BUDGET_TOO_SMALL', 'Request budget must cover the reviewed upper bound. Reduce sample sizes or repeats first.');
       if (activeRun) throw new HttpError(409, 'RUN_IN_PROGRESS', 'A study is already running. Wait for it to finish.');
       // No await between consuming the review and taking the execution lock.
       if (!plans.delete(input.planToken)) throw new HttpError(409, 'REVIEW_REQUIRED', 'This review was already used. Review the study again.');
-      const job: WorkspaceRun = { id: randomUUID(), pipelineId: project.pipeline.id, pipelineName: project.pipeline.name, status: 'running', createdAt: new Date().toISOString(), message: 'Starting your reviewed study…' };
+      const job: WorkspaceRun = { projectId: project.projectId, id: randomUUID(), pipelineId: project.pipeline.id, pipelineName: project.pipeline.name, status: 'running', createdAt: new Date().toISOString(), message: 'Starting your reviewed study…' };
       jobs.set(job.id, job); activeRun = job;
       send(response, 202, job); void execute(job, project, input); return;
     }

@@ -16,7 +16,7 @@ test('the served workspace client parses and embeds its session token safely', (
   assert.doesNotMatch(html, /<script[^>]+src=/);
 });
 
-function browserHarness() {
+function browserHarness(openExistingProject = true) {
   const documentValue = { version: 1, cohorts: [{ id: 'cohort', name: 'Original cohort', population: 'Adults', description: '', assumptions: [], sources: [], segments: [], personas: [{ id: 'person', label: 'Adult participant', age: 30, segment: 'general', weight: 1, background: 'Independent background', attributes: {}, sourceIds: [], syntheticFields: ['background'] }] }], pipelines: [{ id: 'study', name: 'Original study', description: '', stages: [{ id: 'panel', label: 'First question', kind: 'poll', cohort: 'audience', questions: { answer: { type: 'choice', label: 'Which option fits?', instructions: 'Choose an option.', criteria: { a: 'A', b: 'B' } } }, inputs: {}, dependsOn: [] }], cohorts: { audience: 'cohort' } }] };
   let snapshot = { revision: 1, document: documentValue, auth: { configured: true, source: 'keychain' }, runs: [], activeRun: null };
   const elements = new Map<string, any>();
@@ -48,9 +48,10 @@ function browserHarness() {
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
+  if (openExistingProject) (context as any).clientTest.S.projectId = 'existing-research';
   return {
     client: (context as typeof context & { clientTest: any }).clientTest,
     element, listeners, intervals, timeouts, requests, bodies, storage, respond: (path: string, value: unknown) => responses.set(path, value),
@@ -143,7 +144,7 @@ test('next phase wires a named output, keeps one question, and excludes downstre
   await settle();
   const { S, freshPipeline, addNextPhase, dataInputOptions, projectionOptions } = browser.client;
   const pipeline = freshPipeline('Which customer-support approach should we use?');
-  S.doc.pipelines = [pipeline]; S.pipelineId = pipeline.id; S.stageId = pipeline.stages[0].id; S.tab = 'studies';
+  S.doc.pipelines = [pipeline]; S.doc.projects[0].pipelineIds = [pipeline.id]; S.pipelineId = pipeline.id; S.stageId = pipeline.stages[0].id; S.tab = 'studies';
   addNextPhase();
   const next = pipeline.stages[1];
   assert.equal(pipeline.stages.length, 2);
@@ -176,7 +177,7 @@ test('local assistant submits saved revision and keeps proposal separate until e
   await startLocalJob();
   assert.equal(S.doc.cohorts[0].name, 'Original cohort', 'preparation never writes the draft');
   assert.equal(S.localJob.proposal.document.cohorts[0].name, 'Proposed support pool');
-  assert.deepEqual(browser.bodies[0], { path: '/api/agent/jobs', body: { engine: 'codex', prompt: S.localPrompt, revision: 1 } });
+  assert.deepEqual(browser.bodies[0], { path: '/api/agent/jobs', body: { projectId: 'existing-research', engine: 'codex', prompt: S.localPrompt, revision: 1 } });
   assert.equal(browser.requests.includes('/api/agent/jobs/job-one/apply'), false);
   assert.match(browser.element('app').innerHTML, /Apply proposal/);
   await applyLocalProposal();
@@ -260,7 +261,7 @@ test('cohort prompt generation scopes the request and previews personas without 
   const job = { id: 'cohort-job', engine: 'codex', revision: S.revision, status: 'completed', cohort: { id: candidate.id, size: 2, prompt: S.cohortPrompt }, proposal: { document: { ...structuredClone(S.doc), cohorts: [...S.doc.cohorts, candidate] }, explanation: 'Fictional personas with assumed weights.' } };
   browser.respond('/api/agent/jobs', job);
   await startCohortJob();
-  assert.deepEqual(JSON.parse(JSON.stringify(browser.bodies.at(-1)!.body)), { engine: 'codex', prompt: S.cohortPrompt, revision: S.revision, cohort: { id: 'new-audience', size: 2 } });
+  assert.deepEqual(JSON.parse(JSON.stringify(browser.bodies.at(-1)!.body)), { projectId: 'existing-research', engine: 'codex', prompt: S.cohortPrompt, revision: S.revision, cohort: { id: 'new-audience', size: 2 } });
   assert.equal(JSON.stringify(S.doc), JSON.stringify(original), 'generation cannot modify the workspace draft');
   const review = cohortProposalReview(S.localJob);
   assert.match(review, /Frequent visitor/); assert.match(review, /Review and edit cohort/);
@@ -328,7 +329,7 @@ test('ChatGPT drafting requires explicit model and carries selected model withou
   const html = agents(); assert.match(html, /&lt;unsafe account&gt;/); assert.match(html, /TypeSafe and its separate billing/);
   browser.respond('/api/agent/jobs', { id: 'chatgpt-job', engine: 'chatgpt', status: 'failed', revision: S.revision, message: 'Test complete' });
   await startLocalJob();
-  assert.deepEqual(browser.bodies.at(-1), { path: '/api/agent/jobs', body: { engine: 'chatgpt', model: 'model-one', prompt: S.localPrompt, revision: S.revision } });
+  assert.deepEqual(browser.bodies.at(-1), { path: '/api/agent/jobs', body: { projectId: 'existing-research', engine: 'chatgpt', model: 'model-one', prompt: S.localPrompt, revision: S.revision } });
   assert.equal(S.snap.auth.configured, true); assert.equal(browser.requests.includes('/api/run'), false);
 });
 
@@ -401,7 +402,7 @@ test('custom ChatGPT model survives catalog refresh, resets across accounts, and
   assert.match(browser.client.cohortGenerator(), /value="__custom__" selected/);
   browser.respond('/api/agent/jobs', { id: 'custom-model-job', status: 'failed', revision: S.revision });
   await startCohortJob();
-  assert.deepEqual(browser.bodies.at(-1)?.body, { engine: 'chatgpt', model: 'gpt-6.1-sol', prompt: S.cohortPrompt, revision: S.revision, cohort: { id: 'gamers', size: 100 } });
+  assert.deepEqual(browser.bodies.at(-1)?.body, { projectId: 'existing-research', engine: 'chatgpt', model: 'gpt-6.1-sol', prompt: S.cohortPrompt, revision: S.revision, cohort: { id: 'gamers', size: 100 } });
   browser.respond('/api/chatgpt/status', { ...S.chatgpt, account: { id: 'second' } });
   await loadChatGpt();
   assert.equal(S.chatgptModel, ''); assert.equal(S.chatgptCustomModel, false);
@@ -435,7 +436,7 @@ test('cohort count rejects invalid edits, permits larger cohorts, and shows othe
 
 test('recovering a cohort job keeps its requested count after clearing and leaving the field', async () => {
   const browser = browserHarness(); await settle();
-  browser.storage.set('jev-local-job:http://127.0.0.1:4180', 'recovered');
+  browser.storage.set('jev-local-job:http://127.0.0.1:4180:existing-research', 'recovered');
   browser.respond('/api/local-agents', { engines: [{ id: 'codex', available: true }] });
   browser.respond('/api/agent/jobs/recovered', { id: 'recovered', status: 'completed', cohort: { id: 'gamers', size: 100, prompt: 'Diverse adults' } });
   await browser.client.loadLocalAgents();
@@ -444,6 +445,63 @@ test('recovering a cohort job keeps its requested count after clearing and leavi
   browser.listeners.get('input')!({ target });
   await browser.listeners.get('change')!({ target });
   assert.equal(target.value, '100'); assert.equal(browser.client.S.cohortSize, 100);
+});
+
+
+test('workspace opens at projects and keeps another project out of cohort, pipeline and run views', async () => {
+  const browser = browserHarness(false); await settle();
+  const { S, selectProject, projectCohorts, projectPipelines, projectRuns, render } = browser.client;
+  assert.equal(S.projectId, null);
+  assert.match(browser.element('app').innerHTML, /Your projects/);
+  assert.match(browser.element('app').innerHTML, /Existing research/);
+  assert.doesNotMatch(browser.element('app').innerHTML, /Who should be in this cohort/);
+  S.doc.projects.push({ id: 'second', name: 'Second research', description: 'Other decision', cohortIds: ['second-cohort'], pipelineIds: ['second-pipeline'] });
+  S.doc.cohorts.push({ ...structuredClone(S.doc.cohorts[0]), id: 'second-cohort', name: 'Other audience' });
+  S.doc.pipelines.push({ ...structuredClone(S.doc.pipelines[0]), id: 'second-pipeline', name: 'Other pipeline', cohorts: { audience: 'second-cohort' } });
+  S.snap.runs = [{ id: 'first-run', projectId: 'existing-research', pipelineId: 'study' }, { id: 'second-run', projectId: 'second', pipelineId: 'second-pipeline' }];
+  selectProject('existing-research'); await settle();
+  assert.deepEqual(Array.from(projectCohorts(), (c: any) => c.id), ['cohort']);
+  assert.deepEqual(Array.from(projectPipelines(), (p: any) => p.id), ['study']);
+  assert.deepEqual(Array.from(projectRuns(), (r: any) => r.id), ['first-run']);
+  S.cohortPrompt = 'Unsaved first project brief'; S.localPrompt = 'First assistant brief'; S.plan = { planToken: 'old' };
+  selectProject('second'); await settle();
+  assert.equal(S.cohortPrompt, ''); assert.equal(S.localPrompt, ''); assert.equal(S.plan, null);
+  assert.deepEqual(Array.from(projectCohorts(), (c: any) => c.id), ['second-cohort']);
+  S.tab = 'studies'; render();
+  assert.match(browser.element('app').innerHTML, /Other pipeline/);
+  assert.doesNotMatch(browser.element('app').innerHTML, /Original cohort|Original study/);
+  selectProject('existing-research');
+  assert.equal(S.cohortPrompt, 'Unsaved first project brief'); assert.equal(S.localPrompt, 'First assistant brief');
+});
+
+test('manual cohort creation and deletion update only selected project membership', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, act, deleteCohortFromDraft } = browser.client;
+  S.doc.projects.push({ id: 'empty', name: 'Empty', description: '', cohortIds: [], pipelineIds: [] });
+  const previous = JSON.stringify(S.doc.projects[1]);
+  act({}, { dataset: { act: 'manual-cohort' } });
+  const created = S.cohortId;
+  assert.ok(S.doc.projects[0].cohortIds.includes(created));
+  S.cohortDeletion = { id: created, revision: S.revision };
+  deleteCohortFromDraft();
+  assert.equal(S.doc.projects[0].cohortIds.includes(created), false);
+  assert.equal(S.doc.cohorts.some((c: any) => c.id === created), false);
+  assert.equal(JSON.stringify(S.doc.projects[1]), previous);
+});
+
+
+test('late run plan cannot land after switching projects', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, reviewPlan, selectProject } = browser.client;
+  S.pipelineId = 'study'; S.doc.projects.push({ id: 'other', name: 'Other', description: '', cohortIds: [], pipelineIds: [] });
+  let complete!: (value: unknown) => void;
+  browser.respond('/api/plan', new Promise(resolve => { complete = resolve; }));
+  const pending = reviewPlan();
+  selectProject('other');
+  complete({ pipelineId: 'study', projectId: 'existing-research', maxRequests: 1 });
+  await pending;
+  assert.equal(S.plan, null);
+  assert.equal(S.projectId, 'other');
 });
 
 test('cohort editor has an explicit path back to the library and keeps unsaved edits', async () => {
@@ -569,7 +627,7 @@ test('single-persona regeneration targets one ID and adoption is stale-safe and 
   const proposal = structuredClone(S.doc); proposal.cohorts[0].personas[0] = replacement;
   browser.respond('/api/agent/jobs', { id: 'persona-job', engine: 'codex', status: 'completed', revision: S.revision, persona: { cohortId: cohort.id, personaId: 'person' }, proposal: { document: proposal, explanation: 'Only one persona changed.' } });
   await startPersonaJob();
-  assert.deepEqual(JSON.parse(JSON.stringify(browser.bodies.at(-1)?.body)), { engine: 'codex', prompt: 'Add a distinct family detail.', revision: S.revision, persona: { cohortId: 'cohort', personaId: 'person' } });
+  assert.deepEqual(JSON.parse(JSON.stringify(browser.bodies.at(-1)?.body)), { projectId: 'existing-research', engine: 'codex', prompt: 'Add a distinct family detail.', revision: S.revision, persona: { cohortId: 'cohort', personaId: 'person' } });
   assert.deepEqual(JSON.parse(JSON.stringify(S.doc)), original, 'generation leaves the saved draft untouched');
   assert.match(browser.client.personaDetail(cohort), /Updated participant/);
 
@@ -581,6 +639,38 @@ test('single-persona regeneration targets one ID and adoption is stale-safe and 
   assert.equal(cohort.personas[0].label, 'Updated participant');
   assert.deepEqual(cohort.personas[1], original.cohorts[0].personas[1]);
   assert.equal(JSON.stringify(S.doc.pipelines), JSON.stringify(original.pipelines));
+});
+
+test('persona regeneration proposals stay isolated to the project that requested them', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, startPersonaJob, selectProject, adoptPersonaProposal } = browser.client;
+  const otherCohort = structuredClone(S.doc.cohorts[0]);
+  otherCohort.id = 'other-cohort'; otherCohort.name = 'Other project cohort';
+  otherCohort.personas[0].id = 'other-person'; otherCohort.personas[0].label = 'Keep other project person';
+  S.doc.cohorts.push(otherCohort);
+  S.doc.projects.push({ id: 'other-project', name: 'Other project', description: '', cohortIds: [otherCohort.id], pipelineIds: [] });
+  S.cohortId = 'cohort'; S.personId = 'person'; S.localEngine = 'codex'; S.localEngines = [{ id: 'codex', available: true }];
+  const proposal = structuredClone(S.doc);
+  proposal.cohorts.find(c => c.id === 'cohort')!.personas[0]!.label = 'First project replacement';
+  browser.respond('/api/agent/jobs', { id: 'first-project-persona-job', projectId: 'existing-research', engine: 'codex', status: 'completed', revision: S.revision, persona: { cohortId: 'cohort', personaId: 'person' }, proposal: { document: proposal, explanation: 'One persona in the first project changed.' } });
+  await startPersonaJob();
+  assert.equal((browser.bodies.at(-1)?.body as any).projectId, 'existing-research');
+  const firstProjectJob = S.localJob;
+
+  selectProject('other-project'); await settle();
+  assert.equal(S.localJob, null, 'a completed persona proposal from another project is not shown');
+  S.localJob = firstProjectJob;
+  assert.throws(adoptPersonaProposal, /Open the project that generated this draft/);
+  S.localJob = null;
+  adoptPersonaProposal();
+  assert.equal(S.doc.cohorts.find(c => c.id === 'other-cohort')!.personas[0]!.label, 'Keep other project person');
+  assert.equal(S.doc.cohorts.find(c => c.id === 'cohort')!.personas[0]!.label, 'Adult participant');
+
+  selectProject('existing-research'); await settle();
+  assert.equal(S.localJob?.projectId, 'existing-research', 'returning restores only that project’s proposal');
+  adoptPersonaProposal();
+  assert.equal(S.doc.cohorts.find(c => c.id === 'cohort')!.personas[0]!.label, 'First project replacement');
+  assert.equal(S.doc.cohorts.find(c => c.id === 'other-cohort')!.personas[0]!.label, 'Keep other project person');
 });
 
 test('cohort generation is entered explicitly and its return action restores the right editor', async () => {
@@ -644,7 +734,7 @@ test('cohort editor keeps management controls without study execution or inferen
   assert.doesNotMatch(html, /running this study|Review before inference/i);
 });
 
-test('workspace tabs clear stale cohort and pipeline selections while preserving the draft', async () => {
+test('workspace tabs clear cohort selections and open the project pipeline while preserving the draft', async () => {
   const browser = browserHarness(); await settle();
   const { S, act } = browser.client;
   const draft = structuredClone(S.doc);
@@ -659,7 +749,28 @@ test('workspace tabs clear stale cohort and pipeline selections while preserving
 
   S.pipelineId = 'study'; S.stageId = 'panel';
   act(null, { dataset: { act: 'tab', tab: 'studies' } });
-  assert.equal(S.pipelineId, null); assert.equal(S.stageId, null);
+  assert.equal(S.pipelineId, 'study'); assert.equal(S.stageId, 'panel');
   assert.match(browser.element('app').innerHTML, /role="tablist"/);
   assert.deepEqual(JSON.parse(JSON.stringify(S.doc)), JSON.parse(JSON.stringify(draft)));
+});
+
+
+test('project detail submission saves metadata and pipeline creation assigns ownership', async () => {
+  const browser = browserHarness(); await settle();
+  const { S } = browser.client;
+  const submit = (kind: string, values: Record<string, string>) => {
+    const form = { dataset: { form: kind }, values };
+    browser.listeners.get('submit')!({ target: { closest: () => form }, preventDefault() {} });
+  };
+  S.flushing = true;
+  submit('project-settings', { name: 'Renamed project', description: 'Updated research brief' });
+  S.flushing = false;
+  assert.equal(S.doc.projects[0].name, 'Renamed project');
+  assert.equal(S.doc.projects[0].description, 'Updated research brief');
+  S.doc.pipelines = []; S.doc.projects[0].pipelineIds = [];
+  submit('new-pipeline', { question: 'Which service is preferred?' });
+  assert.equal(S.doc.pipelines.length, 1);
+  assert.equal(S.doc.projects[0].pipelineIds[0], S.doc.pipelines[0].id);
+  submit('new-pipeline', { question: 'Second pipeline?' });
+  assert.equal(S.doc.pipelines.length, 1, 'new project keeps one pipeline');
 });

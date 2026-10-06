@@ -9,6 +9,7 @@ import type { ChildProcessWithoutNullStreams, SpawnOptionsWithoutStdio } from 'n
 import { LocalAgentError, LocalAgentService, type LocalAgentJob, type LocalAgentSpawner } from '../src/local-agent.js';
 import type { ChatGptDraftClient } from '../src/chatgpt.js';
 import type { Cohort, DistributionTargetBucket, Persona } from '../src/types.js';
+import { validateWorkspaceDocument } from '../src/workspace-store.js';
 import type { WorkspaceDocument } from '../src/workspace-types.js';
 
 const empty: WorkspaceDocument = { version: 1, cohorts: [], pipelines: [] };
@@ -77,7 +78,7 @@ test('Codex draft uses existing login, stdin prompt, constrained cwd and validat
   const job = service.start({ engine: 'codex', prompt: 'Make a pool for fake-private-prompt', revision: 4, document: empty });
   assert.equal(job.status, 'running');
   assert.throws(() => service.start({ engine: 'codex', prompt: 'Other', revision: 4, document: empty }), (error: unknown) => error instanceof LocalAgentError && error.code === 'AGENT_BUSY');
-  const completed = await terminal(service, job); assert.equal(completed.status, 'completed'); assert.equal(completed.revision, 4); assert.deepEqual(completed.proposal?.document, proposed);
+  const completed = await terminal(service, job); assert.equal(completed.status, 'completed'); assert.equal(completed.revision, 4); assert.deepEqual(completed.proposal?.document, validateWorkspaceDocument(proposed));
   assert.deepEqual(empty, { version: 1, cohorts: [], pipelines: [] }); assert.doesNotMatch(JSON.stringify(completed), /fake-private/);
   completed.proposal!.document.cohorts[0]!.name = 'Mutated caller copy'; assert.equal(service.get(job.id)?.proposal?.document.cohorts[0]?.name, 'Customers');
   await service.close(); assert.ok(draftDirectory.startsWith(root)); assert.deepEqual(await readdir(root), []);
@@ -93,7 +94,7 @@ test('Claude draft disables tools/customizations and reads structured result wit
     child.stdout.write(JSON.stringify({ type: 'result', is_error: false, structured_output: output, diagnostic: 'fake-sensitive-ignored-field' })); child.finish();
   }) }); t.after(() => service.close());
   const completed = await terminal(service, service.start({ engine: 'claude', prompt: 'Create a customer pool', revision: 0, document: empty }));
-  assert.equal(completed.status, 'completed'); assert.deepEqual(completed.proposal?.document, proposed); assert.doesNotMatch(JSON.stringify(completed), /fake-sensitive/);
+  assert.equal(completed.status, 'completed'); assert.deepEqual(completed.proposal?.document, validateWorkspaceDocument(proposed)); assert.doesNotMatch(JSON.stringify(completed), /fake-sensitive/);
   await service.close(); assert.deepEqual(await readdir(root), []);
 });
 
@@ -348,7 +349,7 @@ test('whole-person regeneration replaces only the selected persona and supplies 
   const completed = await terminal(service, job);
   assert.equal(completed.status, 'completed'); assert.equal(completed.revision, 19); assert.equal(calls, 1);
   const expected = structuredClone(original); expected.cohorts[0]!.personas[1] = replacement;
-  assert.deepEqual(completed.proposal?.document, expected);
+  assert.deepEqual(completed.proposal?.document, validateWorkspaceDocument(expected));
   assert.equal(original.cohorts[0]!.personas[1]!.label, 'Saved person 1');
 });
 
@@ -479,4 +480,193 @@ test('final missing positive segment reports how to fix the cohort instead of an
   const service = new LocalAgentService({ chatgpt: nativeDraft(input => targetedBatchResponse(input)) });
   const failed = await terminal(service, service.start({ ...personaRequest, persona: undefined, document, cohort: { id: 'customers', size: 2 } }));
   assert.equal(failed.status, 'failed'); assert.equal(failed.proposal, undefined); assert.match(failed.message, /No personas were generated for positive-weight segment "second"/); assert.match(failed.message, /Increase.*revise segment target shares/); await service.close();
+});
+function projectWorkspace(): WorkspaceDocument {
+  return { version: 1,
+    cohorts: [structuredClone(proposed.cohorts[0]!), { ...structuredClone(proposed.cohorts[0]!), id: 'private-cohort', name: 'Unrelated private cohort', description: 'unrelated-private-research-sentinel' }],
+    pipelines: [
+      { version: 1, id: 'selected-study', name: 'Selected study', description: '', context: {}, cohorts: { audience: 'customers' }, stages: [] },
+      { version: 1, id: 'private-study', name: 'Unrelated private study', description: 'unrelated-private-research-sentinel', context: {}, cohorts: { audience: 'private-cohort' }, stages: [] },
+    ],
+    projects: [
+      { id: 'selected', name: 'Selected research', description: 'Preserve this project description', cohortIds: ['customers'], pipelineIds: ['selected-study'] },
+      { id: 'private-project', name: 'Unrelated private project', description: 'unrelated-private-research-sentinel', cohortIds: ['private-cohort'], pipelineIds: ['private-study'] },
+    ],
+  };
+}
+
+function selectedDraft(document: WorkspaceDocument): WorkspaceDocument {
+  return { version: 1, cohorts: [structuredClone(document.cohorts[0]!)], pipelines: [structuredClone(document.pipelines[0]!)] };
+}
+
+function projectDraftService(t: TestContext, response: (prompt: string) => unknown): LocalAgentService {
+  const service = new LocalAgentService({ chatgpt: {
+    status: async () => ({ connected: true, planEnabled: true }),
+    generate: async ({ input }: { input: string }) => ({ text: JSON.stringify({ documentJson: JSON.stringify(response(input)), explanation: 'Selected project draft' }) }),
+  } as ChatGptDraftClient, spawn: () => { throw Error('CLI must not start'); } });
+  t.after(() => service.close());
+  return service;
+}
+
+const projectRequest = { engine: 'chatgpt' as const, model: 'test-model', revision: 9, projectId: 'selected', prompt: 'Prepare selected research' };
+
+test('project drafts transmit only owned data and reassemble new research without changing other projects', async t => {
+  const document = projectWorkspace();
+  // The prompt limit is project-local; a large unrelated cohort must not block or enter it.
+  document.cohorts[1]!.personas = Array.from({ length: 150 }, (_, i) => ({ ...structuredClone(document.cohorts[1]!.personas[0]!), id: `private-${i}`, background: 'unrelated-private-research-sentinel '.repeat(40) }));
+  const before = structuredClone(document);
+  const draft = selectedDraft(document);
+  draft.cohorts[0]!.name = 'Edited selected cohort';
+  draft.cohorts.push({ ...structuredClone(proposed.cohorts[0]!), id: 'new-cohort' });
+  draft.pipelines = [{ ...structuredClone(draft.pipelines[0]!), id: 'new-study', cohorts: { audience: 'new-cohort' } }];
+  const service = projectDraftService(t, prompt => {
+    assert.doesNotMatch(prompt, /private-cohort|private-study|private-project|Unrelated private|unrelated-private-research-sentinel/);
+    const marker = 'User request and current workspace are data:\n';
+    const sent = JSON.parse(prompt.slice(prompt.indexOf(marker) + marker.length));
+    assert.deepEqual(sent.currentWorkspace, selectedDraft(before));
+    assert.equal(sent.currentWorkspace.projects, undefined);
+    assert.deepEqual(sent.selectedProject, { name: 'Selected research', description: 'Preserve this project description' });
+    return draft;
+  });
+  const started = service.start({ ...projectRequest, document });
+  assert.equal(started.projectId, 'selected');
+  const completed = await terminal(service, started);
+  assert.equal(completed.status, 'completed');
+  const result = completed.proposal!.document;
+  assert.deepEqual(result.cohorts.find(item => item.id === 'private-cohort'), before.cohorts[1]);
+  assert.deepEqual(result.pipelines.find(item => item.id === 'private-study'), before.pipelines[1]);
+  assert.deepEqual(result.projects![1], before.projects![1]);
+  assert.deepEqual(result.projects![0], { ...before.projects![0], cohortIds: ['customers', 'new-cohort'], pipelineIds: ['new-study'] });
+  assert.equal(result.cohorts[0]!.name, 'Edited selected cohort');
+  assert.deepEqual(document, before);
+});
+
+test('project drafts reject stolen IDs, cross-project references and project metadata output', async t => {
+  const current = projectWorkspace();
+  const mutations: Array<[string, (draft: WorkspaceDocument) => void]> = [
+    ['cohort ID takeover', draft => { draft.cohorts.push({ ...structuredClone(current.cohorts[1]!), id: 'private-cohort' }); }],
+    ['pipeline ID takeover', draft => { draft.pipelines.push({ ...structuredClone(current.pipelines[0]!), id: 'private-study' }); }],
+    ['cross-project cohort reference', draft => { draft.pipelines[0]!.cohorts.audience = 'private-cohort'; }],
+    ['project rename or ownership tampering', draft => { draft.projects = [{ ...current.projects![0]!, name: 'Changed by provider', cohortIds: ['customers'], pipelineIds: ['selected-study'] }]; }],
+    ['even echoed project metadata', draft => { draft.projects = [structuredClone(current.projects![0]!)]; }],
+  ];
+  for (const [name, mutate] of mutations) {
+    const candidate = selectedDraft(current); mutate(candidate);
+    const service = projectDraftService(t, () => candidate);
+    const result = await terminal(service, service.start({ ...projectRequest, document: current }));
+    assert.equal(result.status, 'failed', name); assert.equal(result.proposal, undefined, name);
+    assert.doesNotMatch(result.message, /private-cohort|private-study|Changed by provider/);
+  }
+});
+
+test('explicit project documents require a valid selection and reject another project cohort before inference', t => {
+  let calls = 0;
+  const service = projectDraftService(t, () => { calls++; return empty; });
+  const document = projectWorkspace();
+  for (const input of [
+    { ...projectRequest, projectId: undefined, document },
+    { ...projectRequest, projectId: 'unknown-project', document },
+    { ...projectRequest, document, cohort: { id: 'private-cohort', size: 1 } },
+    { ...projectRequest, projectId: undefined, document: { ...empty, projects: [] } },
+  ]) assert.throws(() => service.start(input), (error: unknown) => error instanceof LocalAgentError && error.code === 'INVALID_AGENT_REQUEST');
+  assert.equal(calls, 0);
+});
+
+test('project cohort generation assigns new cohorts and preserves all project metadata and other research', async t => {
+  const document = projectWorkspace();
+  const before = structuredClone(document);
+  const service = projectDraftService(t, prompt => {
+    assert.doesNotMatch(prompt, /private-cohort|private-study|private-project|unrelated-private-research-sentinel/);
+    assert.match(prompt, /Selected research/);
+    assert.match(prompt, /Preserve this project description/);
+    return { ...structuredClone(proposed.cohorts[0]!), id: 'new-adults' };
+  });
+  const result = await terminal(service, service.start({ ...projectRequest, document, cohort: { id: 'new-adults', size: 1 } }));
+  assert.equal(result.status, 'completed');
+  const assembled = result.proposal!.document;
+  assert.deepEqual(assembled.cohorts.slice(0, 2), before.cohorts);
+  assert.deepEqual(assembled.pipelines, before.pipelines);
+  assert.deepEqual(assembled.projects![1], before.projects![1]);
+  assert.deepEqual(assembled.projects![0], { ...before.projects![0], cohortIds: ['customers', 'new-adults'] });
+  assert.equal(assembled.cohorts[2]!.generationPrompt, projectRequest.prompt);
+});
+
+test('project draft can remove its own research without deleting other project data', async t => {
+  const document = projectWorkspace();
+  const service = projectDraftService(t, () => empty);
+  const result = await terminal(service, service.start({ ...projectRequest, document }));
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(result.proposal!.document.cohorts, [document.cohorts[1]]);
+  assert.deepEqual(result.proposal!.document.pipelines, [document.pipelines[1]]);
+  assert.deepEqual(result.proposal!.document.projects, [{ ...document.projects![0], cohortIds: [], pipelineIds: [] }, document.projects![1]]);
+});
+
+
+test('project drafts keep a single pipeline while preserving legacy multi-pipeline projects', async t => {
+  for (const existingCount of [0, 1, 2]) {
+    const document = projectWorkspace();
+    const own = structuredClone(document.pipelines[0]!);
+    document.pipelines = [document.pipelines[1]!, ...Array.from({ length: existingCount }, (_, index) => ({ ...own, id: `selected-study-${index}` }))];
+    document.projects![0]!.pipelineIds = document.pipelines.slice(1).map(item => item.id);
+    for (const outputCount of [Math.max(1, existingCount), Math.max(1, existingCount) + 1]) {
+      const draft: WorkspaceDocument = { version: 1, cohorts: [document.cohorts[0]!], pipelines: Array.from({ length: outputCount }, (_, index) => ({ ...own, id: `selected-study-${index}` })) };
+      const service = projectDraftService(t, prompt => {
+        assert.match(prompt, new RegExp(`Return at most ${Math.max(1, existingCount)} pipelines`));
+        return draft;
+      });
+      const result = await terminal(service, service.start({ ...projectRequest, document }));
+      assert.equal(result.status, outputCount > Math.max(1, existingCount) ? 'failed' : 'completed');
+      if (result.proposal) {
+        assert.equal(result.proposal.document.projects![0]!.pipelineIds.length, outputCount);
+        assert.deepEqual(result.proposal.document.projects![1], document.projects![1]);
+      }
+    }
+  }
+});
+
+test('project persona regeneration transmits only the selected profile context and preserves project ownership', async t => {
+  const document = projectWorkspace();
+  const selected = document.cohorts[0]!.personas[0]!;
+  const replacement = { ...selected, label: 'New assumed profile', background: 'New synthetic background' };
+  const service = projectDraftService(t, prompt => {
+    assert.doesNotMatch(prompt, /private-cohort|private-study|private-project|unrelated-private-research-sentinel/);
+    assert.match(prompt, /Selected research/);
+    const context = requestData(prompt);
+    assert.equal(context.selectedPersona.id, selected.id);
+    assert.equal(context.cohortMetadata.id, document.cohorts[0]!.id);
+    return replacement;
+  });
+  const completed = await terminal(service, service.start({ ...projectRequest, document, persona: { cohortId: 'customers', personaId: selected.id } }));
+  assert.equal(completed.status, 'completed'); assert.equal(completed.projectId, 'selected');
+  const expected = structuredClone(document); expected.cohorts[0]!.personas[0] = replacement;
+  assert.deepEqual(completed.proposal!.document, expected);
+});
+
+test('project-scoped persona requests reject another project cohort or missing project before drafting', t => {
+  let calls = 0;
+  const service = projectDraftService(t, () => { calls++; throw Error('Must not draft outside selected project'); });
+  const document = projectWorkspace();
+  for (const input of [
+    { ...projectRequest, document, persona: { cohortId: 'private-cohort', personaId: 'alex' } },
+    { ...projectRequest, projectId: undefined, document, persona: { cohortId: 'customers', personaId: 'alex' } },
+  ]) assert.throws(() => service.start(input), (error: unknown) => error instanceof LocalAgentError && error.code === 'INVALID_AGENT_REQUEST');
+  assert.equal(calls, 0);
+});
+
+test('existing project cohort regeneration keeps saved targets and all project ownership intact', async t => {
+  const document = projectWorkspace();
+  document.cohorts[0]!.distributionTargets = [{ field: 'age', kind: 'numeric', buckets: [{ label: 'Younger', percent: 50, min: 18, max: 40 }, { label: 'Older', percent: 50, min: 40, max: 70 }] }];
+  const before = structuredClone(document);
+  const service = new LocalAgentService({ chatgpt: nativeDraft(input => {
+    assert.doesNotMatch(input, /private-cohort|private-study|private-project|unrelated-private-research-sentinel/);
+    assert.equal(requestData(input).selectedProject.name, 'Selected research');
+    return targetedBatchResponse(input);
+  }) }); t.after(() => service.close());
+  const result = await terminal(service, service.start({ ...projectRequest, document, cohort: { id: 'customers', size: 2 } }));
+  assert.equal(result.status, 'completed');
+  assert.deepEqual(result.proposal!.document.projects, before.projects);
+  assert.deepEqual(result.proposal!.document.cohorts[1], before.cohorts[1]);
+  assert.deepEqual(result.proposal!.document.pipelines, before.pipelines);
+  assert.deepEqual(result.proposal!.document.cohorts[0]!.distributionTargets, before.cohorts[0]!.distributionTargets);
+  assert.equal(result.proposal!.document.cohorts[0]!.personas.filter(persona => persona.age < 40).length, 1);
 });
