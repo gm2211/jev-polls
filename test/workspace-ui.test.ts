@@ -16,7 +16,7 @@ test('the served workspace client parses and embeds its session token safely', (
   assert.doesNotMatch(html, /<script[^>]+src=/);
 });
 
-function browserHarness(openExistingProject = true) {
+function browserHarness(openExistingProject = true, preferences = new Map<string, string>()) {
   const documentValue = { version: 1, cohorts: [{ id: 'cohort', name: 'Original cohort', population: 'Adults', description: '', assumptions: [], sources: [], segments: [], personas: [{ id: 'person', label: 'Adult participant', age: 30, segment: 'general', weight: 1, background: 'Independent background', attributes: {}, sourceIds: [], syntheticFields: ['background'] }] }], pipelines: [{ id: 'study', name: 'Original study', description: '', stages: [{ id: 'panel', label: 'First question', kind: 'poll', cohort: 'audience', questions: { answer: { type: 'choice', label: 'Which option fits?', instructions: 'Choose an option.', criteria: { a: 'A', b: 'B' } } }, inputs: {}, dependsOn: [] }], cohorts: { audience: 'cohort' } }] };
   let snapshot = { revision: 1, document: documentValue, auth: { configured: true, source: 'keychain' }, runs: [], activeRun: null };
   const elements = new Map<string, any>();
@@ -25,7 +25,8 @@ function browserHarness(openExistingProject = true) {
   const timeouts: Function[] = [];
   const requests: string[] = [];
   const bodies: Array<{ path: string; body: unknown }> = [];
-  const responses = new Map<string, unknown>();
+  const responses = new Map<string, unknown>([['/api/local-agents', { engines: [] }], ['/api/chatgpt/status', { connected: false, planEnabled: false }]]);
+  const failures = new Map<string, string>();
   const storage = new Map<string, string>();
   class TestFormData {
     constructor(private readonly form: any) {}
@@ -39,23 +40,32 @@ function browserHarness(openExistingProject = true) {
   }
   const context = {
     location: { origin: "http://127.0.0.1:4180" },
+    localStorage: { getItem: (key: string) => preferences.get(key) ?? null, setItem: (key: string, value: string) => preferences.set(key, value), removeItem: (key: string) => preferences.delete(key) },
     sessionStorage: { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value), removeItem: (key: string) => storage.delete(key) },
     document: { getElementById: element, querySelectorAll: () => [], visibilityState: 'visible', addEventListener: (name: string, fn: Function) => listeners.set(name, fn) },
     window: { addEventListener: (name: string, fn: Function) => listeners.set(name, fn) },
-    fetch: async (path: string, options?: { body?: string }) => { requests.push(path); if (options?.body) bodies.push({ path, body: JSON.parse(options.body) }); return { ok: true, json: async () => JSON.parse(JSON.stringify(await (responses.get(path) ?? snapshot))) }; },
+    fetch: async (path: string, options?: { method?: string; body?: string }) => {
+      requests.push(path); if (options?.body) bodies.push({ path, body: JSON.parse(options.body) });
+      const key = (options?.method || 'GET') + ' ' + path;
+      const data = await (responses.get(key) ?? responses.get(path) ?? snapshot);
+      const failure = failures.get(key) ?? failures.get(path);
+      return { ok: !failure, json: async () => JSON.parse(JSON.stringify(failure ? { error: { message: failure } } : data)) };
+    },
     setTimeout: (fn: Function) => { timeouts.push(fn); return timeouts.length; }, clearTimeout() {}, setInterval: (fn: Function) => { intervals.push(fn); return 1; },
     navigator: {}, URL, confirm: () => { throw new Error('Unexpected native confirmation'); },
     FormData: TestFormData,
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
   if (openExistingProject) (context as any).clientTest.S.projectId = 'existing-research';
   return {
     client: (context as typeof context & { clientTest: any }).clientTest, window: context.window,
-    element, listeners, intervals, timeouts, requests, bodies, storage, respond: (path: string, value: unknown) => responses.set(path, value),
+    element, listeners, intervals, timeouts, requests, bodies, storage,
+    respond: (path: string, value: unknown, method?: string) => responses.set(method ? method + ' ' + path : path, value),
+    fail: (path: string, message: string, method?: string) => failures.set(method ? method + ' ' + path : path, message),
     setSnapshot: (value: typeof snapshot) => { snapshot = value; },
     snapshot: () => structuredClone(snapshot),
     document: context.document,
@@ -235,8 +245,9 @@ test('background sync pauses while hidden and agent configuration remains escape
   await settle();
   assert.equal(browser.requests.length, requests + 1);
   browser.client.S.agentConfig = { codexCommand: 'codex mcp add jev -- node </textarea><script>bad()</script>', claudeCommand: 'claude setup', mcpConfig: { mcpServers: {} }, guidePrompt: 'Prepare <personas> with sources.' };
-  const html = browser.client.agents();
-  assert.match(html, /Your agent prepares\. Jev evaluates\./);
+  assert.match(browser.client.agents(), /Your agent prepares\. Jev evaluates\./);
+  browser.client.S.aiSection = 'external';
+  const html = browser.client.aiSettingsContent();
   assert.match(html, /&lt;\/textarea&gt;&lt;script&gt;/);
   assert.doesNotMatch(html, /<script>bad/);
   const field = browser.element('agentSetup');
@@ -295,17 +306,178 @@ test('local assistant submits saved revision and keeps proposal separate until e
   assert.equal(browser.requests.some(path => path === '/api/run'), false, 'drafting and apply never run TypeSafe polls');
 });
 
-test('local assistant refuses unsaved work and stale proposals without posting mutations', async () => {
+test('local assistant refuses stale proposals without posting mutations', async () => {
   const browser = browserHarness();
   await settle();
-  const { S, startLocalJob, applyLocalProposal } = browser.client;
-  S.localEngines = [{ id: 'codex', available: true }]; S.localPrompt = 'Prepare a pool'; S.dirty = true;
-  await assert.rejects(startLocalJob(), /Save your changes/);
-  S.dirty = false;
+  const { S, applyLocalProposal } = browser.client;
   S.localJob = { id: 'stale', engine: 'codex', status: 'completed', revision: 0, proposal: { document: browser.snapshot().document, explanation: 'Old proposal' } };
   await assert.rejects(applyLocalProposal(), /Workspace changed/);
   assert.equal(browser.bodies.length, 0);
   assert.match(browser.client.proposalReview(S.localJob), /Prepare a new proposal/);
+});
+
+for (const mode of ['cohort', 'persona', 'assistant'] as const) {
+  test(`${mode} generation saves typed draft edits first and uses the returned revision`, async () => {
+    const browser = browserHarness(); await settle();
+    const { S, startCohortJob, startPersonaJob, startLocalJob } = browser.client;
+    S.localEngine = 'codex'; S.localEngines = [{ id: 'codex', available: true }];
+    S.cohortId = 'cohort'; S.personId = 'person'; S.cohortTarget = 'cohort';
+    S.cohortPrompt = 'Adults with varied reading habits'; S.cohortSize = 2;
+    S.personaRegenPrompt = 'Generate a different individual'; S.localPrompt = 'Draft a reading study';
+    S.dirty = true;
+    const name = 'Typed cohort brief before generation';
+    const form: any = { dataset: { form: 'cohort' }, reportValidity: () => true, values: {
+      name, population: 'Adult readers', description: 'Unsubmitted context', generationPrompt: 'Readers', assumptions: 'Synthetic people',
+    } };
+    form.requestSubmit = () => browser.listeners.get('submit')!({ target: { closest: () => form }, preventDefault() {} });
+    browser.element('app').querySelectorAll = (selector: string) => selector === '[data-form]' ? [form] : [];
+    const saved = structuredClone(S.doc);
+    Object.assign(saved.cohorts[0], { name, population: 'Adult readers', description: 'Unsubmitted context', generationPrompt: 'Readers', assumptions: ['Synthetic people'] });
+    browser.respond('/api/workspace', { revision: 7, document: saved }, 'POST');
+    browser.respond('/api/agent/jobs', { id: mode + '-draft', revision: 7, status: 'failed', message: 'No model needed for this test' });
+    await ({ cohort: startCohortJob, persona: startPersonaJob, assistant: startLocalJob })[mode]();
+    assert.deepEqual(browser.bodies.map(request => request.path), ['/api/workspace', '/api/agent/jobs']);
+    assert.deepEqual(browser.bodies[0], { path: '/api/workspace', body: { revision: 1, document: saved } });
+    const expectedDetails = mode === 'cohort' ? { prompt: S.cohortPrompt, cohort: { id: 'cohort', size: 2 } }
+      : mode === 'persona' ? { prompt: S.personaRegenPrompt, persona: { cohortId: 'cohort', personaId: 'person' } }
+      : { prompt: S.localPrompt };
+    assert.deepEqual(browser.bodies[1], { path: '/api/agent/jobs', body: { projectId: 'existing-research', engine: 'codex', ...expectedDetails, revision: 7 } });
+    assert.equal(S.revision, 7); assert.equal(S.dirty, false); assert.equal(S.doc.cohorts[0].name, name);
+    assert.equal(browser.requests.includes('/api/run'), false);
+  });
+}
+
+test('generation retains unsaved draft and returns to its request tab when autosave fails', async () => {
+  for (const mode of ['cohort', 'assistant'] as const) {
+    for (const message of ['Workspace revision conflict: expected 1, current revision is 2', 'Workspace could not be written']) {
+      const browser = browserHarness(); await settle();
+      const { S, startCohortJob, startLocalJob } = browser.client;
+      S.localEngine = 'codex'; S.localEngines = [{ id: 'codex', available: true }];
+      S.cohortPrompt = 'Synthetic adult readers'; S.localPrompt = 'Draft a reading study'; S.dirty = true;
+      S.tab = mode === 'cohort' ? 'cohorts' : 'agents'; S.cohortComposer = mode === 'cohort';
+      S.sections['cohort-generation'] = 'review'; S.sections.assistant = 'proposal';
+      S.doc.cohorts[0].description = 'Keep my unsaved changes';
+      const before = JSON.stringify(S.doc);
+      browser.fail('/api/workspace', message, 'POST');
+      await (mode === 'cohort' ? startCohortJob : startLocalJob)();
+      assert.deepEqual(browser.bodies.map(request => request.path), ['/api/workspace']);
+      assert.equal(S.localError, message); assert.equal(S.dirty, true); assert.equal(S.revision, 1);
+      assert.equal(JSON.stringify(S.doc), before); assert.equal(S.localStarting, false);
+      assert.equal(browser.element('app').inert, false);
+      const sectionKey = mode === 'cohort' ? 'cohort-generation' : 'assistant', section = mode === 'cohort' ? 'prompt' : 'draft';
+      assert.equal(S.sections[sectionKey], section);
+      assert.match(browser.element('app').innerHTML, new RegExp('data-section-key="' + sectionKey + '" data-section-id="' + section + '" >'));
+      assert.equal(browser.element('app').innerHTML.includes(message), true, 'save error remains visible in the active request panel');
+    }
+  }
+});
+
+
+test('invalid editor fields stop generation before saving and leave the draft intact', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, startPersonaJob } = browser.client;
+  S.localEngine = 'codex'; S.localEngines = [{ id: 'codex', available: true }];
+  S.cohortId = 'cohort'; S.personId = 'person'; S.dirty = true;
+  const before = JSON.stringify(S.doc); let checked = 0;
+  browser.element('app').querySelectorAll = (selector: string) => selector === '[data-form]' ? [{
+    dataset: { form: 'persona' }, reportValidity: () => { checked++; return false; },
+    requestSubmit: () => assert.fail('Invalid form must not submit'),
+  }] : [];
+  await assert.rejects(startPersonaJob(), /Complete the invalid fields/);
+  assert.equal(checked, 1); assert.equal(S.dirty, true); assert.equal(JSON.stringify(S.doc), before);
+  assert.equal(browser.bodies.length, 0); assert.equal(S.localStarting, false);
+});
+
+test('draft start remains locked across autosave and job request and ignores an in-flight refresh', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, refresh, startCohortJob, selectProject } = browser.client;
+  S.localEngine = 'codex'; S.localEngines = [{ id: 'codex', available: true }]; S.cohortPrompt = 'Synthetic adult readers';
+  let finishRefresh!: (value: unknown) => void, finishSave!: (value: unknown) => void, finishStart!: (value: unknown) => void;
+  browser.respond('/api/workspace', new Promise(resolve => { finishRefresh = resolve; }), 'GET');
+  browser.respond('/api/workspace', new Promise(resolve => { finishSave = resolve; }), 'POST');
+  browser.respond('/api/agent/jobs', new Promise(resolve => { finishStart = resolve; }));
+  const refreshing = refresh();
+  S.dirty = true; S.doc.cohorts[0].name = 'Current typed audience';
+  const saved = structuredClone(S.doc), starting = startCohortJob();
+  assert.equal(S.localStarting, true); assert.equal(browser.element('app').inert, true);
+  assert.throws(() => selectProject(null), /Wait for the drafting request/);
+  await startCohortJob();
+  finishRefresh({ ...browser.snapshot(), revision: 99 }); await refreshing;
+  assert.equal(S.revision, 1); assert.equal(S.remoteRevision, null); assert.equal(S.doc.cohorts[0].name, 'Current typed audience');
+  finishSave({ revision: 7, document: saved }); await settle();
+  assert.equal(S.revision, 7); assert.equal(S.localStarting, true); assert.equal(browser.element('app').inert, true);
+  await startCohortJob();
+  await browser.listeners.get('change')!({ target: { name: 'localEngine', value: 'claude' } });
+  browser.listeners.get('click')!({ target: { closest: () => ({ dataset: { act: 'projects' } }) }, preventDefault() {} });
+  assert.equal(S.localEngine, 'codex'); assert.equal(S.projectId, 'existing-research');
+  assert.deepEqual(browser.bodies.map(request => request.path), ['/api/workspace', '/api/agent/jobs']);
+  assert.equal((browser.bodies[1]!.body as any).revision, 7);
+  finishStart({ id: 'single-start', revision: 7, status: 'failed', message: 'Finished without inference' }); await starting;
+  assert.equal(S.localStarting, false); assert.equal(S.localLoading, false); assert.equal(browser.element('app').inert, false);
+});
+
+test('global AI settings preserve editor DOM and draft state across workspace views', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, render, aiSettingsContent } = browser.client;
+  const engines = [{ id: 'codex', label: 'Codex', available: true }, { id: 'chatgpt', label: 'ChatGPT subscription', available: true }];
+  S.localEngines = engines; S.localEngine = 'codex';
+  browser.respond('/api/local-agents', { engines });
+  browser.respond('/api/chatgpt/status', { connected: true, planEnabled: true, account: { id: 'account', label: 'Account' }, accounts: [] });
+  browser.respond('/api/chatgpt/models', { models: [{ id: 'draft-model', name: 'Draft model' }] });
+  const click = (act: string) => browser.listeners.get('click')!({ target: { closest: () => ({ dataset: { act } }) }, preventDefault() {} });
+  for (const [index, view] of ['cohorts', 'persona', 'studies', 'agents'].entries()) {
+    const tab = view === 'persona' ? 'cohorts' : view;
+    S.tab = tab; S.dirty = index !== 0; S.cohortId = 'cohort'; S.personId = 'person';
+    S.pipelineId = 'study'; S.stageId = 'panel';
+    S.personaOpen = view === 'persona'; S.personaRegenOpen = view === 'persona'; S.sections['persona-detail'] = 'regenerate';
+    S.cohortComposer = view === 'cohorts'; S.cohortPrompt = 'Typed cohort prompt'; S.localPrompt = 'Typed assistant request';
+    render();
+    assert.doesNotMatch(browser.element('app').innerHTML, /name="(?:localEngine|chatgptModel|chatgptCustomModelId)"/);
+    const draft = JSON.stringify(S.doc), dirty = S.dirty, currentDom = 'Unsaved editor DOM with caret ' + tab;
+    browser.element('app').innerHTML = currentDom;
+    browser.element('app').querySelectorAll = (selector: string) => selector === '[data-form]' ? [{
+      dataset: { form: 'cohort' }, reportValidity: () => assert.fail('AI settings must not validate the draft'),
+    }] : [];
+    click('ai-open'); await settle();
+    assert.equal(browser.element('aiSettingsDialog').open, true);
+    await browser.listeners.get('change')!({ target: { name: 'localEngine', value: 'chatgpt' } });
+    await browser.listeners.get('change')!({ target: { name: 'chatgptModel', value: 'draft-model' } });
+    click('ai-close');
+    assert.equal(browser.element('aiSettingsDialog').open, false);
+    assert.equal(browser.element('app').innerHTML, currentDom); assert.equal(JSON.stringify(S.doc), draft); assert.equal(S.dirty, dirty);
+    assert.equal(S.cohortPrompt, 'Typed cohort prompt'); assert.equal(S.localPrompt, 'Typed assistant request');
+    assert.equal(S.localEngine, 'chatgpt'); assert.equal(S.chatgptModel, 'draft-model');
+    assert.match(browser.element('aiLabel').textContent, /ChatGPT.*draft-model/);
+    assert.match(aiSettingsContent(), /name="localEngine"/);
+  }
+  assert.equal(browser.bodies.length, 0, 'connection preferences never save or generate a workspace');
+});
+
+test('AI provider and account-scoped custom model preferences restore without saving draft data', async () => {
+  const preferences = new Map<string, string>();
+  const browser = browserHarness(true, preferences); await settle();
+  const { S } = browser.client;
+  S.chatgpt = { connected: true, planEnabled: true, account: { id: 'first-account' } };
+  S.localEngines = [{ id: 'chatgpt', available: true }, { id: 'claude', available: true }];
+  await browser.listeners.get('change')!({ target: { name: 'localEngine', value: 'chatgpt' } });
+  await browser.listeners.get('change')!({ target: { name: 'chatgptModel', value: '__custom__' } });
+  browser.listeners.get('input')!({ target: { name: 'chatgptCustomModelId', value: 'gpt-6.1-sol' } });
+  await browser.listeners.get('change')!({ target: { name: 'localEngine', value: 'claude' } });
+  assert.deepEqual(JSON.parse(preferences.get('jev-ai-selection')!), { provider: 'claude', accountId: 'first-account', model: 'gpt-6.1-sol', custom: true });
+  const reopened = browserHarness(true, preferences);
+  assert.equal(reopened.client.S.localEngine, 'claude', 'provider restores before connection checks finish');
+  reopened.respond('/api/local-agents', { engines: [{ id: 'chatgpt', available: true }, { id: 'claude', available: true }] });
+  reopened.respond('/api/chatgpt/status', { connected: true, planEnabled: true, account: { id: 'first-account' } });
+  reopened.respond('/api/chatgpt/models', { models: [{ id: 'older-model', name: 'Older model' }] });
+  await settle();
+  assert.equal(reopened.client.S.localEngine, 'claude');
+  assert.equal(reopened.client.S.chatgptModel, 'gpt-6.1-sol'); assert.equal(reopened.client.S.chatgptCustomModel, true);
+  reopened.respond('/api/chatgpt/status', { connected: true, planEnabled: true, account: { id: 'second-account' } });
+  await reopened.client.loadChatGpt();
+  assert.equal(reopened.client.S.chatgptModel, '', 'custom model does not carry into another account');
+  assert.equal(reopened.client.S.chatgptCustomModel, false);
+  assert.equal(S.dirty, false); assert.equal(reopened.client.S.dirty, false);
+  assert.equal(browser.bodies.length + reopened.bodies.length, 0, 'preferences do not persist through workspace writes');
 });
 
 test('proposal review itemizes removed cohorts and pipelines plus removals inside changed entities', async () => {
@@ -383,10 +555,8 @@ test('cohort prompt generation scopes the request and previews personas without 
 test('cohort generation preserves unsaved edits and rejects stale proposal adoption', async () => {
   const browser = browserHarness(); await settle();
   const { S, startCohortJob, adoptCohortProposal, canGenerateCohort } = browser.client;
-  S.cohortPrompt = 'Synthetic adult hikers'; S.cohortSize = 3; S.localEngines = [{ id: 'codex', available: true }];
-  S.dirty = true;
-  await assert.rejects(startCohortJob(), /Save your changes/);
-  assert.equal(browser.bodies.length, 0);
+  S.cohortPrompt = 'Synthetic adult hikers'; S.cohortSize = 3; S.localEngine = 'codex'; S.localEngines = [{ id: 'codex', available: true }];
+  S.dirty = true; assert.equal(canGenerateCohort(), true, 'valid unsaved edits do not block generation');
   S.dirty = false; S.cohortSize = 0; assert.equal(canGenerateCohort(), false);
   S.cohortSize = 3;
   S.localJob = { status: 'completed', revision: S.revision, cohort: { id: 'cohort', size: 1, prompt: S.cohortPrompt }, proposal: { document: structuredClone(S.doc), explanation: 'Draft' } };
@@ -433,7 +603,9 @@ test('ChatGPT drafting requires explicit model and carries selected model withou
   assert.equal(canGenerateCohort(), false); await assert.rejects(startLocalJob(), /Choose an available drafting provider/);
   S.chatgptModels = [{ id: 'model-one', name: 'Model One' }]; S.chatgptModel = 'model-one';
   assert.equal(canGenerateCohort(), true);
-  const html = agents(); assert.match(html, /&lt;unsafe account&gt;/); assert.match(html, /TypeSafe and its separate billing/);
+  const html = browser.client.aiSettingsContent(); assert.match(html, /&lt;unsafe account&gt;/);
+  S.aiSection = 'evaluations'; assert.match(browser.client.aiSettingsContent(), /TypeSafe/); S.aiSection = 'drafting';
+  assert.doesNotMatch(agents(), /name="(?:localEngine|chatgptModel)"/);
   browser.respond('/api/agent/jobs', { id: 'chatgpt-job', engine: 'chatgpt', status: 'failed', revision: S.revision, message: 'Test complete' });
   await startLocalJob();
   assert.deepEqual(browser.bodies.at(-1), { path: '/api/agent/jobs', body: { projectId: 'existing-research', engine: 'chatgpt', model: 'model-one', prompt: S.localPrompt, revision: S.revision } });
@@ -506,7 +678,8 @@ test('custom ChatGPT model survives catalog refresh, resets across accounts, and
   assert.equal(S.chatgptModel, 'gpt-6.1-sol'); assert.equal(S.chatgptCustomModel, true);
   assert.equal(browser.client.canGenerateCohort(), true);
   browser.respond('/api/chatgpt/models', { models: [] });
-  assert.match(browser.client.cohortGenerator(), /value="__custom__" selected/);
+  assert.match(browser.client.aiSettingsContent(), /value="__custom__" selected/);
+  assert.doesNotMatch(browser.client.cohortGenerator(), /name="(?:localEngine|chatgptModel)"/);
   browser.respond('/api/agent/jobs', { id: 'custom-model-job', status: 'failed', revision: S.revision });
   await startCohortJob();
   assert.deepEqual(browser.bodies.at(-1)?.body, { projectId: 'existing-research', engine: 'chatgpt', model: 'gpt-6.1-sol', prompt: S.cohortPrompt, revision: S.revision, cohort: { id: 'gamers', size: 100 } });
@@ -537,7 +710,8 @@ test('cohort count rejects invalid edits, permits larger cohorts, and shows othe
   assert.equal(browser.element('cohortReadiness').hidden, true); assert.equal(S.dirty, false);
   S.localEngine = 'chatgpt'; S.localEngines = [{ id: 'chatgpt', available: true }];
   assert.match(cohortBlockReason(), /Choose a drafting model/);
-  S.dirty = true; assert.match(cohortBlockReason(), /Save your current edits/);
+  S.dirty = true; assert.match(cohortBlockReason(), /Choose a drafting model/);
+  S.chatgptModel = 'chosen-model'; assert.equal(cohortBlockReason(), '');
 });
 
 
