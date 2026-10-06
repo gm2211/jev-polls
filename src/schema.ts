@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { dirname, resolve } from 'node:path';
 import { z } from 'zod';
 import type { Cohort, Condition, Pipeline, PollInputSelect, Question, Stage } from './types.js';
+import { validateTargets } from './cohort-insights.js';
 
 const safeKey = z.string().min(1).max(160).refine(v => !['__proto__', 'prototype', 'constructor'].includes(v), 'Reserved key');
 const id = safeKey.regex(/^[a-z][a-z0-9_-]*$/, 'Use lowercase letters, digits, underscores, and hyphens, starting with a letter');
@@ -11,7 +12,9 @@ const date = z.string().datetime({ offset: true });
 const source = z.object({ id, title: text, url: z.string().url().refine(value => { const u = new URL(value); return ['http:', 'https:'].includes(u.protocol) && !u.username && !u.password; }, 'Use an HTTP(S) URL without credentials'), retrievedAt: date, notes: text }).strict();
 const segment = z.object({ id, label: text, description: text, weight: z.number().finite().nonnegative(), weightBasis: z.enum(['sourced', 'assumed', 'user']), sourceIds: z.array(id) }).strict();
 const persona = z.object({ id, label: text, segment: id, age: z.number().int().min(18).max(120), background: text, attributes: z.record(safeKey, z.json()), sourceIds: z.array(id), syntheticFields: z.array(text), weight: positive }).strict();
-export const cohortSchema = z.object({ version: z.literal(1), id, name: text, description: text, population: text, createdAt: date, sources: z.array(source), segments: z.array(segment).min(1), personas: z.array(persona).min(1), assumptions: z.array(text), generationPrompt: text.max(10_000).optional() }).strict();
+const distributionTargetBucket = z.object({ label: z.string().trim().min(1).max(200), percent: z.number().finite().min(0).max(100), value: z.union([z.string().max(1000), z.number().finite(), z.boolean(), z.null()]).optional(), min: z.number().finite().optional(), max: z.number().finite().optional() }).strict();
+const distributionTarget = z.object({ field: z.string().min(1).max(256), kind: z.enum(['numeric', 'categorical']), buckets: z.array(distributionTargetBucket).min(1).max(100) }).strict();
+export const cohortSchema = z.object({ version: z.literal(1), id, name: text, description: text, population: text, createdAt: date, sources: z.array(source), segments: z.array(segment).min(1), personas: z.array(persona).min(1), assumptions: z.array(text), generationPrompt: text.max(10_000).optional(), distributionTargets: z.array(distributionTarget).max(100).optional() }).strict();
 export const questionSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('choice'), label: text, instructions: text, criteria: z.record(safeKey, z.string().nullable()).refine(v => Object.keys(v).length >= 2 && Object.keys(v).length <= 255, 'Choice requires 2–255 options') }).strict(),
   z.object({ type: z.literal('noul'), label: text, instructions: text }).strict(),
@@ -36,6 +39,7 @@ function unique(values: string[], label: string) { assert(new Set(values).size =
 
 export function parseCohort(input: unknown): Cohort {
   const c = cohortSchema.parse(input) as Cohort;
+  if (c.distributionTargets) validateTargets(c.distributionTargets);
   unique(c.sources.map(v => v.id), 'source id'); unique(c.segments.map(v => v.id), 'segment id'); unique(c.personas.map(v => v.id), 'persona id');
   const sources = new Set(c.sources.map(v => v.id)); const segments = new Set(c.segments.map(v => v.id));
   assert(c.segments.some(s => s.weight > 0), 'At least one segment must have positive weight');

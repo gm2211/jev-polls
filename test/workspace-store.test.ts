@@ -139,6 +139,17 @@ test('validation returns a detached JSON snapshot for queued saves', async (t) =
   assert.equal((await pending).document.cohorts[0]!.name, 'People');
 });
 
+test('workspace drafts preserve and validate optional cohort distribution targets', async (t) => {
+  const directory = await temporaryDirectory(); t.after(() => rm(directory, { recursive: true, force: true }));
+  const draft = documentWith();
+  draft.cohorts[0]!.distributionTargets = [{ field: 'age', kind: 'numeric', buckets: [{ label: '18–39', min: 18, max: 40, percent: 45 }, { label: '40+', min: 40, max: 121, percent: 55 }] }];
+  const saved = await new WorkspaceStore(directory).save(draft, 0);
+  assert.deepEqual(saved.document.cohorts[0]!.distributionTargets, draft.cohorts[0]!.distributionTargets);
+  const invalid = structuredClone(draft);
+  invalid.cohorts[0]!.distributionTargets![0]!.buckets[1]!.min = 39;
+  assert.throws(() => validateWorkspaceDocument(invalid), /overlapping/);
+});
+
 test('rejects wrong fields, unsafe IDs, prototype keys, and oversized arrays', () => {
   const base = documentWith();
   assert.throws(() => validateWorkspaceDocument({ ...base, typo: true }), /unknown field/);

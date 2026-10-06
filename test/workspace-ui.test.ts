@@ -27,6 +27,11 @@ function browserHarness() {
   const bodies: Array<{ path: string; body: unknown }> = [];
   const responses = new Map<string, unknown>();
   const storage = new Map<string, string>();
+  class TestFormData {
+    constructor(private readonly form: any) {}
+    get(name: string) { const value = this.form.values?.[name]; return Array.isArray(value) ? value[0] ?? null : value ?? null; }
+    getAll(name: string) { const value = this.form.values?.[name]; return value === undefined ? [] : Array.isArray(value) ? value : [value]; }
+  }
   function element(id: string) {
     if (!elements.has(id)) elements.set(id, { innerHTML: '', textContent: '', value: '', hidden: false, inert: false, classList: { add() {}, remove() {}, toggle() {} }, querySelector: () => null, querySelectorAll: () => [], focus() {}, select() {}, open: false, showModal() { this.open = true; }, close() { this.open = false; } });
     return elements.get(id);
@@ -38,11 +43,12 @@ function browserHarness() {
     window: { addEventListener: (name: string, fn: Function) => listeners.set(name, fn) },
     fetch: async (path: string, options?: { body?: string }) => { requests.push(path); if (options?.body) bodies.push({ path, body: JSON.parse(options.body) }); return { ok: true, json: async () => JSON.parse(JSON.stringify(await (responses.get(path) ?? snapshot))) }; },
     setTimeout: (fn: Function) => { timeouts.push(fn); return timeouts.length; }, clearTimeout() {}, setInterval: (fn: Function) => { intervals.push(fn); return 1; },
-    navigator: {}, confirm: () => { throw new Error('Unexpected native confirmation'); },
+    navigator: {}, URL, confirm: () => { throw new Error('Unexpected native confirmation'); },
+    FormData: TestFormData,
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
   return {
@@ -449,6 +455,8 @@ test('cohort editor has an explicit path back to the library and keeps unsaved e
   assert.doesNotMatch(browser.element('app').innerHTML, /role="tablist"|role="tabpanel"/);
   assert.match(browser.element('app').innerHTML, /Back to cohorts/);
   assert.match(browser.element('app').innerHTML, /Original cohort/);
+  act(null, { dataset: { act: 'cohort-section', section: 'definition' } });
+  assert.match(browser.element('app').innerHTML, /data-form="cohort"/);
   const input = { name: 'description', closest: () => ({ dataset: { form: 'cohort' } }) };
   browser.listeners.get('input')!({ target: input });
   assert.match(cohorts(), /Unsaved changes/);
@@ -458,6 +466,121 @@ test('cohort editor has an explicit path back to the library and keeps unsaved e
   assert.match(browser.element('app').innerHTML, /role="tablist"/);
   assert.match(browser.element('app').innerHTML, /Unsaved audience edit/);
   assert.equal(S.doc.cohorts[0].name, 'Unsaved audience edit');
+});
+
+test('opening a persona shows its full story, structured attributes, attached sources, and one weight control', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, act } = browser.client;
+  const cohort = S.doc.cohorts[0];
+  cohort.segments = [{ id: 'general', label: 'General visitors', description: 'Museum visitors', weight: 1, weightBasis: 'assumed', sourceIds: [] }];
+  cohort.sources = [{ id: 'study', title: 'Visitor research', url: 'https://example.com/visitors', retrievedAt: '2026-10-01T00:00:00.000Z', notes: 'Supports the general visit-frequency context.' }];
+  cohort.personas[0].sourceIds = ['study'];
+  cohort.personas[0].background = 'A complete story about how this adult chooses weekend museum visits.';
+  cohort.personas[0].attributes = { region: 'North', visitsPerYear: 4 };
+  S.cohortId = cohort.id;
+  act(null, { dataset: { act: 'open-persona', id: 'person' } });
+  const html = browser.element('app').innerHTML;
+  assert.equal(S.personaOpen, true);
+  assert.match(html, /A complete story about how this adult chooses weekend museum visits/);
+  assert.match(html, /visitsPerYear/); assert.match(html, /North/);
+  assert.match(html, /Visitor research/); assert.match(html, /Supports the general visit-frequency context/);
+  assert.match(html, /href="https:\/\/example.com\/visitors"/);
+  assert.match(html, /Synthetic fields/);
+  assert.equal((html.match(/name="relativeWeight"/g) ?? []).length, 1, 'weight editing has one authoritative field');
+});
+
+test('persona grouping, filtering, and pagination operate on the full cohort', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, cohortExplorer, explorerAction } = browser.client;
+  const cohort = S.doc.cohorts[0];
+  cohort.personas = Array.from({ length: 50 }, (_, index) => ({ ...structuredClone(cohort.personas[0]), id: `person-${index + 1}`, label: `Person ${index + 1}`, attributes: { region: index % 2 ? 'South' : 'North' } }));
+  S.cohortId = cohort.id; S.personaGroup = 'attributes.region';
+  let html = cohortExplorer(cohort);
+  assert.match(html, /Group personas by/); assert.match(html, /North/); assert.doesNotMatch(html, /South/);
+  assert.match(html, /1–24 of 50 personas/);
+  explorerAction('persona-page', { dataset: { delta: '1' } });
+  html = browser.element('app').innerHTML;
+  assert.match(html, /25–48 of 50 personas/);
+  assert.match(html, /South/);
+  S.personaFilter = { field: 'attributes.region', bucket: { label: 'North', value: 'North' } };
+  S.personaPage = 0; html = cohortExplorer(cohort);
+  assert.match(html, /Showing Region: North/);
+  assert.match(html, /1–24 of 25 personas/);
+  assert.doesNotMatch(html, /Person 2</);
+  explorerAction('persona-clear-filter', { dataset: {} });
+  assert.equal(S.personaFilter, null);
+  assert.match(browser.element('app').innerHTML, /of 50 personas/);
+});
+
+test('explorer controls stay transient and target validation plus positive persona weights gate edits', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, explorerAction } = browser.client;
+  const cohort = S.doc.cohorts[0];
+  cohort.segments = [{ id: 'general', label: 'General', description: 'General adults', weight: 1, weightBasis: 'assumed', sourceIds: [] }];
+  cohort.personas = [
+    { ...structuredClone(cohort.personas[0]), id: 'young', age: 25, weight: 1 },
+    { ...structuredClone(cohort.personas[0]), id: 'older', age: 60, weight: 1 },
+  ];
+  S.cohortId = cohort.id;
+  const saved = JSON.stringify(S.doc);
+  const change = browser.listeners.get('change')!;
+  change({ target: { name: 'personaGroup', value: 'age' } });
+  change({ target: { name: 'distributionField', value: 'age' } });
+  change({ target: { name: 'distributionMeasure', value: 'weighted' } });
+  assert.equal(S.dirty, false); assert.equal(JSON.stringify(S.doc), saved);
+
+  S.targetDraft = { field: 'age', kind: 'numeric', buckets: [{ label: 'Younger', min: 18, max: 40, percent: 50 }, { label: 'Older', min: 40, max: 121, percent: 50 }] };
+  const targetForm = { reportValidity: () => true, values: { targetField: 'age', targetKind: 'numeric', targetLabel0: 'Younger', targetMin0: '18', targetMax0: '40', targetPercent0: '70', targetLabel1: 'Older', targetMin1: '40', targetMax1: '121', targetPercent1: '20' } };
+  browser.element('app').querySelector = selector => selector === '[data-form=distribution-target]' ? targetForm : null;
+  const input = { name: 'targetPercent0', closest: () => ({ dataset: { form: 'distribution-target' } }) };
+  browser.listeners.get('input')!({ target: input });
+  assert.equal(S.dirty, false); assert.equal(JSON.stringify(S.doc), saved);
+  assert.throws(() => explorerAction('target-apply', { dataset: {} }), /percentages must total 100/);
+  assert.equal(cohort.distributionTargets, undefined);
+  targetForm.values.targetPercent0 = '60'; targetForm.values.targetPercent1 = '40';
+  explorerAction('target-apply', { dataset: {} });
+  assert.deepEqual(JSON.parse(JSON.stringify(cohort.distributionTargets)), [{ field: 'age', kind: 'numeric', buckets: [{ label: 'Younger', min: 18, max: 40, percent: 60 }, { label: 'Older', min: 40, max: 121, percent: 40 }] }]);
+  assert.equal(S.dirty, true);
+
+  S.dirty = false; S.personId = 'young';
+  let selfSubmitAttempts = 0;
+  const weightForm = { dataset: { form: 'persona-weight' }, values: { relativeWeight: '0' }, reportValidity: () => true, requestSubmit: () => { selfSubmitAttempts++; } };
+  browser.element('app').querySelectorAll = selector => selector === '[data-form]' ? [weightForm] : [];
+  const submit = browser.listeners.get('submit')!;
+  browser.listeners.get('input')!({ target: { name: 'relativeWeight', closest: () => weightForm } });
+  submit({ target: { closest: () => weightForm }, preventDefault() {} });
+  assert.equal(cohort.personas[0].weight, 1);
+  weightForm.values.relativeWeight = '2.5';
+  browser.listeners.get('input')!({ target: { name: 'relativeWeight', closest: () => weightForm } });
+  S.dirty = false;
+  submit({ target: { closest: () => weightForm }, preventDefault() {} });
+  assert.equal(cohort.personas[0].weight, 2.5); assert.equal(S.dirty, true);
+  assert.equal(selfSubmitAttempts, 0, 'submitting the active weight form does not re-submit itself during flush');
+});
+
+test('single-persona regeneration targets one ID and adoption is stale-safe and preserves all other data', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, startPersonaJob, adoptPersonaProposal } = browser.client;
+  const cohort = S.doc.cohorts[0];
+  cohort.personas.push({ ...structuredClone(cohort.personas[0]), id: 'keep-person', label: 'Keep this person', background: 'Unaffected person.' });
+  S.cohortId = cohort.id; S.personId = 'person'; S.localEngine = 'codex'; S.localEngines = [{ id: 'codex', available: true }]; S.personaRegenPrompt = 'Add a distinct family detail.';
+  const original = structuredClone(S.doc);
+  const replacement = { ...structuredClone(cohort.personas[0]), label: 'Updated participant', background: 'A refreshed full story.', attributes: { role: 'Parent' } };
+  const proposal = structuredClone(S.doc); proposal.cohorts[0].personas[0] = replacement;
+  browser.respond('/api/agent/jobs', { id: 'persona-job', engine: 'codex', status: 'completed', revision: S.revision, persona: { cohortId: cohort.id, personaId: 'person' }, proposal: { document: proposal, explanation: 'Only one persona changed.' } });
+  await startPersonaJob();
+  assert.deepEqual(JSON.parse(JSON.stringify(browser.bodies.at(-1)?.body)), { engine: 'codex', prompt: 'Add a distinct family detail.', revision: S.revision, persona: { cohortId: 'cohort', personaId: 'person' } });
+  assert.deepEqual(JSON.parse(JSON.stringify(S.doc)), original, 'generation leaves the saved draft untouched');
+  assert.match(browser.client.personaDetail(cohort), /Updated participant/);
+
+  S.dirty = true; assert.throws(adoptPersonaProposal, /Workspace changed/); S.dirty = false;
+  S.revision++; assert.throws(adoptPersonaProposal, /Workspace changed/); S.revision--;
+  S.remoteRevision = S.revision + 1; assert.throws(adoptPersonaProposal, /Workspace changed/); S.remoteRevision = null;
+  adoptPersonaProposal();
+  assert.equal(S.dirty, true);
+  assert.equal(cohort.personas[0].label, 'Updated participant');
+  assert.deepEqual(cohort.personas[1], original.cohorts[0].personas[1]);
+  assert.equal(JSON.stringify(S.doc.pipelines), JSON.stringify(original.pipelines));
 });
 
 test('cohort generation is entered explicitly and its return action restores the right editor', async () => {
@@ -483,6 +606,7 @@ test('cohort generation is entered explicitly and its return action restores the
 
   act(null, { dataset: { act: 'open-cohort', id: 'cohort' } });
   S.doc.cohorts[0].description = 'Unsaved cohort detail'; S.dirty = true;
+  act(null, { dataset: { act: 'cohort-section', section: 'definition' } });
   act(null, { dataset: { act: 'generate-personas' } });
   assert.match(browser.element('app').innerHTML, /Back to cohort/);
   act(null, { dataset: { act: 'cohort-generator-close' } });
