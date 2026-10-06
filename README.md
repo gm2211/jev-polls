@@ -57,7 +57,7 @@ Every input source is an explicit graph dependency; cycles and incompatible proj
 
 ## Agent workflow
 
-The local assistant runs your installed Codex or Claude CLI with its existing login. Save changes first. Cohort generation accepts a brief and 1–30 personas, validates only the selected cohort can change, and opens an editable draft after review. Other cohorts and pipelines stay intact. The Assistant tab can propose broader workspace changes for explicit application. Generation never saves automatically or starts a TypeSafe study. If the saved workspace changes meanwhile, the proposal must be regenerated against the new revision. The assistant cannot browse for evidence: supplied sources and synthetic assumptions remain distinct.
+The local assistant runs your installed Codex or Claude CLI with its existing login. Save changes first. Cohort generation accepts a brief and up to 20,000 personas per cohort (the workspace storage limit), generates larger cohorts in batches, validates only the selected cohort can change, and opens an editable draft after review. Other cohorts and pipelines stay intact. The Assistant tab can propose broader workspace changes for explicit application. Generation never saves automatically or starts a TypeSafe study. If the saved workspace changes meanwhile, the proposal must be regenerated against the new revision. The assistant cannot browse for evidence: supplied sources and synthetic assumptions remain distinct.
 
 Advanced MCP connection settings also support Codex, Claude Code, or another client. Keep the workspace server running. The adapter uses local stdio and the same revision checks and run controls as the browser; it never asks the agent to copy your TypeSafe key. Start a new agent session after registering the server so its tools are loaded.
 
@@ -98,7 +98,7 @@ See [implementation contracts](CONTRACT.md) for module responsibilities and [Typ
 
 ### ChatGPT subscription drafting
 
-In the cohort generator or Assistant, select **ChatGPT subscription**, click **Continue with ChatGPT**, approve access, and choose an available model. The local BYOS adapter calls Responses directly; no Codex installation is needed for this option. ChatGPT controls eligible plans, models, and per-app usage limits. Account switching and disconnect are available in the same controls. Tokens stay in local Keychain storage and never enter browser storage or workspace exports.
+In the cohort generator or Assistant, select **ChatGPT subscription**, click **Continue with ChatGPT**, approve access, and choose an available model. If the catalog omits a model you can access, choose **Enter model ID…** and enter its exact ID (for example, `gpt-6.1-sol`); inference verifies access when you generate. The local BYOS adapter calls Responses directly; no Codex installation is needed for this option. ChatGPT controls eligible plans, models, and per-app usage limits. Account switching and disconnect are available in the same controls. Tokens stay in local Keychain storage and never enter browser storage or workspace exports.
 
 Drafting proposes editable cohorts and pipelines. Review and save remain explicit; studies still run through TypeSafe with its separate credential and billing. Codex and Claude Code remain explicit alternatives using their existing CLI logins. See [the agent guide](docs/agent-guide.md) for boundaries and reconnection details.
 

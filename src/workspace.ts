@@ -1,3 +1,4 @@
+import { MAX_COHORT_PERSONAS } from './limits.js';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
@@ -202,7 +203,7 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
     }
     if (method === 'GET' && pathname === '/api/local-agents') { send(response, 200, await localAgents.availability()); return; }
     if (method === 'POST' && pathname === '/api/agent/jobs') {
-      const input = z.object({ engine: z.enum(['codex', 'claude', 'chatgpt']), model: z.string().trim().min(1).max(200).optional(), prompt: z.string().trim().min(1).max(10_000), revision: z.number().int().nonnegative().safe(), cohort: z.object({ id: safeId, size: z.number().int().min(1).max(30) }).strict().optional() }).strict().parse(await body(request, 64 * 1024));
+      const input = z.object({ engine: z.enum(['codex', 'claude', 'chatgpt']), model: z.string().trim().min(1).max(200).optional(), prompt: z.string().trim().min(1).max(10_000), revision: z.number().int().nonnegative().safe(), cohort: z.object({ id: safeId, size: z.number().int().min(1).max(MAX_COHORT_PERSONAS) }).strict().optional() }).strict().parse(await body(request, 64 * 1024));
       const saved = await store.read();
       if (saved.revision !== input.revision) throw new WorkspaceConflictError(input.revision, saved.revision);
       if (input.engine === 'chatgpt' && (changingChatGpt || (await chatgpt.snapshot()).signingIn || changingChatGpt)) throw new HttpError(409, 'CHATGPT_BUSY', 'Finish or cancel ChatGPT sign-in before drafting.');

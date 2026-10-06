@@ -1,3 +1,4 @@
+import { MAX_COHORT_PERSONAS, MAX_WORKSPACE_BYTES } from './limits.js';
 import { randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
@@ -6,11 +7,11 @@ import type { WorkspaceDocument, WorkspaceSaved } from './workspace-types.js';
 import { parseCohort, parsePipeline, stageOrder } from './schema.js';
 
 const FILE_NAME = 'workspace.json';
-const MAX_DOCUMENT_BYTES = 20 * 1024 * 1024;
+const MAX_DOCUMENT_BYTES = MAX_WORKSPACE_BYTES;
 const MAX_COHORTS = 100;
 const MAX_PIPELINES = 100;
 const MAX_STAGES = 500;
-const MAX_PERSONAS = 20_000;
+const MAX_PERSONAS = MAX_COHORT_PERSONAS;
 const MAX_SOURCES = 5_000;
 const MAX_SEGMENTS = 1_000;
 const MAX_QUESTIONS = 1_000;

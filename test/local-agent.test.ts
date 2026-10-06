@@ -38,6 +38,18 @@ async function terminal(service: LocalAgentService, job: LocalAgentJob): Promise
   for (let i = 0; i < 200; i++) { const current = service.get(job.id)!; if (current.status !== 'running') return current; await new Promise(resolve => setTimeout(resolve, 10)); }
   throw Error('Test draft did not finish');
 }
+function cohortBatchResponse(input: string): string {
+  const marker = 'Request data:\n';
+  const request = JSON.parse(input.slice(input.lastIndexOf(marker) + marker.length)) as { batch: { size: number; firstPosition: number; number: number } };
+  const cohort = structuredClone(proposed.cohorts[0]!);
+  cohort.personas = Array.from({ length: request.batch.size }, (_, index) => ({
+    ...structuredClone(proposed.cohorts[0]!.personas[0]!),
+    id: `batch-${request.batch.number}-${index + 1}`,
+    label: `Persona ${request.batch.firstPosition + index}`,
+    background: `Distinct synthetic adult profile ${request.batch.firstPosition + index}`,
+  }));
+  return JSON.stringify({ ...output, documentJson: JSON.stringify(cohort) });
+}
 
 test('Codex draft uses existing login, stdin prompt, constrained cwd and validated proposal without saving', async t => {
   const root = await setup(t); const invocations: Invocation[] = [];
@@ -88,11 +100,11 @@ test('cohort draft replaces only its requested cohort, preserves unrelated works
   const current: WorkspaceDocument = { version: 1, cohorts: [structuredClone(proposed.cohorts[0]!), { ...structuredClone(proposed.cohorts[0]!), id: 'other', name: 'Keep this cohort' }], pipelines: [{ version: 1, id: 'study', name: 'Keep this study', description: '', context: {}, cohorts: {}, stages: [] }] };
   const generated = structuredClone(proposed);
   generated.cohorts[0]!.personas.push({ ...structuredClone(generated.cohorts[0]!.personas[0]!), id: 'sam', label: 'Sam', age: 42 });
-  const data = { ...output, documentJson: JSON.stringify({ ...current, cohorts: [generated.cohorts[0]!, current.cohorts[1]!] }) };
+  const data = { ...output, documentJson: JSON.stringify(generated.cohorts[0]!) };
   const service = new LocalAgentService({ temporaryRoot: root, spawn: fakeSpawner(async ({ args, child }) => {
     assert.match(child.input, /Never run a study, invoke TypeSafe/);
     assert.match(child.input, /do not invent sources/);
-    assert.match(child.input, /Create or replace only the cohort whose ID is customers/);
+    assert.match(child.input, /cohort customers/);
     await writeFile(args[args.indexOf('--output-last-message') + 1]!, JSON.stringify(data)); child.finish();
   }) });
   t.after(() => service.close());
@@ -107,21 +119,19 @@ test('cohort draft replaces only its requested cohort, preserves unrelated works
   assert.equal(completed.proposal?.document.cohorts[0]?.generationPrompt, request);
 });
 
-test('cohort drafts reject scope changes, wrong counts, and invalid targets', async t => {
+test('cohort drafts reject wrong batch counts and invalid cohort output', async t => {
   const root = await setup(t);
   const current: WorkspaceDocument = { version: 1, cohorts: [{ ...structuredClone(proposed.cohorts[0]!), id: 'other' }], pipelines: [] };
-  const expectedTarget = structuredClone(proposed.cohorts[0]!);
-  expectedTarget.personas.push({ ...structuredClone(expectedTarget.personas[0]!), id: 'sam', label: 'Sam', age: 42 });
-  const cases: Array<{ name: string; document: WorkspaceDocument }> = [
-    { name: 'unrelated cohort mutation', document: { ...current, cohorts: [{ ...current.cohorts[0]!, name: 'Changed' }, expectedTarget] } },
-    { name: 'extra cohort', document: { ...current, cohorts: [...current.cohorts, expectedTarget, { ...expectedTarget, id: 'unexpected' }] } },
-    { name: 'pipeline mutation', document: { ...current, cohorts: [...current.cohorts, expectedTarget], pipelines: [{ version: 1, id: 'study', name: 'Changed', description: '', context: {}, cohorts: {}, stages: [] }] } },
-    { name: 'missing target', document: current },
-    { name: 'wrong target count', document: { ...current, cohorts: [...current.cohorts, { ...expectedTarget, personas: expectedTarget.personas.slice(0, 1) }] } },
-    { name: 'invalid target cohort', document: { ...current, cohorts: [...current.cohorts, { ...expectedTarget, segments: [] }] } },
+  const wrongCount = structuredClone(proposed.cohorts[0]!);
+  const wrongId = structuredClone(proposed.cohorts[0]!); wrongId.id = 'unexpected';
+  const invalid = structuredClone(proposed.cohorts[0]!); invalid.segments = [];
+  const cases: Array<{ name: string; cohort: unknown }> = [
+    { name: 'wrong target count', cohort: wrongCount },
+    { name: 'wrong target ID', cohort: wrongId },
+    { name: 'invalid target cohort', cohort: invalid },
   ];
   for (const item of cases) {
-    const service = new LocalAgentService({ temporaryRoot: root, spawn: fakeSpawner(async ({ args, child }) => { await writeFile(args[args.indexOf('--output-last-message') + 1]!, JSON.stringify({ ...output, documentJson: JSON.stringify(item.document) })); child.finish(); }) });
+    const service = new LocalAgentService({ temporaryRoot: root, spawn: fakeSpawner(async ({ args, child }) => { await writeFile(args[args.indexOf('--output-last-message') + 1]!, JSON.stringify({ ...output, documentJson: JSON.stringify(item.cohort) })); child.finish(); }) });
     const started = service.start({ engine: 'codex', prompt: 'Create two people', revision: 0, document: current, cohort: { id: 'customers', size: 2 } });
     const completed = await terminal(service, started);
     assert.equal(completed.status, 'failed', item.name);
@@ -191,7 +201,11 @@ test('ChatGPT drafts use native transport, preserve validation, and never start 
   const calls: unknown[] = [];
   const chatgpt = {
     status: async () => ({ connected: true, planEnabled: true }),
-    generate: async (request: { input: string; model: string; signal?: AbortSignal }) => { calls.push(request); return { text: JSON.stringify(output) }; },
+    generate: async (request: { input: string; model: string; signal?: AbortSignal }) => {
+      calls.push(request);
+      const documentJson = request.input.includes('Request data:\n') ? JSON.stringify(proposed.cohorts[0]) : output.documentJson;
+      return { text: JSON.stringify({ ...output, documentJson }) };
+    },
   } as import('../src/chatgpt.js').ChatGptDraftClient;
   const service = new LocalAgentService({ chatgpt, spawn: () => { throw Error('CLI must not start'); } });
   t.after(() => service.close());
@@ -207,6 +221,79 @@ test('ChatGPT drafts use native transport, preserve validation, and never start 
   chatgpt.generate = async () => { throw Object.assign(Error('private-token'), { code: 'quota' }); };
   const limited = await terminal(service, service.start({ engine: 'chatgpt', model: 'eligible-model', prompt: 'Prepare', document: empty, revision: 7 }));
   assert.equal(limited.status, 'failed'); assert.match(limited.message, /usage limit/); assert.doesNotMatch(JSON.stringify(limited), /private-token/);
+});
+
+test('ChatGPT cohort drafts batch 100 and 101 personas with a custom model and reject counts above the workspace limit', async t => {
+  const calls: Array<{ model: string; input: string }> = [];
+  const chatgpt = {
+    status: async () => ({ connected: true, planEnabled: true }),
+    generate: async (request: { input: string; model: string }) => {
+      calls.push(request);
+      return { text: cohortBatchResponse(request.input) };
+    },
+  } as ChatGptDraftClient;
+  const service = new LocalAgentService({ chatgpt, spawn: () => { throw Error('CLI must not start'); } });
+  t.after(() => service.close());
+
+  const hundred = await terminal(service, service.start({ engine: 'chatgpt', model: 'gpt-6.1-sol', prompt: 'Create one hundred adults', document: empty, revision: 12, cohort: { id: 'customers', size: 100 } }));
+  assert.equal(hundred.status, 'completed');
+  assert.equal(hundred.proposal?.document.cohorts[0]?.personas.length, 100);
+  assert.equal(hundred.proposal?.document.cohorts[0]?.generationPrompt, 'Create one hundred adults');
+  assert.equal(hundred.proposal?.document.cohorts[0]?.personas[99]?.id, 'persona-00100');
+  assert.equal(calls.slice(0, 4).length, 4);
+  assert.ok(calls.slice(0, 4).every(call => call.model === 'gpt-6.1-sol'));
+  assert.match(calls[0]?.input ?? '', /batch 1 of 4/);
+  assert.match(calls[3]?.input ?? '', /exactly 25 new personas/);
+
+  const hundredOne = await terminal(service, service.start({ engine: 'chatgpt', model: 'gpt-6.1-sol', prompt: 'Create one hundred and one adults', document: empty, revision: 13, cohort: { id: 'customers', size: 101 } }));
+  assert.equal(hundredOne.status, 'completed');
+  assert.equal(hundredOne.proposal?.document.cohorts[0]?.personas.length, 101);
+  assert.ok(calls.slice(4).every(call => call.model === 'gpt-6.1-sol'));
+  assert.match(calls[8]?.input ?? '', /exactly 1 new personas/);
+  assert.throws(
+    () => service.start({ engine: 'chatgpt', model: 'gpt-6.1-sol', prompt: 'Too many', document: empty, revision: 14, cohort: { id: 'customers', size: 20_001 } }),
+    (error: unknown) => error instanceof LocalAgentError && error.code === 'INVALID_AGENT_REQUEST',
+  );
+});
+
+test('cohort batch failures and cancellation never publish partial proposals', async t => {
+  const root = await setup(t);
+  let failedCalls = 0;
+  const failing = new LocalAgentService({ chatgpt: {
+    status: async () => ({ connected: true, planEnabled: true }),
+    generate: async ({ input }: { input: string }) => {
+      failedCalls++;
+      if (failedCalls === 2) throw Object.assign(Error('private quota detail'), { code: 'quota' });
+      return { text: cohortBatchResponse(input) };
+    },
+  } as ChatGptDraftClient });
+  const failed = await terminal(failing, failing.start({ engine: 'chatgpt', model: 'gpt-6.1-sol', prompt: 'Create 30 adults', document: empty, revision: 1, cohort: { id: 'customers', size: 30 } }));
+  assert.equal(failed.status, 'failed');
+  assert.equal(failed.proposal, undefined);
+  assert.match(failed.message, /usage limit/);
+  assert.equal(failedCalls, 2);
+  await failing.close();
+
+  let secondBatchStarted!: () => void;
+  const secondBatch = new Promise<void>(resolve => { secondBatchStarted = resolve; });
+  let cancelCalls = 0;
+  const cancelling = new LocalAgentService({ chatgpt: {
+    status: async () => ({ connected: true, planEnabled: true }),
+    generate: async ({ input, signal }: { input: string; signal?: AbortSignal }) => {
+      cancelCalls++;
+      if (cancelCalls === 1) return { text: cohortBatchResponse(input) };
+      secondBatchStarted();
+      return new Promise(resolve => signal!.addEventListener('abort', () => resolve({ text: cohortBatchResponse(input) }), { once: true }));
+    },
+  } as ChatGptDraftClient });
+  const job = cancelling.start({ engine: 'chatgpt', model: 'gpt-6.1-sol', prompt: 'Create 30 adults', document: empty, revision: 2, cohort: { id: 'customers', size: 30 } });
+  await secondBatch;
+  assert.match(cancelling.get(job.id)?.message ?? '', /25\/30 personas/);
+  assert.equal(cancelling.get(job.id)?.proposal, undefined);
+  assert.equal(cancelling.cancel(job.id)?.status, 'cancelled');
+  await cancelling.close();
+  assert.equal(cancelling.get(job.id)?.proposal, undefined);
+  assert.equal(cancelCalls, 2);
 });
 
 test('ChatGPT cancellation aborts request and discards partial output', async t => {
