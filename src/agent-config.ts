@@ -16,6 +16,6 @@ export function agentConnectionConfig(workspaceUrl: string) {
     codexCommand: `codex mcp add jev-polls -- ${invocation}`,
     claudeCommand: `claude mcp add --scope local jev-polls -- ${invocation}`,
     mcpConfig: { mcpServers: { 'jev-polls': { command, args } } },
-    guidePrompt: 'Use the Jev Polls MCP tools to help prepare my research study. Start with get_guide and get_workspace. Ask one question at a time when needed. Research relevant audience dimensions with your research tools; distinguish sourced facts from synthetic assumptions and keep profiles independent of the answer being tested. Save my cohorts, personas, questions, and branching pipeline with the current workspace revision. Review the request plan before any authorized live run. Explain uncertainty and preserve disagreement in the results.',
+    guidePrompt: 'Use the Jev Polls MCP tools to help prepare my research study. Start with get_guide and get_workspace. Ask one question at a time when needed. Research relevant audience dimensions with your research tools; distinguish sourced facts from synthetic assumptions and keep profiles independent of the answer being tested. Create or select my research project first. Save its cohorts, personas, questions, and branching pipeline with the current workspace revision and projectId. Preserve every other project and its ownership. Review the request plan before any authorized live run. Explain uncertainty and preserve disagreement in the results.',
   };
 }

@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import { startWorkspaceServer } from '../src/workspace.js';
 import { createProvider } from '../src/provider.js';
@@ -52,6 +53,8 @@ test('workspace never runs on connect/save/review and requires a fresh explicit 
   assert.equal(connections, 1); assert.equal(evaluations, 0);
   const saved = await post('/api/workspace', { document, revision: 0 }); assert.equal(saved.status, 200);
   const firstPlan = await (await post('/api/plan', { pipelineId: 'study' })).json();
+  assert.equal(firstPlan.projectId, 'existing-research');
+  assert.equal((await post('/api/plan', { pipelineId: 'study', projectId: 'wrong-project' })).status, 400);
   assert.equal(firstPlan.maxRequests, 1); assert.equal(firstPlan.stages.length, 2);
   assert.equal(evaluations, 0);
   assert.equal((await post('/api/workspace', { document, revision: 1 })).status, 200);
@@ -59,6 +62,8 @@ test('workspace never runs on connect/save/review and requires a fresh explicit 
   assert.equal((await run(firstPlan)).status, 409);
   assert.equal(evaluations, 0);
   const plan = await (await post('/api/plan', { pipelineId: 'study' })).json();
+  assert.equal((await post('/api/run', { pipelineId: 'study', projectId: 'wrong-project', revision: plan.revision, planToken: plan.planToken, seed: 'test', concurrency: 2, maxRequests: 1 })).status, 400);
+  assert.equal(evaluations, 0);
   const accepted = await run(plan); assert.equal(accepted.status, 202);
   let job = await accepted.json() as WorkspaceRun;
   assert.equal((await run(plan)).status, 409);
@@ -66,6 +71,7 @@ test('workspace never runs on connect/save/review and requires a fresh explicit 
     await new Promise(resolve => setTimeout(resolve, 10));
     job = await (await fetch(new URL(`/api/run/${job.id}`, server.url))).json() as WorkspaceRun;
   }
+  assert.equal(job.projectId, 'existing-research');
   assert.equal(job.status, 'completed'); assert.equal(evaluations, 1);
   assert.ok(job.reportUrl);
   const report = await fetch(new URL(job.reportUrl, server.url));
@@ -79,6 +85,22 @@ test('workspace never runs on connect/save/review and requires a fresh explicit 
   assert.equal((await fetch(new URL('/api/run/unknown/record', server.url))).status, 404);
   assert.notEqual(savedRecord.id, job.id, 'engine run IDs remain distinct from workspace folder IDs');
   assert.equal(JSON.parse(await readFile(join(runFolder, 'job.json'), 'utf8')).id, job.id);
+  assert.equal(JSON.parse(await readFile(join(runFolder, 'job.json'), 'utf8')).projectId, 'existing-research');
+  const historicalIds = { legacy: randomUUID(), unmatched: randomUUID(), explicit: randomUUID(), interrupted: randomUUID(), pendingOwner: randomUUID() };
+  for (const [kind, id] of Object.entries(historicalIds)) {
+    const target = join(directory, 'runs', id); await mkdir(target);
+    const metadata = { ...job, id }; delete metadata.projectId;
+    if (kind === 'interrupted') {
+      await writeFile(join(target, 'pending.json'), JSON.stringify({ ...metadata, status: 'running' }));
+      continue;
+    }
+    const record = JSON.parse(await readFile(join(runFolder, 'run.json'), 'utf8'));
+    if (kind === 'unmatched') { record.pipeline.id = 'removed-study'; metadata.pipelineId = 'removed-study'; }
+    if (kind === 'explicit') metadata.projectId = 'original-project';
+    await writeFile(join(target, 'run.json'), JSON.stringify(record));
+    if (kind === 'pendingOwner') await writeFile(join(target, 'pending.json'), JSON.stringify({ ...metadata, projectId: 'original-project', status: 'running' }));
+    else await writeFile(join(target, 'job.json'), JSON.stringify(metadata));
+  }
   await server.close();
   server = await startWorkspaceServer({ directory,
     getAuthStatus: async () => ({ configured, source: configured ? 'keychain' : 'none' }),
@@ -86,7 +108,15 @@ test('workspace never runs on connect/save/review and requires a fresh explicit 
   });
   const recovered = await (await fetch(new URL('/api/workspace', server.url))).json() as { runs: WorkspaceRun[] };
   const recoveredJob = recovered.runs.find(item => item.id === job.id);
+  assert.equal(recovered.runs.find(item => item.id === historicalIds.legacy)?.projectId, 'existing-research');
+  assert.equal(recovered.runs.find(item => item.id === historicalIds.unmatched)?.projectId, undefined);
+  assert.equal(recovered.runs.find(item => item.id === historicalIds.explicit)?.projectId, 'original-project');
+  assert.equal(recovered.runs.find(item => item.id === historicalIds.pendingOwner)?.projectId, 'original-project', 'Launch ownership survives missing completion metadata and changed pipeline ownership');
+  assert.equal(recovered.runs.find(item => item.id === historicalIds.interrupted)?.projectId, 'existing-research');
+  assert.equal(recovered.runs.find(item => item.id === historicalIds.interrupted)?.status, 'failed');
+  assert.equal(JSON.parse(await readFile(join(directory, 'runs', historicalIds.legacy, 'job.json'), 'utf8')).projectId, undefined, 'Opening history must not rewrite old artifacts');
   assert.equal(recoveredJob?.id, job.id);
+  assert.equal(recoveredJob?.projectId, 'existing-research');
   assert.equal(recoveredJob?.reportUrl, job.reportUrl);
   assert.equal((await fetch(new URL(`/api/run/${job.id}`, server.url))).status, 200);
   assert.equal((await fetch(new URL(job.reportUrl, server.url))).status, 200);

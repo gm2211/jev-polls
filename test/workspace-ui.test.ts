@@ -38,6 +38,7 @@ function browserHarness(openExistingProject = true) {
     window: { addEventListener: (name: string, fn: Function) => listeners.set(name, fn) },
     fetch: async (path: string, options?: { body?: string }) => { requests.push(path); if (options?.body) bodies.push({ path, body: JSON.parse(options.body) }); return { ok: true, json: async () => JSON.parse(JSON.stringify(await (responses.get(path) ?? snapshot))) }; },
     setTimeout: (fn: Function) => { timeouts.push(fn); return timeouts.length; }, clearTimeout() {}, setInterval: (fn: Function) => { intervals.push(fn); return 1; },
+    FormData: class { constructor(private form: any) {} get(key: string) { return this.form.values?.[key] ?? null; } },
     navigator: {}, confirm: () => { throw new Error('Unexpected native confirmation'); },
   };
   const html = renderWorkspace('test', 'token');
@@ -596,4 +597,25 @@ test('workspace tabs clear cohort selections and open the project pipeline while
   assert.equal(S.pipelineId, 'study'); assert.equal(S.stageId, 'panel');
   assert.match(browser.element('app').innerHTML, /role="tablist"/);
   assert.deepEqual(JSON.parse(JSON.stringify(S.doc)), JSON.parse(JSON.stringify(draft)));
+});
+
+
+test('project detail submission saves metadata and pipeline creation assigns ownership', async () => {
+  const browser = browserHarness(); await settle();
+  const { S } = browser.client;
+  const submit = (kind: string, values: Record<string, string>) => {
+    const form = { dataset: { form: kind }, values };
+    browser.listeners.get('submit')!({ target: { closest: () => form }, preventDefault() {} });
+  };
+  S.flushing = true;
+  submit('project-settings', { name: 'Renamed project', description: 'Updated research brief' });
+  S.flushing = false;
+  assert.equal(S.doc.projects[0].name, 'Renamed project');
+  assert.equal(S.doc.projects[0].description, 'Updated research brief');
+  S.doc.pipelines = []; S.doc.projects[0].pipelineIds = [];
+  submit('new-pipeline', { question: 'Which service is preferred?' });
+  assert.equal(S.doc.pipelines.length, 1);
+  assert.equal(S.doc.projects[0].pipelineIds[0], S.doc.pipelines[0].id);
+  submit('new-pipeline', { question: 'Second pipeline?' });
+  assert.equal(S.doc.pipelines.length, 1, 'new project keeps one pipeline');
 });

@@ -112,7 +112,7 @@ test('init creates an empty workspace by default and copies examples only when r
   assert.doesNotMatch(initialized.stdout, /game-naming|name worth|illustrative/i);
   assert.deepEqual(await readdir(directory), ['workspace.json']);
   const originalWorkspace = await readFile(created.workspace, 'utf8');
-  assert.deepEqual(JSON.parse(originalWorkspace), { revision: 1, document: { version: 1, cohorts: [], pipelines: [] } });
+  assert.deepEqual(JSON.parse(originalWorkspace), { revision: 1, document: { version: 1, cohorts: [], pipelines: [], projects: [] } });
 
   for (const args of [['init', directory], ['init', directory, '--example', 'game-naming']]) {
     const refused = invoke(args, root);
@@ -284,7 +284,7 @@ test('workspace opens empty without running; connect imports a pipeline for edit
   const emptyStateResponse = await fetch(new URL('/api/workspace', empty.initialOutput.url));
   assert.equal(emptyStateResponse.status, 200);
   const emptyState = await emptyStateResponse.json() as { document: { version: number; cohorts: unknown[]; pipelines: unknown[] }; runs: unknown[]; activeRun: unknown };
-  assert.deepEqual(emptyState.document, { version: 1, cohorts: [], pipelines: [] });
+  assert.deepEqual(emptyState.document, { version: 1, cohorts: [], pipelines: [], projects: [] });
   assert.deepEqual(emptyState.runs, []);
   assert.equal(emptyState.activeRun, null);
   await delay(100);
@@ -301,11 +301,14 @@ test('workspace opens empty without running; connect imports a pipeline for edit
   assert.match(imported.initialOutput.note, /never runs a study/i);
   const saved = JSON.parse(await readFile(join(importedDirectory, 'workspace.json'), 'utf8')) as {
     revision: number;
-    document: { cohorts: Array<{ id: string }>; pipelines: Array<{ id: string; cohorts: Record<string, string> }> };
+    document: { cohorts: Array<{ id: string }>; pipelines: Array<{ id: string; cohorts: Record<string, string> }>; projects: Array<{ name: string; cohortIds: string[]; pipelineIds: string[] }> };
   };
   assert.equal(saved.revision, 1);
   assert.deepEqual(saved.document.cohorts.map(cohort => cohort.id).sort(), ['review-panel', 'strategy-players']);
   assert.equal(saved.document.pipelines.length, 1);
+  assert.equal(saved.document.projects.length, 1);
+  assert.deepEqual(saved.document.projects[0]!.pipelineIds, ['game-naming']);
+  assert.deepEqual([...saved.document.projects[0]!.cohortIds].sort(), ['review-panel', 'strategy-players']);
   assert.equal(saved.document.pipelines[0]?.id, 'game-naming');
   assert.deepEqual(saved.document.pipelines[0]?.cohorts, { players: 'strategy-players', reviewers: 'review-panel' });
   const importedState = await (await fetch(new URL('/api/workspace', imported.initialOutput.url))).json() as { runs: unknown[]; activeRun: unknown };
@@ -327,4 +330,56 @@ test('workspace opens empty without running; connect imports a pipeline for edit
   assert.deepEqual(JSON.parse(invalid.stdout.trim()), errorOutput, 'failures also emit only one JSON object to stdout');
   assert.equal(invalid.stderr, '');
   assert.equal(await exists(join(temp, 'must-not-start')), false);
+});
+
+test('connect imports an isolated project beside legacy research and reimports without duplicating or overwriting it', async t => {
+  const temp = await mkdtemp(join(tmpdir(), 'jev-polls-cli-projects-'));
+  t.after(async () => rm(temp, { recursive: true, force: true }));
+  const source = join(temp, 'source');
+  await cp(fixture, source, { recursive: true });
+  const directory = join(temp, 'workspace');
+  const file = join(source, 'pipeline.json');
+  const first = await startCli(['connect', file, '--directory', directory], temp);
+  t.after(() => stopCli(first.child));
+  await stopCli(first.child);
+  const workspaceFile = join(directory, 'workspace.json');
+  const original = JSON.parse(await readFile(workspaceFile, 'utf8'));
+  delete original.document.projects; // An existing version-1 workspace before project grouping.
+  await writeFile(workspaceFile, JSON.stringify(original));
+
+  const pipeline = JSON.parse(await readFile(file, 'utf8'));
+  pipeline.id = 'another-study'; pipeline.name = 'Another research project';
+  await writeFile(file, JSON.stringify(pipeline));
+  const second = await startCli(['connect', file, '--directory', directory], temp);
+  t.after(() => stopCli(second.child));
+  await stopCli(second.child);
+  const savedText = await readFile(workspaceFile, 'utf8');
+  const saved = JSON.parse(savedText);
+  const legacy = saved.document.projects.find((p: any) => p.id === 'existing-research');
+  const added = saved.document.projects.find((p: any) => p.pipelineIds.includes('another-study'));
+  assert.ok(legacy); assert.ok(added);
+  assert.equal(added.name, pipeline.name);
+  assert.deepEqual(legacy.pipelineIds, ['game-naming']);
+  assert.deepEqual(saved.document.pipelines[0], original.document.pipelines[0]);
+  assert.deepEqual(saved.document.cohorts.slice(0, original.document.cohorts.length), original.document.cohorts);
+  assert.equal(saved.document.cohorts.length, original.document.cohorts.length * 2);
+  assert.ok(added.cohortIds.every((id: string) => !legacy.cohortIds.includes(id)));
+  const importedPipeline = saved.document.pipelines.find((p: any) => p.id === 'another-study');
+  for (const [alias, id] of Object.entries(importedPipeline.cohorts)) {
+    assert.ok(added.cohortIds.includes(id));
+    const cloned = saved.document.cohorts.find((c: any) => c.id === id);
+    const originalCohort = original.document.cohorts.find((c: any) => c.id === original.document.pipelines[0].cohorts[alias]);
+    assert.deepEqual({ ...cloned, id: originalCohort.id }, originalCohort);
+  }
+
+  const repeated = await startCli(['connect', file, '--directory', directory], temp);
+  t.after(() => stopCli(repeated.child));
+  await stopCli(repeated.child);
+  assert.equal(await readFile(workspaceFile, 'utf8'), savedText, 'identical reimport does not change revisions or ownership');
+  pipeline.name = 'Conflicting renamed study';
+  await writeFile(file, JSON.stringify(pipeline));
+  const conflict = invoke(['connect', file, '--directory', directory], root);
+  assert.equal(conflict.status, 1);
+  assert.match(output(conflict).error.message, /already exists with different content/);
+  assert.equal(await readFile(workspaceFile, 'utf8'), savedText, 'conflicting import preserves every project');
 });
