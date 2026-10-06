@@ -23,3 +23,10 @@ Never present mock distributions or synthetic profiles as observed human data.
 Run `npm run verify` and `npm run demo` after changes. For report changes, inspect
 the rendered report in Codex's built-in browser on desktop and narrow viewports.
 Keep machine output as JSON on stdout and progress as JSON lines on stderr.
+
+## Workspace interaction
+
+Prefer focused tabs and pagination over long pages or stacked editors. Keep
+navigation, save actions, and page controls easy to reach. Preserve unsaved fields
+when switching sections or pages; retain natural overflow for zoom, narrow
+screens, and unusually long content rather than clipping controls.
