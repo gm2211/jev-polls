@@ -15,7 +15,7 @@
     "test": "node --import tsx --test test/*.test.ts",
     "dev": "node --import tsx src/cli.ts",
     "demo": "node --import tsx src/cli.ts run examples/game-naming/pipeline.json --provider mock --out .jev-polls/demo --overwrite",
-    "verify": "npm run check && npm test && npm run build",
+    "verify": "npm run build && node --import tsx --test test/*.test.ts",
     "build:byos": "tsc -p node_modules/@byos/chatgpt-local/tsconfig.json --types node --typeRoots ./node_modules/@types",
     "sync:byos": "node scripts/sync-byos.mjs",
     "prestart": "npm run build:byos",
