@@ -102,7 +102,7 @@ In the cohort generator or Assistant, select **ChatGPT subscription**, click **C
 
 Drafting proposes editable cohorts and studies. Review and save remain explicit; studies still run through TypeSafe with its separate credential and billing. Codex and Claude Code remain explicit alternatives using their existing CLI logins. See [the agent guide](docs/agent-guide.md) for boundaries and reconnection details.
 
-The native adapter is vendored from `gm2211/byos`; `vendor/BYOS_REVISION` records its full commit SHA. On a fresh checkout use Node 22.23.2 or newer, run `npm ci`, then `npm start`. The npm start/dev/check/build/test/demo commands build the adapter from its pinned source automatically.
+The native adapter is vendored from `gm2211/byos`; `vendor/BYOS_REVISION` records its full commit SHA. On a fresh checkout use Node 22.23.2 or newer, run `npm ci`, then `npm start`. The npm start/dev/check/build/test/demo commands build the adapter from its pinned source automatically. `npm run verify` builds and type-checks once, then runs the full test suite without repeating the standalone test command's build hook. Integration tests require permission to bind loopback ports.
 
 To update it, fetch the intended BYOS commit in a separate local checkout and run:
 
