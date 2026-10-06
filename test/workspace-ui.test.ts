@@ -29,6 +29,7 @@ function browserHarness(openExistingProject = true) {
   const storage = new Map<string, string>();
   class TestFormData {
     constructor(private readonly form: any) {}
+    has(name: string) { return Object.prototype.hasOwnProperty.call(this.form.values ?? {}, name); }
     get(name: string) { const value = this.form.values?.[name]; return Array.isArray(value) ? value[0] ?? null : value ?? null; }
     getAll(name: string) { const value = this.form.values?.[name]; return value === undefined ? [] : Array.isArray(value) ? value : [value]; }
   }
@@ -48,7 +49,7 @@ function browserHarness(openExistingProject = true) {
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
   if (openExistingProject) (context as any).clientTest.S.projectId = 'existing-research';
@@ -773,4 +774,177 @@ test('project detail submission saves metadata and pipeline creation assigns own
   assert.equal(S.doc.projects[0].pipelineIds[0], S.doc.pipelines[0].id);
   submit('new-pipeline', { question: 'Second pipeline?' });
   assert.equal(S.doc.pipelines.length, 1, 'new project keeps one pipeline');
+});
+
+
+test('segment percentages round-trip without rewriting relative weights or source provenance', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, segmentShares, applySegmentShares } = browser.client;
+  const cohort = S.doc.cohorts[0];
+  cohort.segments = [
+    { id: 'general', label: 'General', description: 'Audience', weight: 2, weightBasis: 'sourced', sourceIds: ['research'] },
+    { id: 'other', label: 'Other', description: 'Other audience', weight: 1, weightBasis: 'assumed', sourceIds: [] },
+    { id: 'excluded', label: 'Excluded', description: '', weight: 0, weightBasis: 'user', sourceIds: [] },
+  ];
+  const before = JSON.stringify(S.doc);
+  const shares = Array.from(segmentShares(cohort)) as number[];
+  assert.equal(shares.reduce((sum, share) => sum + share, 0), 100);
+  assert.ok(Math.abs(shares[0]! - 200 / 3) < 0.000001);
+  assert.equal(shares[2], 0);
+  applySegmentShares(cohort, { values: Object.fromEntries(shares.map((share, i) => [`segmentShare${i}`, String(share)])) });
+  assert.equal(JSON.stringify(S.doc), before, 'display rounding must not mutate saved raw weights or provenance');
+});
+
+test('segment percentage validation is atomic for missing, invalid, and non-totaling values', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, applySegmentShares } = browser.client;
+  const cohort = S.doc.cohorts[0];
+  cohort.segments = [
+    { id: 'general', label: 'General', description: '', weight: 2, weightBasis: 'sourced', sourceIds: ['research'] },
+    { id: 'other', label: 'Other', description: '', weight: 1, weightBasis: 'assumed', sourceIds: [] },
+  ];
+  const before = JSON.stringify(S.doc);
+  for (const shares of [['', '100'], [' ', '100'], ['60', '30'], ['-1', '101'], ['101', '-1'], ['Infinity', '0'], ['NaN', '100'], ['no', '100'], ['0', '0']]) {
+    assert.throws(() => applySegmentShares(cohort, { values: { segmentShare0: shares[0], segmentShare1: shares[1] } }), `must reject ${JSON.stringify(shares)}`);
+    assert.equal(JSON.stringify(S.doc), before, 'failed validation must leave the entire draft unchanged');
+  }
+  assert.throws(() => applySegmentShares(cohort, { values: { segmentShare0: '100' } }));
+  assert.equal(JSON.stringify(S.doc), before);
+});
+
+test('applying segment percentages preserves references and changes provenance only for edited shares', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, applySegmentShares } = browser.client;
+  const cohort = S.doc.cohorts[0];
+  cohort.segments = [
+    { id: 'general', label: 'General', description: 'Keep biography', weight: 2, weightBasis: 'sourced', sourceIds: ['research'] },
+    { id: 'other', label: 'Other', description: '', weight: 1, weightBasis: 'assumed', sourceIds: [] },
+    { id: 'same', label: 'Same', description: '', weight: 1, weightBasis: 'sourced', sourceIds: ['unchanged-research'] },
+  ];
+  const people = JSON.stringify(cohort.personas), pipelines = JSON.stringify(S.doc.pipelines);
+  applySegmentShares(cohort, { values: { segmentShare0: '60', segmentShare1: '15', segmentShare2: '25' } });
+  assert.deepEqual(Array.from(cohort.segments, (segment: any) => segment.weight), [0.6, 0.15, 0.25]);
+  assert.deepEqual(Array.from(cohort.segments, (segment: any) => segment.weightBasis), ['user', 'user', 'sourced']);
+  assert.deepEqual(Array.from(cohort.segments[0].sourceIds), ['research']);
+  assert.deepEqual(Array.from(cohort.segments[2].sourceIds), ['unchanged-research']);
+  assert.equal(cohort.segments[0].description, 'Keep biography');
+  assert.equal(JSON.stringify(cohort.personas), people);
+  assert.equal(JSON.stringify(S.doc.pipelines), pipelines);
+  applySegmentShares(cohort, { values: { segmentShare0: '100', segmentShare1: '0', segmentShare2: '0' } });
+  assert.deepEqual(Array.from(cohort.segments, (segment: any) => segment.weight), [1, 0, 0], 'zero-share segments remain valid');
+});
+
+test('weights show compact shares and only the selected segment details editor', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, act } = browser.client;
+  const cohort = S.doc.cohorts[0];
+  cohort.segments = [
+    { id: 'general', label: 'General visitors', description: 'General audience details', weight: 1, weightBasis: 'assumed', sourceIds: [] },
+    { id: 'other', label: 'Other visitors', description: 'Other audience details', weight: 1, weightBasis: 'assumed', sourceIds: [] },
+  ];
+  S.cohortId = cohort.id;
+  act(null, { dataset: { act: 'cohort-section', section: 'weights' } });
+  let html = browser.element('app').innerHTML;
+  assert.equal((html.match(/name="segmentShare\d+"/g) ?? []).length, 2);
+  assert.doesNotMatch(html, /data-form="segment"/);
+  act(null, { dataset: { act: 'edit-segment', id: 'other' } });
+  html = browser.element('app').innerHTML;
+  assert.equal(S.segmentId, 'other');
+  assert.equal((html.match(/data-form="segment"/g) ?? []).length, 1);
+  assert.match(html, /Other audience details/);
+  assert.doesNotMatch(html, /name="segmentWeight"/);
+  assert.match(html, /<details[\s\S]*name="segmentId"/);
+  act(null, { dataset: { act: 'close-segment' } });
+  assert.doesNotMatch(browser.element('app').innerHTML, /data-form="segment"/);
+});
+
+test('leaving weights flushes percentage and detail edits together without stale provenance overwrites', async () => {
+  const browser = browserHarness(); await settle();
+  const { S } = browser.client;
+  const cohort = S.doc.cohorts[0];
+  cohort.sources = [{ id: 'research', title: 'Research', url: 'https://example.com', retrievedAt: '2026-10-01T00:00:00Z', notes: 'Original share context' }];
+  cohort.segments = [
+    { id: 'general', label: 'General', description: 'Before', weight: 2, weightBasis: 'sourced', sourceIds: ['research'] },
+    { id: 'other', label: 'Other', description: '', weight: 1, weightBasis: 'assumed', sourceIds: [] },
+  ];
+  cohort.distributionTargets = [{ field: 'segment', kind: 'categorical', buckets: [{ label: 'General', value: 'general', percent: 100 }] }];
+  S.tab = 'cohorts'; S.cohortId = cohort.id; S.cohortSection = 'weights'; S.segmentId = 'general'; S.dirty = true;
+  const submit = browser.listeners.get('submit')!;
+  const sharesForm: any = { dataset: { form: 'segment-shares' }, values: { segmentShare0: '60', segmentShare1: '40' }, reportValidity: () => true };
+  const detailsForm: any = { dataset: { form: 'segment', id: 'general', weightBasis: 'sourced' }, values: { segmentId: 'renamed', segmentLabel: 'Renamed group', segmentDescription: 'After', weightBasis: 'sourced', sourceIds: ['research'] }, reportValidity: () => true };
+  detailsForm.querySelector = () => ({ value: 'renamed' });
+  for (const form of [sharesForm, detailsForm]) form.requestSubmit = () => submit({ target: { closest: () => form }, preventDefault() {} });
+  browser.element('app').querySelectorAll = (selector: string) => selector === '[data-form]' ? [sharesForm, detailsForm] : selector === '[data-form=segment]' ? [detailsForm] : [];
+  browser.listeners.get('click')!({ target: { closest: () => ({ dataset: { act: 'close-segment' } }) }, preventDefault() {} });
+  assert.deepEqual(Array.from(S.doc.cohorts[0].segments, (segment: any) => segment.weight), [0.6, 0.4]);
+  assert.equal(S.doc.cohorts[0].segments[0].label, 'Renamed group');
+  assert.equal(S.doc.cohorts[0].segments[0].description, 'After');
+  assert.equal(S.doc.cohorts[0].segments[0].weightBasis, 'user', 'untouched details provenance must not erase the edited share provenance');
+  assert.equal(S.doc.cohorts[0].personas[0].segment, 'renamed');
+  assert.equal(S.doc.cohorts[0].distributionTargets[0].buckets[0].value, 'renamed');
+  assert.equal(S.segmentId, null);
+});
+
+test('invalid percentage totals block navigation and roll back other flushed form edits', async () => {
+  const browser = browserHarness(); await settle();
+  const { S } = browser.client;
+  const cohort = S.doc.cohorts[0];
+  cohort.segments = [
+    { id: 'general', label: 'General', description: 'Original description', weight: 2, weightBasis: 'assumed', sourceIds: [] },
+    { id: 'other', label: 'Other', description: '', weight: 1, weightBasis: 'assumed', sourceIds: [] },
+  ];
+  S.tab = 'cohorts'; S.cohortId = cohort.id; S.cohortSection = 'weights'; S.segmentId = 'general'; S.dirty = true;
+  const before = JSON.stringify(S.doc), submit = browser.listeners.get('submit')!;
+  const detailsForm: any = { dataset: { form: 'segment', id: 'general', weightBasis: 'assumed' }, values: { segmentId: 'renamed', segmentLabel: 'Edited but not applied', segmentDescription: 'Do not partially apply', weightBasis: 'assumed' }, reportValidity: () => true };
+  const sharesForm: any = { dataset: { form: 'segment-shares' }, values: { segmentShare0: '60', segmentShare1: '30' }, reportValidity: () => true };
+  detailsForm.querySelector = () => ({ value: 'renamed' });
+  for (const form of [detailsForm, sharesForm]) form.requestSubmit = () => submit({ target: { closest: () => form }, preventDefault() {} });
+  browser.element('app').querySelectorAll = (selector: string) => selector === '[data-form]' ? [detailsForm, sharesForm] : selector === '[data-form=segment]' ? [detailsForm] : [];
+  browser.listeners.get('click')!({ target: { closest: () => ({ dataset: { act: 'cohort-section', section: 'people' } }) }, preventDefault() {} });
+  assert.equal(S.cohortSection, 'weights');
+  assert.equal(S.segmentId, 'general');
+  assert.equal(JSON.stringify(S.doc), before);
+  assert.match(S.formError, /100/);
+});
+
+
+test('submitting segment metadata preserves untouched raw weights and skips submitting the active form twice', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, segmentShares } = browser.client;
+  const cohort = S.doc.cohorts[0];
+  cohort.segments = [
+    { id: 'general', label: 'General', description: 'Before', weight: 2, weightBasis: 'sourced', sourceIds: ['research'] },
+    { id: 'other', label: 'Other', description: '', weight: 1, weightBasis: 'assumed', sourceIds: [] },
+  ];
+  S.tab = 'cohorts'; S.cohortId = cohort.id; S.cohortSection = 'weights'; S.segmentId = 'general'; S.dirty = true;
+  const submit = browser.listeners.get('submit')!, shares = Array.from(segmentShares(cohort));
+  const sharesForm: any = { dataset: { form: 'segment-shares' }, values: Object.fromEntries(shares.map((share, i) => [`segmentShare${i}`, String(share)])), reportValidity: () => true };
+  const detailsForm: any = { dataset: { form: 'segment', id: 'general', weightBasis: 'sourced' }, values: { segmentId: 'general', segmentLabel: 'Clearer group label', segmentDescription: 'Edited description only', weightBasis: 'sourced', sourceIds: ['research'] }, reportValidity: () => true };
+  detailsForm.querySelector = () => ({ value: 'general' });
+  let activeFormSubmits = 0;
+  detailsForm.requestSubmit = () => { activeFormSubmits++; };
+  sharesForm.requestSubmit = () => submit({ target: { closest: () => sharesForm }, preventDefault() {} });
+  browser.element('app').querySelectorAll = (selector: string) => selector === '[data-form]' ? [sharesForm, detailsForm] : selector === '[data-form=segment]' ? [detailsForm] : [];
+  submit({ target: { closest: () => detailsForm }, preventDefault() {} });
+  assert.equal(cohort.segments[0].label, 'Clearer group label');
+  assert.equal(cohort.segments[0].description, 'Edited description only');
+  assert.deepEqual(Array.from(cohort.segments, (segment: any) => segment.weight), [2, 1]);
+  assert.deepEqual(Array.from(cohort.segments, (segment: any) => segment.weightBasis), ['sourced', 'assumed']);
+  assert.equal(S.segmentId, 'general');
+  assert.equal(activeFormSubmits, 0);
+});
+
+test('invalid active share submission preserves pending segment ID edits for correction', async () => {
+const browser = browserHarness(); await settle(); const {S}=browser.client;
+const c=S.doc.cohorts[0];c.segments=[{id:'general',label:'General',description:'',weight:1,weightBasis:'assumed',sourceIds:[]},{id:'other',label:'Other',description:'',weight:1,weightBasis:'assumed',sourceIds:[]}];S.tab='cohorts';S.cohortId=c.id;S.segmentId='general';S.cohortSection='weights';S.dirty=true;
+const submit=browser.listeners.get('submit')!;
+const shares:any={dataset:{form:'segment-shares'},values:{segmentShare0:'60',segmentShare1:'30'},reportValidity:()=>true};
+const details:any={dataset:{form:'segment',id:'general',weightBasis:'assumed'},values:{segmentId:'renamed',segmentLabel:'General',segmentDescription:'',weightBasis:'assumed'},reportValidity:()=>true,querySelector:()=>({value:'renamed'})};
+for(const f of [shares,details])f.requestSubmit=()=>submit({target:{closest:()=>f},preventDefault(){}});
+browser.element('app').querySelectorAll=(selector:string)=>selector==='[data-form]'?[shares,details]:selector==='[data-form=segment]'?[details]:[];
+submit({target:{closest:()=>shares},preventDefault(){}});
+assert.match(S.formError,/100/);
+shares.values.segmentShare1='40';submit({target:{closest:()=>shares},preventDefault(){}});
+assert.equal(S.formError,null);
+assert.equal(S.doc.cohorts[0].segments[0].weight,.6);
 });
