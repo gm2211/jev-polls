@@ -7,6 +7,7 @@ import type {
 } from './types.js';
 import { summarizeVotes } from './analysis.js';
 import { ProviderError, type ProviderResponseIssue } from './provider.js';
+import { validateClassifierAnswer } from './gliner-provider.js';
 import { inputSelectCompatible } from './schema.js';
 import { errorMessage, hashValue, isFiniteProbability, seededRandom, stableStringify } from './engine-utils.js';
 
@@ -57,6 +58,7 @@ export function validateEvaluation(evaluation: Evaluation, questions: Record<str
     if (!answer || typeof answer !== 'object' || answer.type !== question.type) {
       throw new Error(`provider answer '${id}' has the wrong type`);
     }
+    if (answer.classifier || evaluation.usage?.tokenUsage === 'unreported') validateClassifierAnswer(answer, question);
     if (question.type === 'noul' && answer.type === 'noul') {
       if (!isFiniteProbability(answer.noul)) throw new Error(`provider answer '${id}' has an invalid noul probability`);
     } else if (question.type === 'choice' && answer.type === 'choice') {
@@ -69,7 +71,7 @@ export function validateEvaluation(evaluation: Evaluation, questions: Record<str
       if (!keys.includes(answer.choice)) throw new Error(`provider answer '${id}' selected an unknown choice`);
       const max = Math.max(...Object.values(answer.probabilities));
       if (answer.probabilities[answer.choice]! < max - 1e-8) throw new Error(`provider answer '${id}' choice is not a most likely option`);
-      if (!isFiniteProbability(answer.confidence)) throw new Error(`provider answer '${id}' has invalid confidence`);
+      if (!answer.classifier && (typeof answer.confidence !== 'number' || !isFiniteProbability(answer.confidence))) throw new Error(`provider answer '${id}' has invalid confidence`);
     } else if (question.type === 'score' && answer.type === 'score') {
       const size = question.criteria.length;
       const expected = Array.from({ length: size }, (_, i) => String(i));
@@ -81,7 +83,7 @@ export function validateEvaluation(evaluation: Evaluation, questions: Record<str
       if (!Number.isFinite(answer.score) || answer.score < 0 || answer.score > size - 1) {
         throw new Error(`provider answer '${id}' has an invalid score`);
       }
-      if (!isFiniteProbability(answer.confidence)) throw new Error(`provider answer '${id}' has invalid confidence`);
+      if (!answer.classifier && (typeof answer.confidence !== 'number' || !isFiniteProbability(answer.confidence))) throw new Error(`provider answer '${id}' has invalid confidence`);
       const expectedLegend = Object.fromEntries(question.criteria.map((criterion, index) => [String(index), criterion]));
       if (!answer.legend || typeof answer.legend !== 'object' || Array.isArray(answer.legend) ||
           Object.keys(answer.legend).length !== size || expected.some((key) => answer.legend[key] !== expectedLegend[key])) {
@@ -96,6 +98,7 @@ export function validateEvaluation(evaluation: Evaluation, questions: Record<str
       !Number.isFinite(evaluation.usage.outputTokens) || evaluation.usage.outputTokens < 0) {
     throw new Error('provider response has invalid usage');
   }
+  if (evaluation.usage.measuredInputTokens !== undefined && (!Number.isSafeInteger(evaluation.usage.measuredInputTokens) || evaluation.usage.measuredInputTokens < 0)) throw new Error('provider response has invalid measured tokenizer usage');
 }
 
 function validateDistribution(id: string, probabilities: Record<string, number>): void {
@@ -251,8 +254,9 @@ export async function runPipeline(pipeline: Pipeline, cohorts: Record<string, Co
   const createdAt = new Date().toISOString();
   const pipelineHash = hashValue(pipeline);
   const stages: Record<string, StageResult> = {};
-  const usage = { inputTokens: 0, outputTokens: 0, requests: 0, cacheHits: 0 };
+  const usage: RunRecord['usage'] = { inputTokens: 0, outputTokens: 0, requests: 0, cacheHits: 0, ...(options.provider.name === 'gliner' ? { tokenUsage: 'unreported' as const } : {}) };
   const warnings: string[] = [];
+  if (options.provider.name === 'gliner') warnings.push('GLiNER local classifier: distributions are relative normalized independent sigmoid label scores, not calibrated probabilities or human observations. Native scores and logits are retained in each answer; confidence and token billing are unreported. Repeats are deterministic with this model.');
   let pending = new Set(order.map((stage) => stage.id));
 
   const runStage = async (stage: Stage): Promise<StageResult> => {
@@ -314,7 +318,7 @@ export async function runPipeline(pipeline: Pipeline, cohorts: Record<string, Co
             state: state as Json,
             questions: questionsForSeed(stage.questions, requestSeed),
           };
-          const requestKey = hashValue({ version: 1, provider: options.provider.name, request });
+          const requestKey = hashValue({ version: 1, provider: options.provider.name, ...(options.provider.cacheIdentity ? { providerIdentity: options.provider.cacheIdentity } : {}), request });
           try {
             let evaluation = options.cacheDir && !options.refresh ? await loadCached(options.cacheDir, requestKey, request, request.questions) : undefined;
             let cacheHit = Boolean(evaluation);
@@ -328,6 +332,7 @@ export async function runPipeline(pipeline: Pipeline, cohorts: Record<string, Co
                 catch { throw new InvalidEvaluationError(); }
                 usage.inputTokens += result.usage.inputTokens;
                 usage.outputTokens += result.usage.outputTokens;
+                if (result.usage.measuredInputTokens !== undefined) usage.measuredInputTokens = (usage.measuredInputTokens ?? 0) + result.usage.measuredInputTokens;
                 if (options.cacheDir) await saveCached(options.cacheDir, requestKey, request, result);
                 return result;
               });
@@ -596,6 +601,12 @@ function safeRequestFailure(error: unknown): string {
     TYPESAFE_REQUEST_REJECTED: 'TypeSafe rejected the request',
     TYPESAFE_RESPONSE_INVALID: 'TypeSafe returned an invalid response',
     TYPESAFE_EVALUATION_FAILED: 'TypeSafe evaluation failed',
+    GLINER_NOT_READY: 'GLiNER needs local setup; run npm run setup:gliner',
+    GLINER_UNSUPPORTED_MODEL: 'GLiNER supports only fastino/GLiNER2.5-Decide',
+    GLINER_TIMEOUT: 'GLiNER local model timed out',
+    GLINER_RUNTIME_FAILED: 'GLiNER local inference failed; shorten input or repair local setup',
+    GLINER_RESPONSE_INVALID: 'GLiNER returned invalid label scores',
+    GLINER_INPUT_TOO_LARGE: 'GLiNER input exceeds 512 tokens including question schemas; shorten study context, persona fields, or questions',
   };
   return `${error.code}: ${messages[error.code] ?? 'provider request failed'}`;
 }

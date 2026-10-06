@@ -86,12 +86,13 @@ function summarizeOne(question: Question, votes: Vote[], questionId: string): Qu
     const ranked = Object.entries(distribution).sort(([leftKey, left], [rightKey, right]) => right - left || optionOrder.indexOf(leftKey) - optionOrder.indexOf(rightKey));
     const winner = ranked[0]?.[0];
     const topProbability = ranked[0]?.[1] ?? 0;
-    const meanConfidence = valid.reduce((sum, vote) => sum + answerConfidence(vote.answers[questionId]!) * vote.weight, 0) / totalWeight;
+    const hasConfidence = valid.every(vote => answerConfidence(vote.answers[questionId]!) !== undefined);
+    const confidenceSummary = hasConfidence ? { meanConfidence: valid.reduce((sum, vote) => sum + answerConfidence(vote.answers[questionId]!)! * vote.weight, 0) / totalWeight } : {};
     if (question.type === 'choice') {
-      return { ...base, probabilities: distribution, winner, topProbability, margin: topProbability - (ranked[1]?.[1] ?? 0), meanConfidence };
+      return { ...base, probabilities: distribution, winner, topProbability, margin: topProbability - (ranked[1]?.[1] ?? 0), ...confidenceSummary };
     }
     const mean = valid.reduce((sum, vote) => sum + (vote.answers[questionId] as Extract<Answer, { type: 'score' }>).score * vote.weight, 0) / totalWeight;
-    return { ...base, probabilities: distribution, winner, topProbability, mean, meanConfidence };
+    return { ...base, probabilities: distribution, winner, topProbability, mean, ...confidenceSummary };
   };
   const orderedVotes = [...votes].sort(compareVotes);
   const all = summarize(orderedVotes);
@@ -376,7 +377,7 @@ function collapseRepeats(votes: Vote[], questionId: string): Array<{ answer: Ans
     const probabilities = Object.fromEntries(Object.keys(first.probabilities).map((key) => [key,
       group.reduce((sum, vote) => sum + answerProbability(vote.answers[questionId]!, key) * vote.weight, 0) / weight,
     ]));
-    const confidence = group.reduce((sum, vote) => sum + answerConfidence(vote.answers[questionId]!) * vote.weight, 0) / weight;
+    const confidence = group.every(vote => answerConfidence(vote.answers[questionId]!) !== undefined) ? group.reduce((sum, vote) => sum + answerConfidence(vote.answers[questionId]!)! * vote.weight, 0) / weight : undefined;
     if (first.type === 'choice') {
       const optionOrder = Object.keys(first.probabilities);
       const choice = Object.entries(probabilities).sort(([ka, a], [kb, b]) => b - a || optionOrder.indexOf(ka) - optionOrder.indexOf(kb))[0]![0];
@@ -414,4 +415,4 @@ function interval(values: number[]): SimulationInterval {
 
 function answerAsNoul(answer: Answer): number { return answer.type === 'noul' ? answer.noul : 0; }
 function answerProbability(answer: Answer, key: string): number { return answer.type === 'noul' ? 0 : answer.probabilities[key] ?? 0; }
-function answerConfidence(answer: Answer): number { return answer.type === 'noul' ? Math.abs(2 * answer.noul - 1) : answer.confidence; }
+function answerConfidence(answer: Answer): number | undefined { return answer.type === 'noul' ? undefined : answer.confidence; }

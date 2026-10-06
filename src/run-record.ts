@@ -2,18 +2,20 @@ import { z } from 'zod';
 import { readJson } from './io.js';
 import { outputQuestions, parseCohort, parsePipeline } from './schema.js';
 import { hashValue } from './engine-utils.js';
+import { GLINER_MODEL, GLINER_REVISION, validateClassifierAnswer } from './gliner-provider.js';
 import type { Answer, Question, RunRecord, SummaryBase } from './types.js';
 const probability = z.number().finite().min(0).max(1);
 const probabilities = z.record(z.string(), probability);
+const classifier = z.object({ semantics: z.literal('independent_sigmoid'), rawScores: probabilities, rawLogits: z.record(z.string(), z.number().finite()) }).strict();
 const summary = z.object({ type: z.enum(['choice', 'score', 'noul']), label: z.string(), probabilities: probabilities.optional(), mean: z.number().finite().optional(), winner: z.string().optional(), margin: probability.optional(), topProbability: probability.optional(), meanConfidence: probability.optional(), respondentCount: z.number().int().nonnegative(), totalWeight: z.number().finite().nonnegative() }).strict();
 const answer = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('choice'), choice: z.string(), probabilities, confidence: probability }).strict(),
-  z.object({ type: z.literal('score'), score: z.number().finite(), probabilities, confidence: probability, legend: z.record(z.string(), z.string()) }).strict(),
-  z.object({ type: z.literal('noul'), noul: probability }).strict(),
+  z.object({ type: z.literal('choice'), choice: z.string(), probabilities, confidence: probability.optional(), classifier: classifier.optional() }).strict(),
+  z.object({ type: z.literal('score'), score: z.number().finite(), probabilities, confidence: probability.optional(), legend: z.record(z.string(), z.string()), classifier: classifier.optional() }).strict(),
+  z.object({ type: z.literal('noul'), noul: probability, classifier: classifier.optional() }).strict(),
 ]);
 export const runSchema = z.object({
-  version: z.literal(1), id: z.string(), createdAt: z.string(), finishedAt: z.string(), pipeline: z.unknown(), pipelineHash: z.string(), provider: z.enum(['mock', 'typesafe']), model: z.string(), seed: z.string(), status: z.enum(['completed', 'failed']), cohorts: z.record(z.string(), z.unknown()), warnings: z.array(z.string()),
-  usage: z.object({ inputTokens: z.number().nonnegative(), outputTokens: z.number().nonnegative(), requests: z.number().nonnegative(), cacheHits: z.number().nonnegative() }).strict(),
+  version: z.literal(1), id: z.string(), createdAt: z.string(), finishedAt: z.string(), pipeline: z.unknown(), pipelineHash: z.string(), provider: z.enum(['mock', 'typesafe', 'gliner']), model: z.string(), seed: z.string(), status: z.enum(['completed', 'failed']), cohorts: z.record(z.string(), z.unknown()), warnings: z.array(z.string()),
+  usage: z.object({ inputTokens: z.number().nonnegative(), outputTokens: z.number().nonnegative(), requests: z.number().nonnegative(), cacheHits: z.number().nonnegative(), tokenUsage: z.literal('unreported').optional(), measuredInputTokens: z.number().int().nonnegative().optional() }).strict(),
   stages: z.record(z.string(), z.object({ id: z.string(), kind: z.enum(['poll', 'aggregate', 'decision']), label: z.string(), status: z.enum(['completed', 'skipped', 'failed']), reason: z.string().optional(), dependsOn: z.array(z.string()), startedAt: z.string(), finishedAt: z.string(),
     votes: z.array(z.object({ personaId: z.string(), cohortId: z.string().optional(), segment: z.string(), repeat: z.number().int().nonnegative(), weight: z.number().finite().nonnegative(), answers: z.record(z.string(), answer), cacheHit: z.boolean(), model: z.string() }).strict()),
     summaries: z.record(z.string(), summary.extend({ bySegment: z.record(z.string(), summary), byRepeat: z.record(z.string(), summary) }).strict()),
@@ -113,6 +115,7 @@ function validateQuestionSummary(value: z.infer<typeof runSchema>['stages'][stri
 
 export function parseRun(input: unknown): RunRecord {
   const run = runSchema.parse(input);
+  if (run.provider === 'gliner' && (run.model !== GLINER_MODEL || run.usage.tokenUsage !== 'unreported' || run.usage.inputTokens !== 0 || run.usage.outputTokens !== 0)) throw new Error('Saved GLiNER run has incompatible model or token usage metadata');
   const pipeline = parsePipeline(run.pipeline);
   if (hashValue(pipeline) !== run.pipelineHash) throw new Error('Run pipeline hash does not match its saved snapshot');
   for (const name of Object.keys(pipeline.cohorts)) {
@@ -129,14 +132,19 @@ export function parseRun(input: unknown): RunRecord {
     if (result.label !== stage.label || JSON.stringify(result.dependsOn) !== JSON.stringify(stage.dependsOn)) throw new Error(`Run stage metadata does not match pipeline stage: ${stage.id}`);
     const questions = questionsByStage[stage.id]!;
     for (const [index, vote] of result.votes.entries()) {
+      if (run.provider === 'gliner' && vote.model !== `${GLINER_MODEL}@${GLINER_REVISION}`) throw new Error('Saved GLiNER vote has incompatible model revision');
       assertKeys(Object.keys(vote.answers), Object.keys(questions), `${stage.id}.votes[${index}].answers`);
       for (const [questionId, answer] of Object.entries(vote.answers)) {
+        if (run.provider === 'gliner') validateClassifierAnswer(answer, questions[questionId]!);
+        else if (answer.classifier || (answer.type !== 'noul' && answer.confidence === undefined)) throw new Error('Saved non-classifier run has invalid confidence or classifier evidence');
         validateAnswerForQuestion(answer, questions[questionId]!, `${stage.id}.votes[${index}].${questionId}`);
       }
     }
     if (result.status === 'completed') {
       assertKeys(Object.keys(result.summaries), Object.keys(questions), `${stage.id}.summaries`);
       for (const [questionId, question] of Object.entries(questions)) {
+        const summary = result.summaries[questionId]!;
+        if (run.provider === 'gliner' && [summary, ...Object.values(summary.bySegment), ...Object.values(summary.byRepeat)].some(value => value.meanConfidence !== undefined)) throw new Error('Saved GLiNER summaries must not claim calibrated confidence');
         validateQuestionSummary(result.summaries[questionId]!, question, `${stage.id}.summaries.${questionId}`);
       }
     }

@@ -18,14 +18,16 @@ export interface AggregateStage extends BaseStage { kind: 'aggregate'; inputs: {
 export interface DecisionStage extends BaseStage { kind: 'decision'; from: { stage: string; question: string }; outputQuestion: string }
 export type Stage = PollStage | AggregateStage | DecisionStage;
 export interface Pipeline { version: 1; id: string; name: string; description: string; context: Json; cohorts: Record<string, string>; stages: Stage[] }
-export interface ChoiceAnswer { type: 'choice'; choice: string; probabilities: Record<string, number>; confidence: number }
-export interface ScoreAnswer { type: 'score'; score: number; probabilities: Record<string, number>; confidence: number; legend: Record<string, string> }
-export interface NoulAnswer { type: 'noul'; noul: number }
+/** Native independent sigmoid scores retained before relative normalization. These are not calibrated probabilities. */
+export interface LabelScoreEvidence { semantics: 'independent_sigmoid'; rawScores: Record<string, number>; rawLogits: Record<string, number> }
+export interface ChoiceAnswer { type: 'choice'; choice: string; probabilities: Record<string, number>; confidence?: number; classifier?: LabelScoreEvidence }
+export interface ScoreAnswer { type: 'score'; score: number; probabilities: Record<string, number>; confidence?: number; legend: Record<string, string>; classifier?: LabelScoreEvidence }
+export interface NoulAnswer { type: 'noul'; noul: number; classifier?: LabelScoreEvidence }
 export type Answer = ChoiceAnswer | ScoreAnswer | NoulAnswer;
-export interface Usage { inputTokens: number; outputTokens: number; requests: number; cacheHits: number }
+export interface Usage { inputTokens: number; outputTokens: number; requests: number; cacheHits: number; tokenUsage?: 'unreported'; measuredInputTokens?: number }
 export interface EvaluationRequest { model: string; state: Json; questions: Record<string, Question>; seed: string }
-export interface Evaluation { answers: Record<string, Answer>; model: string; usage: { inputTokens: number; outputTokens: number } }
-export interface Provider { name: 'typesafe' | 'mock'; evaluate(request: EvaluationRequest): Promise<Evaluation> }
+export interface Evaluation { answers: Record<string, Answer>; model: string; usage: { inputTokens: number; outputTokens: number; tokenUsage?: 'unreported'; measuredInputTokens?: number } }
+export interface Provider { name: 'typesafe' | 'mock' | 'gliner'; cacheIdentity?: string; evaluate(request: EvaluationRequest): Promise<Evaluation>; close?(): Promise<void> }
 export interface Vote { personaId: string; cohortId?: string; segment: string; repeat: number; weight: number; answers: Record<string, Answer>; cacheHit: boolean; model: string }
 export interface SummaryBase { type: Question['type']; label: string; probabilities?: Record<string, number>; mean?: number; winner?: string; margin?: number; topProbability?: number; meanConfidence?: number; respondentCount: number; totalWeight: number }
 export interface QuestionSummary extends SummaryBase { bySegment: Record<string, SummaryBase>; byRepeat: Record<string, SummaryBase> }
