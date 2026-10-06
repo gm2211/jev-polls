@@ -1015,7 +1015,8 @@ test('cohort editor keeps management controls without study execution or inferen
   assert.match(html, /data-act="save"/);
   assert.match(html, /data-act="pool-study"/);
   assert.match(html, /data-act="delete-cohort"/);
-  assert.match(html, /management/i);
+  assert.match(html, /role="group" aria-label="Cohort actions"/);
+  assert.doesNotMatch(html, /More cohort actions|cohort-management/);
   assert.doesNotMatch(html, /running this study|Review before inference/i);
 });
 
