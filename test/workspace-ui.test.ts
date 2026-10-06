@@ -501,11 +501,11 @@ test('proposal review itemizes removed cohorts and pipelines plus removals insid
   proposed.pipelines[0].stages.pop();
   const html = proposalReview({ status: 'completed', revision: S.revision, proposal: { document: proposed, explanation: 'Reshape the audience and flow.' } });
   assert.match(html, /Cohorts: 1 added · 1 changed · 1 removed/);
-  assert.match(html, /Pipelines: 0 added · 1 changed · 1 removed/);
+  assert.match(html, /Studies: 0 added · 1 changed · 1 removed/);
   assert.match(html, /Removed cohort: <strong>Archived &lt;audience&gt;<\/strong> <code>\(removed-pool\)<\/code> · 1 personas removed/);
-  assert.match(html, /Removed pipeline: <strong>Retired study<\/strong> <code>\(removed-pipeline\)<\/code> · 1 phases removed/);
+  assert.match(html, /Removed study: <strong>Retired study<\/strong> <code>\(removed-pipeline\)<\/code> · 1 phases removed/);
   assert.match(html, /Changed cohort:.*1 personas removed/);
-  assert.match(html, /Changed pipeline:.*1 phases removed/);
+  assert.match(html, /Changed study:.*1 phases removed/);
   assert.match(html, /including the removals listed below/);
   assert.match(html, /Apply proposal/);
   assert.equal(S.doc.cohorts.length, 2, 'review preserves original workspace until explicit apply');
@@ -1057,6 +1057,7 @@ test('project detail submission saves metadata and pipeline creation assigns own
   submit('new-pipeline', { question: 'Which service is preferred?' });
   assert.equal(S.doc.pipelines.length, 1);
   assert.equal(S.doc.projects[0].pipelineIds[0], S.doc.pipelines[0].id);
+  assert.equal(S.doc.pipelines[0].name, 'Renamed project study');
   submit('new-pipeline', { question: 'Second pipeline?' });
   assert.equal(S.doc.pipelines.length, 1, 'new project keeps one pipeline');
 });
