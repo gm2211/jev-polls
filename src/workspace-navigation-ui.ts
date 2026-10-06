@@ -10,7 +10,7 @@ function pageItems(items,key,limit=6){
 }
 function sectionTabs(key,options,selected){
   const active=selected||S.sections[key]||options[0]?.id;
-  return '<nav class="section-tabs" aria-label="'+attr(key)+' sections">'+options.map(o=>'<button type="button" class="button small" aria-pressed="'+(active===o.id)+'" data-act="section-view" data-section-key="'+attr(key)+'" data-section-id="'+attr(o.id)+'">'+esc(o.label)+'</button>').join('')+'</nav>';
+  return '<nav class="section-tabs" aria-label="'+attr(key==='pipeline'?'Study':key)+' sections">'+options.map(o=>'<button type="button" class="button small" aria-pressed="'+(active===o.id)+'" data-act="section-view" data-section-key="'+attr(key)+'" data-section-id="'+attr(o.id)+'">'+esc(o.label)+'</button>').join('')+'</nav>';
 }
 function sectionPanels(key,options){
   const active=options.some(o=>o.id===S.sections[key])?S.sections[key]:options[0]?.id;
