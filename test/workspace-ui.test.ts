@@ -763,6 +763,56 @@ test('workspace opens at projects and keeps another project out of cohort, pipel
   assert.equal(S.cohortPrompt, 'Unsaved first project brief'); assert.equal(S.localPrompt, 'First assistant brief');
 });
 
+test('project creation requires explicit entry and cancellation preserves its draft without changing projects', async () => {
+  const browser = browserHarness(false); await settle();
+  const { S, act, render, selectProject } = browser.client;
+  const html = () => browser.element('app').innerHTML;
+  const before = JSON.stringify(S.doc);
+  assert.match(html(), /data-act="new-project"/);
+  assert.doesNotMatch(html(), /data-form="new-project"/);
+  act({}, { dataset: { act: 'new-project' } });
+  assert.match(html(), /data-form="new-project"/);
+  assert.doesNotMatch(html(), /data-act="open-project"/);
+  for (const [name, value] of [['projectName', 'Research in progress'], ['projectBrief', 'A brief to keep']]) {
+    browser.listeners.get('input')!({ target: { name, value, closest: () => ({ dataset: { form: 'new-project' } }) } });
+  }
+  act({}, { dataset: { act: 'cancel-project' } });
+  assert.doesNotMatch(html(), /data-form="new-project"/);
+  assert.equal(JSON.stringify(S.doc), before);
+  assert.equal(S.dirty, false);
+  assert.equal(browser.bodies.length, 0);
+  act({}, { dataset: { act: 'new-project' } });
+  assert.match(html(), /Research in progress/);
+  assert.match(html(), /A brief to keep/);
+  selectProject('existing-research');
+  selectProject(null);
+  assert.equal(S.projectComposer, false);
+  assert.doesNotMatch(html(), /data-form="new-project"/);
+  S.doc.projects = []; render();
+  assert.match(html(), /Start your first project/);
+  assert.match(html(), /data-act="new-project"/);
+  assert.doesNotMatch(html(), /data-form="new-project"/);
+});
+
+test('failed project creation exposes the inserted draft and Save changes for recovery', async () => {
+  const browser = browserHarness(false); await settle();
+  const { S, act } = browser.client;
+  browser.fail('/api/workspace', 'Save unavailable', 'POST');
+  act({}, { dataset: { act: 'new-project' } });
+  const form = { dataset: { form: 'new-project' }, values: { projectName: 'Recoverable project', projectBrief: 'Keep this brief' } };
+  browser.listeners.get('submit')!({ target: { closest: () => form }, preventDefault() {} });
+  await settle();
+  assert.equal(S.projectComposer, false);
+  assert.equal(S.dirty, true);
+  assert.equal(S.doc.projects.filter((p: any) => p.name === 'Recoverable project').length, 1);
+  assert.equal(S.doc.projects.at(-1).description, 'Keep this brief');
+  const html = browser.element('app').innerHTML;
+  assert.match(html, /Recoverable project/);
+  assert.match(html, /data-act="save"/);
+  assert.doesNotMatch(html, /data-form="new-project"/);
+  assert.equal(browser.bodies.filter(r => r.path === '/api/workspace').length, 1);
+});
+
 test('manual cohort creation and deletion update only selected project membership', async () => {
   const browser = browserHarness(); await settle();
   const { S, act, deleteCohortFromDraft } = browser.client;
