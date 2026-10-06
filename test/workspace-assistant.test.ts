@@ -1,3 +1,4 @@
+import { MAX_COHORT_PERSONAS } from '../src/limits.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -40,12 +41,12 @@ test('local assistant proposals require explicit application at the original sav
   assert.equal((await post('/api/agent/jobs', { ...input, revision: 8 })).status, 409);
   assert.equal((await post('/api/agent/jobs', { ...input, document: {} })).status, 400);
   assert.equal((await post('/api/agent/jobs', { ...input, cohort: { id: '__proto__', size: 2 } })).status, 400);
-  assert.equal((await post('/api/agent/jobs', { ...input, cohort: { id: 'fresh-panel', size: 31 } })).status, 400);
+  assert.equal((await post('/api/agent/jobs', { ...input, cohort: { id: 'fresh-panel', size: MAX_COHORT_PERSONAS + 1 } })).status, 400);
   assert.equal(starts, 0);
-  const created = await post('/api/agent/jobs', { ...input, cohort: { id: 'fresh-panel', size: 2 } });
+  const created = await post('/api/agent/jobs', { ...input, cohort: { id: 'fresh-panel', size: 100 } });
   assert.equal(created.status, 202);
   const job = jobs.get((await created.json()).id)!;
-  assert.deepEqual(job.cohort, { id: 'fresh-panel', size: 2, prompt: input.prompt });
+  assert.deepEqual(job.cohort, { id: 'fresh-panel', size: 100, prompt: input.prompt });
   assert.equal((await post(`/api/agent/jobs/${job.id}/apply`, { revision: 0 })).status, 409);
   job.status = 'completed';
   job.proposal = { explanation: 'Proposed empty research pipeline for editing.', document: { version: 1, cohorts: [], pipelines: [{ version: 1, id: 'new-study', name: 'Customer study', description: '', context: {}, cohorts: {}, stages: [] }] } };

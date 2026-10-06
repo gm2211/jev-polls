@@ -1,3 +1,4 @@
+import { MAX_COHORT_PERSONAS } from '../src/limits.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Script } from 'node:vm';
@@ -25,11 +26,14 @@ function browserHarness() {
   const requests: string[] = [];
   const bodies: Array<{ path: string; body: unknown }> = [];
   const responses = new Map<string, unknown>();
+  const storage = new Map<string, string>();
   function element(id: string) {
     if (!elements.has(id)) elements.set(id, { innerHTML: '', textContent: '', value: '', hidden: false, inert: false, classList: { add() {}, remove() {}, toggle() {} }, querySelector: () => null, querySelectorAll: () => [], focus() {}, select() {}, open: false, showModal() { this.open = true; }, close() { this.open = false; } });
     return elements.get(id);
   }
   const context = {
+    location: { origin: "http://127.0.0.1:4180" },
+    sessionStorage: { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value), removeItem: (key: string) => storage.delete(key) },
     document: { getElementById: element, querySelectorAll: () => [], visibilityState: 'visible', addEventListener: (name: string, fn: Function) => listeners.set(name, fn) },
     window: { addEventListener: (name: string, fn: Function) => listeners.set(name, fn) },
     fetch: async (path: string, options?: { body?: string }) => { requests.push(path); if (options?.body) bodies.push({ path, body: JSON.parse(options.body) }); return { ok: true, json: async () => JSON.parse(JSON.stringify(await (responses.get(path) ?? snapshot))) }; },
@@ -38,12 +42,12 @@ function browserHarness() {
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
   return {
     client: (context as typeof context & { clientTest: any }).clientTest,
-    element, listeners, intervals, timeouts, requests, bodies, respond: (path: string, value: unknown) => responses.set(path, value),
+    element, listeners, intervals, timeouts, requests, bodies, storage, respond: (path: string, value: unknown) => responses.set(path, value),
     setSnapshot: (value: typeof snapshot) => { snapshot = value; },
     snapshot: () => structuredClone(snapshot),
     document: context.document,
@@ -366,4 +370,72 @@ test('last-cohort deletion still offers saving and stale confirmation cannot del
   assert.equal(S.doc.cohorts.length, 0); assert.equal(S.cohortId, null); assert.equal(S.personId, null);
   assert.match(cohorts(), /data-act="save"/);
   assert.equal(S.dirty, true);
+});
+
+
+test('custom ChatGPT model survives catalog refresh, resets across accounts, and reaches cohort drafting', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, loadChatGpt, startCohortJob } = browser.client;
+  S.localEngine = 'chatgpt'; S.localEngines = [{ id: 'chatgpt', available: true }];
+  S.chatgpt = { connected: true, planEnabled: true, account: { id: 'first' } };
+  S.cohortPrompt = 'Diverse synthetic adult game buyers'; S.cohortSize = 100; S.cohortTarget = 'gamers';
+  browser.respond('/api/chatgpt/status', S.chatgpt);
+  browser.respond('/api/chatgpt/models', { models: [{ id: 'older-model', name: 'Older model' }] });
+  await browser.listeners.get('change')!({ target: { name: 'chatgptModel', value: '__custom__' } });
+  browser.listeners.get('input')!({ target: { name: 'chatgptCustomModelId', value: 'gpt-6.1-sol' } });
+  assert.equal(S.dirty, false);
+  await loadChatGpt();
+  assert.equal(S.chatgptCustomModel, true); assert.equal(S.chatgptModel, 'gpt-6.1-sol');
+  assert.equal(browser.client.canGenerateCohort(), true);
+  browser.respond('/api/chatgpt/models', Promise.reject(new Error('Catalog unavailable')));
+  await loadChatGpt();
+  assert.equal(S.chatgptModel, 'gpt-6.1-sol'); assert.equal(S.chatgptCustomModel, true);
+  assert.equal(browser.client.canGenerateCohort(), true);
+  browser.respond('/api/chatgpt/models', { models: [] });
+  assert.match(browser.client.cohortGenerator(), /value="__custom__" selected/);
+  browser.respond('/api/agent/jobs', { id: 'custom-model-job', status: 'failed', revision: S.revision });
+  await startCohortJob();
+  assert.deepEqual(browser.bodies.at(-1)?.body, { engine: 'chatgpt', model: 'gpt-6.1-sol', prompt: S.cohortPrompt, revision: S.revision, cohort: { id: 'gamers', size: 100 } });
+  browser.respond('/api/chatgpt/status', { ...S.chatgpt, account: { id: 'second' } });
+  await loadChatGpt();
+  assert.equal(S.chatgptModel, ''); assert.equal(S.chatgptCustomModel, false);
+});
+
+test('cohort count rejects invalid edits, permits larger cohorts, and shows other readiness blockers', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, cohortBlockReason, canGenerateCohort } = browser.client;
+  S.localEngine = 'codex'; S.localEngines = [{ id: 'codex', available: true }]; S.cohortPrompt = 'Adult game buyers';
+  const input = (value: string) => ({ name: 'cohortSize', value, closest: () => ({ dataset: { form: 'cohort-generator' } }) });
+  for (const count of [0, -1, 1.5, MAX_COHORT_PERSONAS + 1]) {
+    const target = input(String(count));
+    browser.listeners.get('input')!({ target });
+    assert.equal(S.cohortSize, 8); assert.equal(target.value, '8');
+    assert.match(browser.element('toast').textContent, /Kept 8 personas/);
+  }
+  const blank = input(''); browser.listeners.get('input')!({ target: blank });
+  assert.equal(canGenerateCohort(), false); assert.match(cohortBlockReason(), /20,000/);
+  await browser.listeners.get('change')!({ target: blank });
+  assert.equal(blank.value, '8');
+  for (const count of [100, 101, MAX_COHORT_PERSONAS]) {
+    browser.listeners.get('input')!({ target: input(String(count)) });
+    assert.equal(S.cohortSize, count); assert.equal(canGenerateCohort(), true);
+  }
+  assert.equal(browser.element('cohortReadiness').hidden, true); assert.equal(S.dirty, false);
+  S.localEngine = 'chatgpt'; S.localEngines = [{ id: 'chatgpt', available: true }];
+  assert.match(cohortBlockReason(), /Choose a drafting model/);
+  S.dirty = true; assert.match(cohortBlockReason(), /Save your current edits/);
+});
+
+
+test('recovering a cohort job keeps its requested count after clearing and leaving the field', async () => {
+  const browser = browserHarness(); await settle();
+  browser.storage.set('jev-local-job:http://127.0.0.1:4180', 'recovered');
+  browser.respond('/api/local-agents', { engines: [{ id: 'codex', available: true }] });
+  browser.respond('/api/agent/jobs/recovered', { id: 'recovered', status: 'completed', cohort: { id: 'gamers', size: 100, prompt: 'Diverse adults' } });
+  await browser.client.loadLocalAgents();
+  assert.equal(browser.client.S.cohortSize, 100);
+  const target = { name: 'cohortSize', value: '', closest: () => ({ dataset: { form: 'cohort-generator' } }) };
+  browser.listeners.get('input')!({ target });
+  await browser.listeners.get('change')!({ target });
+  assert.equal(target.value, '100'); assert.equal(browser.client.S.cohortSize, 100);
 });
