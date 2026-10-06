@@ -121,9 +121,9 @@ async function openWorkspace(file: string | undefined, opts: { directory?: strin
     }
   }
   const workspace = await startWorkspaceServer({ directory, port: opts.port, legacyRunsDirectory: resolve('.jev-polls/runs'), emit: event => process.stderr.write(JSON.stringify(event) + '\n') });
-  output({ status: 'workspace-ready', url: workspace.url, directory, note: 'Create cohorts and a pipeline, then review before choosing Run study. Opening the workspace or connecting an account never runs a study.' });
   const shutdown = () => { void workspace.close().then(() => { process.exitCode = 0; }); };
   process.once('SIGINT', shutdown); process.once('SIGTERM', shutdown);
+  output({ status: 'workspace-ready', url: workspace.url, directory, note: 'Create or open a project, add its cohorts and pipeline, then review before choosing Run study. Opening the workspace or connecting an account never runs a study.' });
 }
 program.command('workspace').option('--directory <directory>', 'Saved workspace directory').option('--port <port>', 'Local workspace port', integer)
   .description('Open the cohort builder, visual pipeline editor, and run history').action(opts => openWorkspace(undefined, opts));
