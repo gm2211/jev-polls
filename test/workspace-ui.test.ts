@@ -57,7 +57,7 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,draftProgress,updateDraftClocks,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
   if (openExistingProject) (context as any).clientTest.S.projectId = 'existing-research';
@@ -400,12 +400,16 @@ test('draft start remains locked across autosave and job request and ignores an 
   S.dirty = true; S.doc.cohorts[0].name = 'Current typed audience';
   const saved = structuredClone(S.doc), starting = startCohortJob();
   assert.equal(S.localStarting, true); assert.equal(browser.element('app').inert, true);
+  assert.match(browser.element('app').innerHTML, /Saving your latest edits/);
+  assert.doesNotMatch(browser.element('app').innerHTML, /Wait for the current draft/);
+  assert.equal(S.sections['cohort-generation'], 'review');
   assert.throws(() => selectProject(null), /Wait for the drafting request/);
   await startCohortJob();
   finishRefresh({ ...browser.snapshot(), revision: 99 }); await refreshing;
   assert.equal(S.revision, 1); assert.equal(S.remoteRevision, null); assert.equal(S.doc.cohorts[0].name, 'Current typed audience');
   finishSave({ revision: 7, document: saved }); await settle();
   assert.equal(S.revision, 7); assert.equal(S.localStarting, true); assert.equal(browser.element('app').inert, true);
+  assert.match(browser.element('app').innerHTML, /Checking AI connection/);
   await startCohortJob();
   await browser.listeners.get('change')!({ target: { name: 'localEngine', value: 'claude' } });
   browser.listeners.get('click')!({ target: { closest: () => ({ dataset: { act: 'projects' } }) }, preventDefault() {} });
@@ -1227,4 +1231,74 @@ assert.match(S.formError,/100/);
 shares.values.segmentShare1='40';submit({target:{closest:()=>shares},preventDefault(){}});
 assert.equal(S.formError,null);
 assert.equal(S.doc.cohorts[0].segments[0].weight,.6);
+});
+
+
+test('generation progress reports accepted counts without inventing completion or elapsed-driven progress', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, draftProgress, cohortGenerator, updateDraftClocks, canGenerateCohort } = browser.client;
+  const job = { id: 'progress', engine: 'chatgpt', model: 'chosen-model', status: 'running', startedAt: new Date(Date.now() - 65000).toISOString(), cohort: { id: 'new', size: 60 }, progress: { phase: 'generating', batch: 2, totalBatches: 3, completedBatches: 1, completedPersonas: 25, totalPersonas: 60 } };
+  S.localJob = job; S.cohortTarget = 'new'; S.sections['cohort-generation'] = 'review';
+  let html = draftProgress(job);
+  assert.match(html, /25 \/ 60/); assert.match(html, /value="25" max="60"/);
+  assert.match(html, /Generating batch 2 of 3/); assert.match(html, /1 of 3 batches checked/);
+  assert.match(html, /ChatGPT · chosen-model/); assert.match(html, /1m 5s elapsed/);
+  assert.match(html, /Counts update after validation/); assert.match(html, /Cancel generation/);
+  assert.doesNotMatch(cohortGenerator(), /Wait for the current draft/);
+  assert.equal(canGenerateCohort(), false);
+  const clock = { dataset: { draftStart: job.startedAt }, textContent: '' };
+  browser.element('app').querySelectorAll = (selector: string) => selector === '[data-draft-start]' ? [clock] : [];
+  updateDraftClocks(); assert.match(clock.textContent, /1m 5s elapsed/);
+  assert.equal(S.localJob.progress.completedPersonas, 25);
+  html = draftProgress({ ...job, progress: { ...job.progress, phase: 'validating' } });
+  assert.match(html, /Checking batch 2 of 3/); assert.doesNotMatch(html, /Checking the complete draft/);
+  html = draftProgress({ ...job, progress: { ...job.progress, phase: 'validating', completedBatches: 3, completedPersonas: 60 } });
+  assert.match(html, /Checking the complete draft/); assert.doesNotMatch(html, /Draft ready/);
+  html = draftProgress({ id: 'general', status: 'running', engine: 'codex' });
+  assert.doesNotMatch(html, /<progress|personas checked|elapsed/);
+});
+
+test('poll interruption stays visible in progress and can reconnect without another generation', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, pollLocalJob, cohortGenerator } = browser.client;
+  S.cohortComposer = true; S.cohortTarget = 'new'; S.sections['cohort-generation'] = 'review';
+  S.localJob = { id: 'interrupted', engine: 'codex', status: 'running', cohort: { id: 'new', size: 2 } };
+  browser.fail('/api/agent/jobs/interrupted', 'Local server unavailable');
+  const polling = pollLocalJob('interrupted'); browser.timeouts.at(-1)!(); await polling;
+  assert.equal(S.localJob.status, 'running');
+  assert.match(cohortGenerator(), /Status connection interrupted/);
+  assert.match(cohortGenerator(), /Reconnect progress/);
+  browser.element('app').querySelectorAll = (selector: string) => selector === '[data-form]' ? [{ reportValidity: () => assert.fail('reconnecting must not validate unrelated edits') }] : [];
+  browser.listeners.get('click')!({ target: { closest: () => ({ dataset: { act: 'assistant-status-retry' } }) }, preventDefault() {} });
+  assert.equal(S.localPollError, null);
+  assert.equal(browser.bodies.length, 0, 'reconnecting never submits a generation');
+  S.localJob.status = 'cancelled'; browser.timeouts.at(-1)!(); await settle();
+});
+
+test('recovering active cohort generation selects Progress with actual server counts', async () => {
+  const browser = browserHarness(); await settle();
+  browser.storage.set('jev-local-job:http://127.0.0.1:4180:existing-research', 'active');
+  browser.respond('/api/local-agents', { engines: [{ id: 'codex', available: true }] });
+  browser.respond('/api/agent/jobs/active', { id: 'active', engine: 'codex', status: 'running', cohort: { id: 'new', size: 60, prompt: 'Adult readers' }, progress: { phase: 'generating', completedPersonas: 25, totalPersonas: 60, batch: 2, totalBatches: 3, completedBatches: 1 } });
+  await browser.client.loadLocalAgents();
+  assert.equal(browser.client.S.sections['cohort-generation'], 'review');
+  assert.match(browser.element('app').innerHTML, /data-section-id="review" >[\s\S]*25 \/ 60/);
+  assert.match(browser.element('app').innerHTML, />Progress<\/button>/);
+  assert.doesNotMatch(browser.element('app').innerHTML, /Wait for the current draft/);
+  browser.client.S.localJob.status = 'cancelled'; browser.timeouts.at(-1)!(); await settle();
+});
+
+
+test('poll errors stay with their project and clear when a matching response succeeds', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, pollLocalJob, selectProject } = browser.client;
+  const job = { id: 'resume', status: 'running', engine: 'codex', revision: S.revision };
+  S.localJob = job; S.localPollError = 'Temporary disconnect';
+  selectProject(null); assert.equal(S.localPollError, null);
+  browser.respond('/api/agent/jobs/resume', { ...job, status: 'completed' });
+  selectProject('existing-research');
+  assert.equal(S.localPollError, 'Temporary disconnect');
+  browser.timeouts.at(-1)!(); await settle();
+  assert.equal(S.localJob.status, 'completed'); assert.equal(S.localPollError, null);
+  await pollLocalJob('resume');
 });

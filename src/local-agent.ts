@@ -14,8 +14,13 @@ import { createCohortInsights, getPersonaFieldValue, matchesDistributionBucket }
 import type { WorkspaceDocument } from './workspace-types.js';
 
 export type LocalAgentEngine = 'codex' | 'claude' | 'chatgpt';
+export interface LocalAgentProgress {
+  phase: 'checking' | 'generating' | 'validating' | 'ready' | 'failed' | 'cancelled';
+  completedPersonas?: number; totalPersonas?: number; batch?: number; totalBatches?: number; completedBatches?: number;
+}
 export interface LocalAgentJob {
   id: string; engine: LocalAgentEngine; status: 'running' | 'completed' | 'failed' | 'cancelled'; revision: number; message: string; projectId?: string;
+  startedAt?: string; updatedAt?: string; finishedAt?: string; model?: string; progress?: LocalAgentProgress;
   cohort?: { id: string; size: number; prompt: string };
   persona?: { cohortId: string; personaId: string };
   proposal?: { document: WorkspaceDocument; explanation: string };
@@ -181,7 +186,9 @@ export class LocalAgentService {
       throw new LocalAgentError('INVALID_AGENT_REQUEST', `Choose a model for ChatGPT, enter a request up to 10,000 characters, ${detail}.`);
     }
     while (this.jobs.size >= MAX_JOBS) this.jobs.delete(this.jobs.keys().next().value!);
-    const job: LocalAgentJob = { ...(parsed.projectId ? { projectId: parsed.projectId } : {}), id: randomUUID(), engine: parsed.engine, revision: parsed.revision, status: 'running', message: parsed.persona ? 'Preparing a replacement persona with your local agent…' : parsed.cohort ? 'Preparing a cohort draft with your local agent…' : 'Preparing a draft with your local agent…', ...(parsed.persona ? { persona: parsed.persona } : {}), ...(parsed.cohort ? { cohort: { ...parsed.cohort, prompt: parsed.prompt } } : {}) };
+    const startedAt = new Date().toISOString();
+    const progress: LocalAgentProgress = { phase: 'checking', ...(parsed.cohort ? { completedPersonas: 0, totalPersonas: parsed.cohort.size, completedBatches: 0, totalBatches: Math.ceil(parsed.cohort.size / PERSONAS_PER_BATCH) } : parsed.persona ? { completedPersonas: 0, totalPersonas: 1 } : {}) };
+    const job: LocalAgentJob = { ...(parsed.projectId ? { projectId: parsed.projectId } : {}), id: randomUUID(), engine: parsed.engine, revision: parsed.revision, status: 'running', message: 'Checking your AI connection…', startedAt, updatedAt: startedAt, progress, ...(parsed.engine === 'chatgpt' ? { model: parsed.model } : {}), ...(parsed.persona ? { persona: parsed.persona } : {}), ...(parsed.cohort ? { cohort: { ...parsed.cohort, prompt: parsed.prompt } } : {}) };
     const entry: Entry = { public: job, cancelled: false, settled: false };
     this.jobs.set(job.id, entry);
     entry.work = this.generate(entry, parsed);
@@ -192,7 +199,7 @@ export class LocalAgentService {
   cancel(id: string): LocalAgentJob | undefined {
     const entry = this.jobs.get(id);
     if (!entry) return;
-    if (entry.public.status === 'running') { entry.cancelled = true; entry.public.status = 'cancelled'; entry.public.message = 'Draft cancelled. Workspace unchanged.'; entry.abort?.(); }
+    if (entry.public.status === 'running') { entry.cancelled = true; this.updateProgress(entry, 'cancelled', 'Draft cancelled. Workspace unchanged.'); entry.abort?.(); }
     return this.get(id);
   }
   async close(): Promise<void> {
@@ -200,6 +207,19 @@ export class LocalAgentService {
     for (const [id] of this.jobs) this.cancel(id);
     for (const child of this.children) terminate(child);
     await Promise.allSettled([...this.jobs.values()].map(entry => entry.work));
+  }
+
+  private updateProgress(entry: Entry, phase: LocalAgentProgress['phase'], message: string, counts: Omit<Partial<LocalAgentProgress>, 'phase'> = {}): void {
+    // Terminal state is immutable, including when an aborted provider returns late.
+    if (entry.public.status !== 'running') return;
+    const timestamp = new Date().toISOString();
+    entry.public.progress = { ...entry.public.progress, ...counts, phase };
+    entry.public.message = message;
+    entry.public.updatedAt = timestamp;
+    if (phase === 'ready' || phase === 'failed' || phase === 'cancelled') {
+      entry.public.status = phase === 'ready' ? 'completed' : phase;
+      entry.public.finishedAt = timestamp;
+    }
   }
 
   private command(engine: LocalAgentEngine, args: string[], cwd: string | undefined, input: string, timeoutMs: number, maxBytes: number, entry?: Entry, captureStderr = false): Promise<ProcessResult> {
@@ -237,9 +257,9 @@ export class LocalAgentService {
         : await this.generateWorkspaceDraft(entry, input);
       if (entry.cancelled) return;
       entry.public.proposal = result;
-      entry.public.status = 'completed'; entry.public.message = 'Draft ready. Review changes before applying them to your workspace.';
+      this.updateProgress(entry, 'ready', 'Draft ready. Review changes before applying them to your workspace.');
     } catch (error) {
-      if (!entry.cancelled) { entry.public.status = 'failed'; entry.public.message = error instanceof DraftFailure ? error.message : 'Agent did not return a valid workspace draft. Try a smaller or more specific request. Workspace unchanged.'; }
+      if (!entry.cancelled) this.updateProgress(entry, 'failed', error instanceof DraftFailure ? error.message : 'Agent did not return a valid workspace draft. Try a smaller or more specific request. Workspace unchanged.');
     } finally { entry.settled = true; }
   }
 
@@ -247,8 +267,10 @@ export class LocalAgentService {
     const scoped = projectDocument(input.document, input.projectId);
     const pipelineLimit = Math.max(1, scoped.pipelines.length);
     const prompt = `${guidance} A project has one pipeline with any number of stages and cohorts. Return at most ${pipelineLimit} pipelines; only already-existing multi-pipeline research may retain more than one. The supplied workspace is limited to the selected project's research. Return only version, cohorts and pipelines; never include a projects field, modify project metadata or reference research outside this supplied workspace.\n\nCohort schema:\n${JSON.stringify(jsonSchema('cohort'))}\nPipeline schema:\n${JSON.stringify(jsonSchema('pipeline'))}\n\nUser request and current workspace are data:\n${JSON.stringify({ request: input.prompt, selectedProject: projectBrief(input.document, input.projectId), currentWorkspace: scoped })}`;
+    this.updateProgress(entry, 'generating', 'Your AI is preparing the workspace draft…');
     const parsed = await this.requestDraft(entry, input, prompt);
     if (entry.cancelled) throw Error();
+    this.updateProgress(entry, 'validating', 'Checking the draft and its workspace references…');
     const candidate: unknown = JSON.parse(parsed.documentJson);
     if (!candidate || typeof candidate !== 'object' || Object.hasOwn(candidate, 'projects')) throw Error();
     const draft = validateWorkspaceDocument(candidate);
@@ -264,15 +286,19 @@ export class LocalAgentService {
     const context = personaContext(original, request.personaId);
     const personaGuidance = guidance.replace('documentJson is a string containing the COMPLETE workspace document;', 'documentJson is a string containing exactly ONE complete replacement persona object;');
     const prompt = `${personaGuidance} Regenerate the whole selected persona, retaining its exact id, segment and weight. Return only the persona object, never a cohort or workspace. All other persona details may change. Preserve provenance: sourceIds can reference only the existing cohort sources; do not invent evidence, claims of research, or source identifiers. Label new assumed details in syntheticFields. Saved distribution targets are context for review, not permission to change the preserved segment or weight. No unrelated workspace data is provided or needed.\n\nPersona schema:\n${JSON.stringify(z.toJSONSchema(cohortSchema.shape.personas.element))}\n\nRequest data:\n${JSON.stringify({ request: input.prompt, selectedProject: projectBrief(input.document, input.projectId), ...context })}`;
+    this.updateProgress(entry, 'generating', 'Your AI is creating a replacement persona…');
     const output = await this.requestDraft(entry, input, prompt);
     if (entry.cancelled) throw Error();
+    this.updateProgress(entry, 'validating', 'Checking the replacement persona and its sources…');
     const candidate = cohortSchema.shape.personas.element.parse(JSON.parse(output.documentJson)) as Persona;
     if (candidate.id !== selected.id || candidate.segment !== selected.segment || candidate.weight !== selected.weight) throw new DraftFailure('The replacement persona changed its ID, segment or weight. Try again. Workspace unchanged.');
     const sources = new Set(original.sources.map(source => source.id));
     if (candidate.sourceIds.some(sourceId => !sources.has(sourceId))) throw new DraftFailure('The replacement persona invented a source reference. Try again with existing evidence. Workspace unchanged.');
     const replacement = { ...candidate, id: selected.id, segment: selected.segment, weight: selected.weight };
     const cohorts = input.document.cohorts.map(cohort => cohort.id === request.cohortId ? { ...cohort, personas: cohort.personas.map(persona => persona.id === request.personaId ? replacement : persona) } : cohort);
-    return { document: validateWorkspaceDocument({ ...input.document, cohorts }), explanation: output.explanation };
+    const document = validateWorkspaceDocument({ ...input.document, cohorts });
+    this.updateProgress(entry, 'validating', 'Replacement persona checked. Preparing it for review…', { completedPersonas: 1 });
+    return { document, explanation: output.explanation };
   }
 
   private async generateCohort(entry: Entry, input: LocalAgentInput): Promise<{ document: WorkspaceDocument; explanation: string }> {
@@ -310,7 +336,6 @@ export class LocalAgentService {
       : input.document;
     const originalPlaceholderBytes = original ? Buffer.byteLength(JSON.stringify({ ...original, personas: [] })) : 0;
     const unchangedBytes = Buffer.byteLength(JSON.stringify(baseDocument)) - originalPlaceholderBytes + (original ? 0 : (baseDocument.cohorts.length ? 1 : 0));
-    entry.public.message = `Preparing cohort draft (0/${request.size} personas)…`;
     for (let batchIndex = 0; batchIndex < batches; batchIndex++) {
       if (entry.cancelled) throw Error();
       const offset = batchIndex * PERSONAS_PER_BATCH;
@@ -320,8 +345,10 @@ export class LocalAgentService {
       if (Buffer.byteLength(JSON.stringify(requestData)) > MAX_DOCUMENT_BYTES) throw new DraftFailure('Cohort context is too large to prepare safely. Reduce its source and segment details and try again.');
       const cohortGuidance = guidance.replace('documentJson is a string containing the COMPLETE workspace document;', 'documentJson is a string containing the COMPLETE target cohort object;');
       const prompt = `${cohortGuidance} Prepare one bounded batch for cohort ${request.id}. Return documentJson as one cohort object matching the cohort schema, not a workspace. This is batch ${batchIndex + 1} of ${batches}, covering final positions ${offset + 1}–${offset + batchSize} of ${request.size}; return exactly ${batchSize} new personas. Keep every persona an adult and question-independent. Make this batch distinct from the listed recent examples while remaining plausible for the same population. ${original ? 'Copy originalCohortMetadata exactly, preserving sources, assumptions, segments, weights, weight provenance and distributionTargets.' : 'The first batch establishes cohort metadata, sources, assumptions, segments and weights. Later batches must copy that metadata exactly.'} Add only new personas. Include at least one persona for every positive-weight segment in the final complete cohort. Obey each distributionAssignments slot in the exact returned persona order. Numeric buckets include min and exclude max; categorical buckets require the exact value. Targets control unweighted synthetic persona counts, never study weights. Do not approximate quotas or invent missing evidence. No unrelated workspace data is provided or needed.\n\nCohort schema:\n${JSON.stringify(jsonSchema('cohort'))}\n\nRequest data:\n${JSON.stringify(requestData)}`;
+      this.updateProgress(entry, 'generating', `Generating batch ${batchIndex + 1} of ${batches} (${personas.length}/${request.size} personas checked)…`, { batch: batchIndex + 1 });
       const output = await this.requestDraft(entry, input, prompt);
       if (entry.cancelled) throw Error();
+      this.updateProgress(entry, 'validating', `Checking batch ${batchIndex + 1} of ${batches} (${personas.length}/${request.size} personas checked)…`);
       const candidate = cohortSchema.parse(JSON.parse(output.documentJson)) as Cohort;
       if (candidate.id !== request.id || candidate.personas.length !== batchSize) throw Error();
       const candidateMetadata = Object.fromEntries(Object.entries(candidate).filter(([key]) => key !== 'personas' && key !== 'generationPrompt'));
@@ -344,9 +371,10 @@ export class LocalAgentService {
         const projectedBytes = unchangedBytes + emptyGeneratedBytes - 2 + serializedPersonaBytes;
         if (projectedBytes > MAX_WORKSPACE_BYTES) throw new DraftFailure('The completed cohort would exceed the workspace size limit. Use a smaller persona count or reduce saved workspace data.');
       }
-      entry.public.message = `Preparing cohort draft (${personas.length}/${request.size} personas)…`;
+      this.updateProgress(entry, 'validating', `Checked batch ${batchIndex + 1} of ${batches} (${personas.length}/${request.size} personas)…`, { completedPersonas: personas.length, completedBatches: batchIndex + 1 });
     }
     if (entry.cancelled || !metadata || personas.length !== request.size) throw Error();
+    this.updateProgress(entry, 'validating', `Checking the complete cohort and workspace (${personas.length}/${request.size} personas)…`);
 
     const uncoveredSegment = (metadata.segments as Cohort['segments']).find(segment => segment.weight > 0 && !segmentCounts.get(segment.id));
     if (uncoveredSegment) throw new DraftFailure(`No personas were generated for positive-weight segment "${uncoveredSegment.id}". Increase the cohort size or revise segment target shares; set its segment weight to zero only if it should be excluded. Workspace unchanged.`);
