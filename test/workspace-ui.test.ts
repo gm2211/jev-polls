@@ -38,7 +38,7 @@ function browserHarness() {
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
   return {
@@ -320,4 +320,50 @@ test('ChatGPT drafting requires explicit model and carries selected model withou
   await startLocalJob();
   assert.deepEqual(browser.bodies.at(-1), { path: '/api/agent/jobs', body: { engine: 'chatgpt', model: 'model-one', prompt: S.localPrompt, revision: S.revision } });
   assert.equal(S.snap.auth.configured, true); assert.equal(browser.requests.includes('/api/run'), false);
+});
+
+
+test('cohort deletion names the target, preserves cancel, and detaches only affected phases before explicit save', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, act, cohortCard } = browser.client;
+  S.doc.cohorts.push({ ...structuredClone(S.doc.cohorts[0]), id: 'keep', name: 'Keep cohort' });
+  S.doc.pipelines[0].cohorts.other = 'keep';
+  S.doc.pipelines[0].stages.push({ ...structuredClone(S.doc.pipelines[0].stages[0]), id: 'other-panel', cohort: 'other' });
+  S.cohortId = 'keep'; S.preferredCohortId = 'cohort';
+  const before = JSON.stringify(S.doc);
+  assert.match(cohortCard(S.doc.cohorts[0]), /data-act="delete-cohort" data-id="cohort"/);
+  act(null, { dataset: { act: 'delete-cohort', id: 'cohort' } });
+  assert.equal(browser.element('deleteCohortDialog').open, true);
+  assert.match(browser.element('deleteCohortDescription').textContent, /Original cohort/);
+  assert.match(browser.element('deleteCohortUsage').textContent, /Original study/);
+  assert.equal(JSON.stringify(S.doc), before);
+  act(null, { dataset: { act: 'delete-cohort-close' } });
+  assert.equal(browser.element('deleteCohortDialog').open, false);
+  assert.equal(JSON.stringify(S.doc), before);
+  act(null, { dataset: { act: 'delete-cohort', id: 'cohort' } });
+  act(null, { dataset: { act: 'delete-cohort-confirm' } });
+  assert.equal(S.doc.cohorts.length, 1); assert.equal(S.doc.cohorts[0].id, 'keep');
+  assert.equal(S.cohortId, 'keep'); assert.equal(S.preferredCohortId, null);
+  assert.equal(S.doc.pipelines[0].cohorts.audience, undefined);
+  assert.equal(S.doc.pipelines[0].stages[0].cohort, '');
+  assert.equal(S.doc.pipelines[0].cohorts.other, 'keep');
+  assert.equal(S.doc.pipelines[0].stages[1].cohort, 'other');
+  assert.equal(S.dirty, true); assert.equal(browser.bodies.length, 0);
+  assert.equal(browser.snapshot().document.cohorts.length, 1, 'saved snapshot unchanged');
+});
+
+test('last-cohort deletion still offers saving and stale confirmation cannot delete new data', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, act, cohorts } = browser.client;
+  S.cohortId = 'cohort'; S.personId = 'person';
+  assert.match(cohorts(), /data-act="delete-cohort" data-id="cohort"/);
+  act(null, { dataset: { act: 'delete-cohort', id: 'cohort' } });
+  S.remoteRevision = S.revision + 1;
+  assert.throws(() => act(null, { dataset: { act: 'delete-cohort-confirm' } }), /Workspace changed/);
+  assert.equal(S.doc.cohorts.length, 1);
+  S.remoteRevision = null;
+  act(null, { dataset: { act: 'delete-cohort-confirm' } });
+  assert.equal(S.doc.cohorts.length, 0); assert.equal(S.cohortId, null); assert.equal(S.personId, null);
+  assert.match(cohorts(), /data-act="save"/);
+  assert.equal(S.dirty, true);
 });
