@@ -1,7 +1,7 @@
 /** Shared AI connection controls, outside project editors. No credentials enter workspace data. */
 export const AI_SETTINGS_CSS = `
 .generation-workspace{max-width:880px}.generation-note{margin:12px 0}.generation-help{margin-top:12px;font-size:12px;color:var(--muted)}.generation-help summary{cursor:pointer}
-.ai-pill{border-radius:99px;max-width:350px;min-width:100px}.ai-pill #aiLabel{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ai-pill .pulse{flex:none}.ai-dialog{width:min(620px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto}.ai-dialog .section-tabs{margin:16px 0}.ai-dialog .mini-card{border:0;padding:0;background:transparent}.ai-dialog .toolbar{gap:8px;justify-content:flex-start}.ai-dialog .toolbar .button{font-size:11px}.ai-dialog .field:last-child{margin-bottom:0}.ai-dialog .ai-status{margin:12px 0}.ai-dialog .connection-extra{margin:14px 0}.ai-dialog .connection-extra summary{cursor:pointer;color:var(--muted);font-size:12px}.ai-dialog .close-dialog{color:var(--muted)}
+.ai-pill{border-radius:99px;max-width:350px;min-width:100px}.ai-pill #aiLabel{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.ai-pill .pulse{flex:none}.ai-dialog{width:min(620px,calc(100vw - 24px));max-height:calc(100dvh - 24px);overflow:auto}.ai-dialog .section-tabs{margin:16px 0}.ai-dialog .mini-card{border:0;padding:0;background:transparent}.ai-dialog .toolbar{gap:8px;justify-content:flex-start}.ai-dialog .toolbar .button{font-size:11px}.ai-dialog .field:last-child{margin-bottom:0}.ai-dialog .ai-status{margin:12px 0}.ai-dialog .connection-extra{margin:14px 0}.ai-dialog .close-dialog{color:var(--muted)}
 @media(max-width:600px){.ai-pill{max-width:160px}.topbar{padding-inline:12px}.topbar .wordmark i{display:none}.ai-dialog{padding:16px}.ai-dialog h2{font-size:22px}.ai-dialog .section-tabs .button{font-size:11px}.ai-dialog .toolbar{margin:8px 0}}
 `;
 
@@ -30,9 +30,7 @@ function aiSettingsContent(){
 function updateAISettings(){
   updateAIPill();const dialog=document.getElementById('aiSettingsDialog');if(!dialog.open)return;
   const body=document.getElementById('aiSettingsBody'),active=document.activeElement,focused=body.contains?.(active),name=active?.name,action=active?.dataset?.act,section=active?.dataset?.section;
-  const expanded=body.querySelector('details.connection-extra')?.open;
   body.innerHTML=aiSettingsContent();
-  if(expanded){const details=body.querySelector('details.connection-extra');if(details)details.open=true}
   if(focused){const next=[...body.querySelectorAll('[name],[data-act]')].find(el=>name?el.name===name:action&&el.dataset.act===action&&el.dataset.section===section);next?.focus()}
 }
 function aiSettingsAction(action,el){

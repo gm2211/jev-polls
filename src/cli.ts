@@ -120,7 +120,7 @@ async function openWorkspace(file: string | undefined, opts: { directory?: strin
       await store.save(draft, saved.revision);
     }
   }
-  const workspace = await startWorkspaceServer({ directory, port: opts.port, legacyRunsDirectory: resolve('.jev-polls/runs'), emit: event => process.stderr.write(JSON.stringify(event) + '\n') });
+  const workspace = await startWorkspaceServer({ directory, port: opts.port, emit: event => process.stderr.write(JSON.stringify(event) + '\n') });
   const shutdown = () => { void workspace.close().then(() => { process.exitCode = 0; }); };
   process.once('SIGINT', shutdown); process.once('SIGTERM', shutdown);
   output({ status: 'workspace-ready', url: workspace.url, directory, note: 'Create or open a project, add its cohorts and pipeline, then review before choosing Run study. Opening the workspace or connecting an account never runs a study.' });

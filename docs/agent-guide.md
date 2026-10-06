@@ -4,6 +4,8 @@ Your existing coding or research agent does the preparation and interpretation. 
 
 `workspace` (also available as `connect`) is a long-running local server: stdout contains its workspace URL, while progress and run results are JSON lines on stderr. Its browser editor starts with projects. Each project owns its cohorts, study, and run history; the editor supports saved cohort and study drafts, stage connections and branch conditions, explicit review, and run history. Opening the page or connecting an account never starts a study.
 
+Workspace runs require recorded ownership by an existing project. Standalone CLI artifacts and ownerless legacy runs are not imported into workspace history. **Open report** opens a separate tab so unsaved edits stay intact. Workspace reports are rebuilt from the validated saved run record; the exported HTML file is optional.
+
 When handing this page to the user, keep its server alive beyond the current agent turn. Use a persistent terminal or an OS-managed user process, and verify `/status` responds after the launching command exits. A browser tab can remain visible after its server stops; that is a local availability failure, not evidence that the user's API key is invalid. After restarting the server, reload the page before entering a key so it receives the new session token.
 
 ## Start from the decision
