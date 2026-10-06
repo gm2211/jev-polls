@@ -11,9 +11,12 @@ import {
   type Question as ApiQuestion,
 } from '@typesafe-ai/sdk';
 import { readApiKey } from './auth.js';
+import { createGlinerProvider, type GlinerConfig } from './gliner-provider.js';
+export { GLINER_MODEL, glinerStatus } from './gliner-provider.js';
 import type { Answer, Evaluation, EvaluationRequest, Provider, Question } from './types.js';
 
 export interface ProviderConfig {
+  gliner?: GlinerConfig;
   apiKey?: string;
   baseURL?: string;
   timeoutMs?: number;
@@ -23,6 +26,12 @@ export interface ProviderConfig {
 }
 
 export type ProviderErrorCode =
+  | 'GLINER_NOT_READY'
+  | 'GLINER_UNSUPPORTED_MODEL'
+  | 'GLINER_TIMEOUT'
+  | 'GLINER_RUNTIME_FAILED'
+  | 'GLINER_RESPONSE_INVALID'
+  | 'GLINER_INPUT_TOO_LARGE'
   | 'MISSING_TYPESAFE_API_KEY'
   | 'TYPESAFE_AUTHENTICATION_FAILED'
   | 'TYPESAFE_PERMISSION_DENIED'
@@ -253,6 +262,7 @@ function createTypeSafeProvider(config: ProviderConfig): Provider {
   };
 }
 
-export function createProvider(name: 'typesafe' | 'mock', config: ProviderConfig = {}): Provider {
+export function createProvider(name: Provider['name'], config: ProviderConfig = {}): Provider {
+  if (name === 'gliner') return createGlinerProvider(config.gliner);
   return name === 'mock' ? createMockProvider() : createTypeSafeProvider(config);
 }

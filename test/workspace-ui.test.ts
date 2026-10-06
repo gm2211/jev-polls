@@ -57,7 +57,7 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,draftProgress,updateDraftClocks,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,applyStage};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,updateDraftClocks,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,applyStage};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
   if (openExistingProject) (context as any).clientTest.S.projectId = 'existing-research';
@@ -73,6 +73,48 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
 }
 
 const settle = () => new Promise<void>(resolve => setImmediate(resolve));
+
+test('evaluation provider is global, persists, and invalidates only its reviewed plan', async () => {
+  const preferences = new Map<string, string>([['jev-evaluation-provider', 'gliner']]);
+  const browser = browserHarness(true, preferences); await settle();
+  const { S, aiSettingsContent, reviewPlan } = browser.client;
+  assert.equal(S.evaluationProvider, 'gliner'); S.aiSection = 'evaluations';
+  S.snap.gliner = { ready: true, model: 'fastino/GLiNER2.5-Decide' };
+  assert.match(aiSettingsContent(), /Local model installed/);
+  assert.doesNotMatch(aiSettingsContent(), /Update API key/);
+  S.pipelineId = 'study'; S.tab = 'studies';
+  browser.respond('/api/plan', { pipelineId: 'study', provider: 'gliner', model: 'fastino/GLiNER2.5-Decide', maxRequests: 1, stages: [], warnings: [], revision: 1, planToken: 'test' }, 'POST');
+  await reviewPlan();
+  assert.equal((browser.bodies.at(-1)!.body as any).provider, 'gliner');
+  assert.match(browser.element('app').innerHTML, /Runs locally with GLiNER/);
+  assert.doesNotMatch(browser.element('app').innerHTML, /uses your account balance/);
+  const before = JSON.stringify(S.doc);
+  await browser.listeners.get('change')!({ target: { name: 'evaluationProvider', value: 'typesafe' } });
+  assert.equal(S.plan, null); assert.equal(S.evaluationProvider, 'typesafe');
+  assert.equal(preferences.get('jev-evaluation-provider'), 'typesafe');
+  assert.equal(JSON.stringify(S.doc), before); assert.equal(S.dirty, false);
+});
+
+test('evaluation readiness refresh updates run controls without replacing the form', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, updateAuth, runUsageText } = browser.client;
+  S.plan = { provider: 'gliner' }; S.snap.gliner = { ready: false };
+  const start = { disabled: false }, setup = { hidden: true };
+  const root = browser.element('app'); root.innerHTML = 'Review form with unsaved run settings';
+  root.querySelector = (selector: string) => selector === '[data-act=start-run]' ? start : setup;
+  updateAuth(); assert.equal(start.disabled, true); assert.equal(setup.hidden, false);
+  S.snap.gliner.ready = true; updateAuth();
+  assert.equal(start.disabled, false); assert.equal(setup.hidden, true);
+  assert.equal(root.innerHTML, 'Review form with unsaved run settings');
+  S.plan.provider = 'typesafe'; S.snap.auth.configured = false; browser.client.updateAISettings();
+  assert.equal(start.disabled, true);
+  S.snap.auth.configured = true; browser.client.updateAISettings(); assert.equal(start.disabled, false);
+  assert.equal(runUsageText({ requests: 2, inputTokens: 0, outputTokens: 0, tokenUsage: 'unreported', measuredInputTokens: 123 }), '2 model requests · 123 measured input tokens · API token usage not reported');
+  assert.equal(runUsageText({ requests: 2, inputTokens: 10, outputTokens: 4 }), '2 model requests · 10 input / 4 output tokens');
+  S.snap.runs = [{ projectId: S.projectId, id: 'local-run', pipelineName: 'Local', status: 'completed', createdAt: '2026-10-06T12:00:00Z', message: 'Done', usage: { requests: 2, inputTokens: 0, outputTokens: 0, tokenUsage: 'unreported', measuredInputTokens: 123 } }];
+  assert.match(browser.client.runs(), /123 measured input tokens/);
+  assert.doesNotMatch(browser.client.runs(), /0 input \/ 0 output tokens/);
+});
 
 test('global Data tools export current edits without saving or duplicating controls in editors', async () => {
   const browser = browserHarness(); await settle();

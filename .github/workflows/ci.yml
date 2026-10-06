@@ -22,4 +22,5 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run verify
+      - run: python3 -m unittest discover -s test -p '*_test.py'
       - run: npm run demo > /tmp/jev-polls-demo-output.json
