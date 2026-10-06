@@ -79,11 +79,12 @@ test('persona regeneration HTTP proposals retain saved data and cannot replace a
   const directory = await mkdtemp(join(tmpdir(), 'jev-persona-http-')); t.after(() => rm(directory, { recursive: true, force: true }));
   const cohort = { version: 1 as const, id: 'customers', name: 'Customers', description: 'Synthetic adults', population: 'Adults', createdAt: '2026-10-04T12:00:00Z', sources: [], assumptions: ['Synthetic sample'], segments: [{ id: 'customers', label: 'Customers', description: 'Assumed audience', weight: 1, weightBasis: 'assumed' as const, sourceIds: [] }], personas: [{ id: 'alex', label: 'Alex', segment: 'customers', age: 35, background: 'Uses delivery services', attributes: {}, sourceIds: [], syntheticFields: ['background'], weight: 1 }, { id: 'sam', label: 'Sam', segment: 'customers', age: 41, background: 'Uses grocery shops', attributes: {}, sourceIds: [], syntheticFields: ['background'], weight: 2 }] };
   let calls = 0; let inference = 0;
-  const localAgents = new LocalAgentService({ chatgpt: { status: async () => ({ connected: true, planEnabled: true }), generate: async ({ input }: { input: string }) => {
+  const chatgpt = { status: async () => ({ connected: true, planEnabled: true }), accounts: async () => [], generate: async ({ input }: { input: string }) => {
     calls++; assert.match(input, /selectedPersona/); assert.doesNotMatch(input, /Kept pipeline/);
     return { text: JSON.stringify({ documentJson: JSON.stringify({ ...cohort.personas[0], label: 'Jordan', age: 48, background: 'A new synthetic biography' }), explanation: 'New synthetic details for the selected persona.' }) };
-  } } as import('../src/chatgpt.js').ChatGptDraftClient });
-  const server = await startWorkspaceServer({ directory, localAgents, getAuthStatus: async () => ({ configured: false, source: 'none' }), providerFactory: () => { inference++; throw Error('No study inference'); } }); t.after(() => server.close());
+  } } as import('../src/chatgpt.js').ChatGptDraftClient;
+  const localAgents = new LocalAgentService({ chatgpt });
+  const server = await startWorkspaceServer({ directory, chatgpt, localAgents, getAuthStatus: async () => ({ configured: false, source: 'none' }), providerFactory: () => { inference++; throw Error('No study inference'); } }); t.after(() => server.close());
   const csrf = (await (await fetch(server.url)).text()).match(/<meta name="jev-csrf" content="([a-f0-9]+)"/)![1]!;
   const post = (path: string, value: unknown) => fetch(new URL(path, server.url), { method: 'POST', headers: { origin: new URL(server.url).origin, 'content-type': 'application/json', 'x-jev-csrf': csrf }, body: JSON.stringify(value) });
   const document = { version: 1, cohorts: [cohort, { ...structuredClone(cohort), id: 'other' }], pipelines: [{ version: 1, id: 'study', name: 'Kept pipeline', description: '', context: {}, cohorts: {}, stages: [] }] };
