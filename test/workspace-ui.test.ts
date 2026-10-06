@@ -52,7 +52,7 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
       return { ok: !failure, json: async () => JSON.parse(JSON.stringify(failure ? { error: { message: failure } } : data)) };
     },
     setTimeout: (fn: Function) => { timeouts.push(fn); return timeouts.length; }, clearTimeout() {}, setInterval: (fn: Function) => { intervals.push(fn); return 1; },
-    navigator: {}, URL, confirm: () => { throw new Error('Unexpected native confirmation'); },
+    navigator: {}, URL, Blob, confirm: () => { throw new Error('Unexpected native confirmation'); },
     FormData: TestFormData,
   };
   const html = renderWorkspace('test', 'token');
@@ -73,6 +73,43 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
 }
 
 const settle = () => new Promise<void>(resolve => setImmediate(resolve));
+
+test('global Data tools export current edits without saving or duplicating controls in editors', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, render, selectProject } = browser.client;
+  const click = (act: string) => browser.listeners.get('click')!({ target: { closest: () => ({ dataset: { act } }) }, preventDefault() {} });
+  const before = JSON.stringify(S.doc);
+  S.tab = 'project-settings'; S.dirty = true; render();
+  let submitted = 0;
+  const form: any = { dataset: { form: 'project-settings' }, reportValidity: () => true, values: { name: 'Typed before export', description: 'Unsaved project brief' } };
+  form.requestSubmit = () => { submitted++; browser.listeners.get('submit')!({ target: { closest: () => form }, preventDefault() {} }); };
+  browser.element('app').querySelectorAll = (selector: string) => selector === '[data-form]' ? [form] : [];
+  browser.element('exportDownload').href = '';
+  click('data-open');
+  assert.equal(browser.element('dataToolsDialog').open, true);
+  assert.equal(submitted, 0, 'Opening Data must not change or validate the draft');
+  assert.equal(JSON.stringify(S.doc), before);
+  click('export');
+  assert.equal(browser.element('dataToolsDialog').open, false);
+  assert.equal(browser.element('exportDialog').open, true);
+  assert.equal(submitted, 1);
+  assert.equal(JSON.parse(browser.element('exportJson').value).projects[0].name, 'Typed before export');
+  assert.equal(S.dirty, true);
+  assert.equal(browser.bodies.length, 0, 'Export must not save or send the draft');
+  URL.revokeObjectURL(browser.element('exportDownload').href);
+  click('export-close'); click('data-open'); click('import-open');
+  assert.equal(browser.element('dataToolsDialog').open, false);
+  assert.equal(browser.element('importDialog').open, true);
+  click('import-close');
+  S.cohortId = 'cohort'; S.tab = 'cohorts'; render();
+  assert.doesNotMatch(browser.element('app').innerHTML, /data-act="(?:export|import-open)"/);
+  selectProject(null);
+  assert.doesNotMatch(browser.element('app').innerHTML, /Workspace files|data-act="(?:export|import-open)"/);
+  const shell = renderWorkspace('test', 'token');
+  assert.match(shell, /id="dataToolsPill"[^>]*aria-controls="dataToolsDialog"/);
+  assert.equal([...shell.matchAll(/<button[^>]*data-act="export"/g)].length, 1);
+  assert.equal([...shell.matchAll(/<button[^>]*data-act="import-open"/g)].length, 1);
+});
 
 test('collection pages clamp after deletion and stay independent across projects', async () => {
   const browser = browserHarness(); await settle();
