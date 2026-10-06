@@ -54,6 +54,122 @@ function cohortBatchResponse(input: string): string {
   return JSON.stringify({ ...output, documentJson: JSON.stringify(cohort) });
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+function assertJobTimes(job: LocalAgentJob, finished: boolean) {
+  assert.equal(new Date(job.startedAt!).toISOString(), job.startedAt);
+  assert.equal(new Date(job.updatedAt!).toISOString(), job.updatedAt);
+  assert.ok(Date.parse(job.updatedAt!) >= Date.parse(job.startedAt!));
+  if (finished) assert.equal(job.finishedAt, job.updatedAt);
+  else assert.equal(job.finishedAt, undefined);
+}
+
+test('cohort progress reports connection checking and only accepted batches before ready', async t => {
+  const connection = deferred<{ connected: boolean; planEnabled: boolean }>();
+  const entered = Array.from({ length: 3 }, () => deferred<string>());
+  const replies = Array.from({ length: 3 }, () => deferred<string>());
+  let calls = 0;
+  const service = new LocalAgentService({ chatgpt: {
+    status: () => connection.promise,
+    generate: async ({ input }: { input: string }) => {
+      const index = calls++;
+      entered[index]!.resolve(input);
+      return { text: await replies[index]!.promise };
+    },
+  } as ChatGptDraftClient });
+  t.after(() => service.close());
+  const job = service.start({ engine: 'chatgpt', model: 'draft-model', prompt: 'Create 51 adults', revision: 3, document: empty, cohort: { id: 'customers', size: 51 } });
+  assert.deepEqual(job.progress, { phase: 'checking', completedPersonas: 0, totalPersonas: 51, completedBatches: 0, totalBatches: 3 });
+  assert.equal(job.model, 'draft-model'); assertJobTimes(job, false);
+  connection.resolve({ connected: true, planEnabled: true });
+  for (let index = 0; index < 3; index++) {
+    const input = await entered[index]!.promise;
+    const active = service.get(job.id)!;
+    assert.equal(active.status, 'running'); assert.equal(active.proposal, undefined);
+    assert.deepEqual(active.progress, { phase: 'generating', completedPersonas: index * 25, totalPersonas: 51, completedBatches: index, totalBatches: 3, batch: index + 1 });
+    assertJobTimes(active, false);
+    replies[index]!.resolve(cohortBatchResponse(input));
+  }
+  const completed = await terminal(service, job);
+  assert.equal(completed.status, 'completed');
+  assert.deepEqual(completed.progress, { phase: 'ready', completedPersonas: 51, totalPersonas: 51, completedBatches: 3, totalBatches: 3, batch: 3 });
+  assertJobTimes(completed, true);
+  assert.equal(completed.proposal?.document.cohorts[0]?.personas.length, 51);
+  assert.equal(job.progress?.phase, 'checking', 'returned snapshots do not mutate');
+});
+
+test('failed and cancelled progress retains checked batches and never counts invalid or late output', async t => {
+  for (const outcome of ['failed', 'cancelled'] as const) {
+    const entered = deferred<string>(); const reply = deferred<string>(); let calls = 0;
+    const service = new LocalAgentService({ chatgpt: {
+      status: async () => ({ connected: true, planEnabled: true }),
+      generate: async ({ input }: { input: string }) => {
+        if (++calls === 1) return { text: cohortBatchResponse(input) };
+        entered.resolve(input);
+        return { text: await reply.promise };
+      },
+    } as ChatGptDraftClient });
+    t.after(() => service.close());
+    const job = service.start({ engine: 'chatgpt', model: 'draft-model', prompt: 'Create 30 adults', revision: 3, document: empty, cohort: { id: 'customers', size: 30 } });
+    const input = await entered.promise;
+    assert.equal(service.get(job.id)?.progress?.completedPersonas, 25);
+    let cancelledSnapshot: LocalAgentJob | undefined;
+    if (outcome === 'cancelled') cancelledSnapshot = service.cancel(job.id);
+    // The failure response is syntactically valid, but contains only one of five required personas.
+    reply.resolve(outcome === 'cancelled' ? cohortBatchResponse(input) : JSON.stringify({ ...output, documentJson: JSON.stringify(proposed.cohorts[0]) }));
+    await terminal(service, job);
+    await service.close();
+    const result = service.get(job.id)!;
+    if (outcome === 'cancelled') assert.deepEqual(result, cancelledSnapshot, 'late provider output must not alter cancelled progress or timestamps');
+    assert.equal(result.status, outcome); assert.equal(result.progress?.phase, outcome);
+    assert.equal(result.progress?.completedPersonas, 25);
+    assert.equal(result.proposal, undefined);
+    assert.equal(result.progress?.completedBatches, 1); assertJobTimes(result, true);
+  }
+});
+
+test('connection failures and cancellation finish during checking without provider requests', async t => {
+  for (const outcome of ['failed', 'cancelled'] as const) {
+    const connection = deferred<{ connected: boolean; planEnabled: boolean }>(); let calls = 0;
+    const service = new LocalAgentService({ chatgpt: {
+      status: () => connection.promise,
+      generate: async () => { calls++; return { text: JSON.stringify(output) }; },
+    } as ChatGptDraftClient });
+    t.after(() => service.close());
+    const job = service.start({ engine: 'chatgpt', model: 'draft-model', prompt: 'Prepare a workspace', revision: 0, document: empty });
+    assert.deepEqual(job.progress, { phase: 'checking' });
+    const cancelled = outcome === 'cancelled' ? service.cancel(job.id) : undefined;
+    connection.resolve({ connected: false, planEnabled: false });
+    await terminal(service, job); await service.close();
+    const result = service.get(job.id)!;
+    assert.equal(result.status, outcome); assert.deepEqual(result.progress, { phase: outcome });
+    assertJobTimes(result, true); assert.equal(calls, 0); assert.equal(result.proposal, undefined);
+    if (cancelled) assert.deepEqual(result, cancelled);
+  }
+});
+
+test('persona and general drafting expose generating then ready without invented batch totals', async t => {
+  for (const persona of [false, true]) {
+    const entered = deferred<void>(); const reply = deferred<string>();
+    const document = persona ? personaWorkspace() : empty;
+    const service = new LocalAgentService({ chatgpt: nativeDraft(() => { entered.resolve(); return reply.promise; }) });
+    t.after(() => service.close());
+    const job = service.start({ engine: 'chatgpt', model: 'draft-model', prompt: 'Prepare a draft', revision: 0, document, ...(persona ? { persona: { cohortId: 'customers', personaId: 'saved-1' } } : {}) });
+    await entered.promise;
+    assert.deepEqual(service.get(job.id)?.progress, { phase: 'generating', ...(persona ? { completedPersonas: 0, totalPersonas: 1 } : {}) });
+    const documentJson = persona ? JSON.stringify(document.cohorts[0]!.personas[1]) : output.documentJson;
+    reply.resolve(JSON.stringify({ ...output, documentJson }));
+    const completed = await terminal(service, job);
+    assert.equal(completed.status, 'completed');
+    assert.deepEqual(completed.progress, { phase: 'ready', ...(persona ? { completedPersonas: 1, totalPersonas: 1 } : {}) });
+    assertJobTimes(completed, true);
+  }
+});
+
 test('Codex draft uses existing login, stdin prompt, constrained cwd and validated proposal without saving', async t => {
   const root = await setup(t); const invocations: Invocation[] = [];
   const old = process.env.TYPESAFE_API_KEY; process.env.TYPESAFE_API_KEY = 'fake-private-env-key'; t.after(() => { if (old === undefined) delete process.env.TYPESAFE_API_KEY; else process.env.TYPESAFE_API_KEY = old; });
