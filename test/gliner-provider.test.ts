@@ -90,6 +90,23 @@ test('GLiNER rejects unsupported models before starting subprocess', async t => 
   await provider.close!();
 });
 
+test('GLiNER close during asynchronous setup probe prevents subprocess creation', async t => {
+  const { config, pid } = await fixture(t);
+  const provider = createProvider('gliner', { gliner: config });
+  const evaluation = provider.evaluate(request);
+  // evaluate's serialized operation starts on this microtask and awaits the
+  // filesystem readiness probe; close must take effect before that probe returns.
+  await Promise.resolve();
+  await provider.close!();
+  try {
+    await assert.rejects(evaluation, (error: unknown) => error instanceof ProviderError && error.code === 'GLINER_RUNTIME_FAILED');
+    await assert.rejects(readFile(pid, 'utf8'), (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT');
+  } finally {
+    // A regression must not leave its unexpectedly spawned test worker behind.
+    try { process.kill(Number(await readFile(pid, 'utf8')), 'SIGKILL'); } catch {}
+  }
+});
+
 for (const mode of ['missing', 'zero', 'badlogits']) test(`GLiNER rejects ${mode} native score evidence`, async t => {
   const { config } = await fixture(t, mode);
   const provider = createProvider('gliner', { gliner: config }); t.after(() => provider.close!());

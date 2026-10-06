@@ -108,6 +108,9 @@ export function createGlinerProvider(config: GlinerConfig = {}): Provider {
     if (fatalError) throw fatalError;
     if (ready) return ready;
     const status = await glinerStatus(config);
+    // close() may run while the asynchronous setup probe is in progress.
+    if (closed) throw new ProviderError('GLINER_RUNTIME_FAILED', 'GLiNER provider is closed.');
+    if (fatalError) throw fatalError;
     if (!status.ready) throw new ProviderError('GLINER_NOT_READY', status.message!);
     ready = new Promise<void>((resolveReady, rejectReady) => { readyResolve = resolveReady; readyReject = rejectReady; });
     child = spawn(selected.pythonPath, ['-u', selected.workerPath, '--runtime-dir', selected.runtimeDir], { cwd: repoRoot, env: { ...process.env, JEV_GLINER_RUNTIME_DIR: selected.runtimeDir }, stdio: ['pipe', 'pipe', 'pipe'] });
