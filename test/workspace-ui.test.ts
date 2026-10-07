@@ -57,7 +57,7 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,updateDraftClocks,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,applyStage};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,applyStage};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
   if (openExistingProject) (context as any).clientTest.S.projectId = 'existing-research';
@@ -1406,10 +1406,10 @@ test('generation progress reports accepted counts without inventing completion o
   const job = { id: 'progress', engine: 'chatgpt', model: 'chosen-model', status: 'running', startedAt: new Date(Date.now() - 65000).toISOString(), cohort: { id: 'new', size: 60 }, progress: { phase: 'generating', batch: 2, totalBatches: 3, completedBatches: 1, completedPersonas: 25, totalPersonas: 60 } };
   S.localJob = job; S.cohortTarget = 'new'; S.sections['cohort-generation'] = 'review';
   let html = draftProgress(job);
-  assert.match(html, /25 \/ 60/); assert.match(html, /value="25" max="60"/);
-  assert.match(html, /Generating batch 2 of 3/); assert.match(html, /1 of 3 batches checked/);
+  assert.match(html, /25 <span>\/ 60/); assert.match(html, /value="25" max="60"/);
+  assert.match(html, /Generating batch 2 of 3/); assert.doesNotMatch(html, /batches checked/);
   assert.match(html, /ChatGPT · chosen-model/); assert.match(html, /1m 5s elapsed/);
-  assert.match(html, /Counts update after validation/); assert.match(html, /Cancel generation/);
+  assert.match(html, /personas generated/); assert.doesNotMatch(html, /Waiting for ChatGPT|Counts update after validation/); assert.match(html, /Cancel generation/);
   assert.doesNotMatch(cohortGenerator(), /Wait for the current draft/);
   assert.equal(canGenerateCohort(), false);
   const clock = { dataset: { draftStart: job.startedAt }, textContent: '' };
@@ -1448,7 +1448,7 @@ test('recovering active cohort generation selects Progress with actual server co
   browser.respond('/api/agent/jobs/active', { id: 'active', engine: 'codex', status: 'running', cohort: { id: 'new', size: 60, prompt: 'Adult readers' }, progress: { phase: 'generating', completedPersonas: 25, totalPersonas: 60, batch: 2, totalBatches: 3, completedBatches: 1 } });
   await browser.client.loadLocalAgents();
   assert.equal(browser.client.S.sections['cohort-generation'], 'review');
-  assert.match(browser.element('app').innerHTML, /data-section-id="review" >[\s\S]*25 \/ 60/);
+  assert.match(browser.element('app').innerHTML, /data-section-id="review" >[\s\S]*value="25" max="60"/);
   assert.match(browser.element('app').innerHTML, />Progress<\/button>/);
   assert.doesNotMatch(browser.element('app').innerHTML, /Wait for the current draft/);
   browser.client.S.localJob.status = 'cancelled'; browser.timeouts.at(-1)!(); await settle();
@@ -1516,4 +1516,47 @@ test('changing an intermediate cohort keeps other phase cohorts and inputs indep
       assert.ok(pipeline.stages.every((stage: any) => pipeline.cohorts[stage.cohort] === 'reviewers'));
     }
   }
+});
+
+
+test('progress exposes observed activity, synthetic previews and real checks without changing draft fields', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, draftProgress } = browser.client;
+  const job = { id: 'streamed', status: 'running', engine: 'chatgpt', cohort: {size:100}, progress: { phase:'generating', totalPersonas:100, completedPersonas:25, batch:2, totalBatches:4, batchSize:25, activity:'receiving', outputChars:12500, lastActivityAt:new Date().toISOString(), latestAccepted:[{label:'Synthetic reader <script>',age:42}], validation:{scope:'batch',status:'passed',checks:['Required fields and adult ages','Expected batch size'],checkedPersonas:25} } };
+  S.localJob=job; S.cohortComposer=true; S.cohortTarget='new'; S.sections['cohort-generation']='review';
+  assert.match(draftProgress(job), /Response arriving/);
+  assert.match(draftProgress(job), /12,500 characters received/);
+  assert.match(draftProgress(job), /synthetic draft/);
+  assert.match(draftProgress(job), /Synthetic reader &lt;script&gt;/);
+  const before=JSON.stringify(S.doc);
+  browser.element('app').querySelectorAll=(selector:string)=>selector==='[data-form]'?[{reportValidity:()=>assert.fail('progress tab must not submit another form')}]:[];
+  browser.listeners.get('click')!({target:{closest:()=>({dataset:{act:'draft-progress-section',section:'checks'}})},preventDefault(){}});
+  const html=draftProgress(job);
+  assert.match(html,/Latest batch checks · passed/); assert.match(html,/Expected batch size/);
+  assert.match(html,/do not verify real-world facts/);
+  assert.match(draftProgress({...job,progress:{...job.progress,validation:undefined,lastBatchChecks:['Expected batch size']}}),/Latest batch checks · passed/);
+  assert.equal(JSON.stringify(S.doc),before); assert.equal(browser.bodies.length,0);
+  assert.match(draftProgress({...job,progress:{...job.progress,outputSource:'cli-stdout'}}),/CLI output arriving/);
+});
+
+test('remaining-time estimates require two measured batches and use persona-weighted durations', async () => {
+  const browser=browserHarness(); await settle(); const {draftEstimate}=browser.client;
+  const p={totalPersonas:1000,completedPersonas:50,batchDurationsMs:[60000],completedBatchSizes:[25]};
+  assert.match(draftEstimate(p),/After two completed batches/);
+  assert.match(draftEstimate({...p,batchDurationsMs:[60000,60000],completedBatchSizes:[25,25]}),/~30–46 min remaining/);
+  assert.match(draftEstimate({...p,batchDurationsMs:[60000,12000],completedBatchSizes:[25,5]}),/~30–46 min remaining/);
+  assert.equal(draftEstimate({...p,completedPersonas:1000}), '');
+  assert.match(draftEstimate({...p,totalPersonas:75,batchDurationsMs:[1000,1000],completedBatchSizes:[25,25]}),/~1–2 sec remaining/);
+  assert.match(draftEstimate({...p,batchStartedAt:new Date(Date.now()-120000).toISOString(),batchDurationsMs:[60000,60000],completedBatchSizes:[25,25]}),/Taking longer/);
+  assert.equal(draftEstimate({...p,totalBatches:1}), '');
+  assert.match(draftEstimate({...p,batchDurationsMs:[60000,NaN],completedBatchSizes:[25,25]}),/Estimating/);
+});
+
+
+test('progress polling preserves keyboard focus on its current action', async () => {
+  const browser=browserHarness(); await settle();
+  let focused=false;
+  (browser.document as any).activeElement={closest:()=>true,dataset:{act:'draft-progress-section',section:'checks'}};
+  browser.element('app').querySelector=(selector:string)=>selector==='[data-act=draft-progress-section][data-section="checks"]'?{focus(){focused=true}}:null;
+  browser.client.render(); assert.equal(focused,true);
 });

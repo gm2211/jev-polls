@@ -90,16 +90,105 @@ test('cohort progress reports connection checking and only accepted batches befo
     const input = await entered[index]!.promise;
     const active = service.get(job.id)!;
     assert.equal(active.status, 'running'); assert.equal(active.proposal, undefined);
-    assert.deepEqual(active.progress, { phase: 'generating', completedPersonas: index * 25, totalPersonas: 51, completedBatches: index, totalBatches: 3, batch: index + 1 });
+    assert.equal(active.progress?.phase, 'generating');
+    assert.equal(active.progress?.completedPersonas, index * 25);
+    assert.equal(active.progress?.totalPersonas, 51);
+    assert.equal(active.progress?.completedBatches, index);
+    assert.equal(active.progress?.batch, index + 1);
+    assert.equal(active.progress?.batchSize, index === 2 ? 1 : 25);
+    assert.equal(active.progress?.outputChars, 0);
+    assert.equal(active.progress?.outputTokens, undefined);
+    assert.equal(active.progress?.activity, 'starting');
+    assert.equal(active.progress?.validation, undefined);
+    if (index) assert.ok(active.progress?.lastBatchChecks?.includes('Expected cohort ID and batch size'));
+    else assert.equal(active.progress?.lastBatchChecks, undefined);
+    assert.equal(active.progress?.batchDurationsMs?.length ?? 0, index);
+    assert.deepEqual(active.progress?.completedBatchSizes ?? [], Array.from({ length: index }, () => 25));
+    assert.ok(Date.parse(active.progress!.generationStartedAt!) >= Date.parse(active.progress!.batchStartedAt!));
     assertJobTimes(active, false);
     replies[index]!.resolve(cohortBatchResponse(input));
   }
   const completed = await terminal(service, job);
   assert.equal(completed.status, 'completed');
-  assert.deepEqual(completed.progress, { phase: 'ready', completedPersonas: 51, totalPersonas: 51, completedBatches: 3, totalBatches: 3, batch: 3 });
+  assert.equal(completed.progress?.phase, 'ready'); assert.equal(completed.progress?.completedPersonas, 51);
+  assert.equal(completed.progress?.completedBatches, 3); assert.equal(completed.progress?.batch, 3);
+  assert.deepEqual(completed.progress?.completedBatchSizes, [25, 25, 1]);
+  assert.equal(completed.progress?.batchDurationsMs?.length, 3);
+  assert.ok(completed.progress?.batchDurationsMs?.every(duration => duration >= 0));
+  assert.equal(completed.progress?.validation?.scope, 'final');
+  assert.equal(completed.progress?.validation?.status, 'passed');
+  assert.equal(completed.progress?.validation?.checkedPersonas, 51);
   assertJobTimes(completed, true);
   assert.equal(completed.proposal?.document.cohorts[0]?.personas.length, 51);
   assert.equal(job.progress?.phase, 'checking', 'returned snapshots do not mutate');
+});
+
+test('provider activity reports response receipt without inventing completed personas and resets each batch', async t => {
+  type Activity = { phase: 'starting' | 'generating' | 'receiving'; outputChars: number; outputTokens?: number };
+  const entered = [deferred<string>(), deferred<string>()]; const replies = [deferred<string>(), deferred<string>()];
+  const callbacks: Array<(activity: Activity) => void> = []; let calls = 0;
+  const service = new LocalAgentService({ chatgpt: {
+    status: async () => ({ connected: true, planEnabled: true }),
+    generate: async ({ input, onProgress }: { input: string; onProgress: (activity: Activity) => void }) => {
+      const index = calls++; callbacks[index] = onProgress; entered[index]!.resolve(input); return { text: await replies[index]!.promise };
+    },
+  } as ChatGptDraftClient }); t.after(() => service.close());
+  const job = service.start({ engine: 'chatgpt', model: 'draft-model', prompt: 'Create 30 adults', revision: 0, document: empty, cohort: { id: 'customers', size: 30 } });
+  const first = await entered[0]!.promise;
+  callbacks[0]!({ phase: 'generating', outputChars: 0 });
+  assert.equal(service.get(job.id)!.progress!.activity, 'generating');
+  callbacks[0]!({ phase: 'receiving', outputChars: 217, outputTokens: 34 });
+  const receiving = service.get(job.id)!;
+  assert.equal(receiving.progress!.phase, 'generating'); assert.equal(receiving.progress!.activity, 'receiving');
+  assert.equal(receiving.progress!.outputChars, 217); assert.equal(receiving.progress!.outputTokens, 34);
+  assert.equal(receiving.progress!.completedPersonas, 0); assert.equal(receiving.progress!.completedBatches, 0);
+  assert.equal(receiving.progress!.latestAccepted, undefined); assert.equal(receiving.proposal, undefined);
+  assert.ok(Date.parse(receiving.progress!.lastActivityAt!) >= Date.parse(receiving.progress!.generationStartedAt!));
+  callbacks[0]!({ phase: 'receiving', outputChars: 10 });
+  assert.equal(service.get(job.id)!.progress!.outputChars, 217, 'provider counters cannot move backwards');
+  replies[0]!.resolve(cohortBatchResponse(first));
+  const second = await entered[1]!.promise;
+  const next = service.get(job.id)!;
+  assert.equal(next.progress!.completedPersonas, 25); assert.equal(next.progress!.outputChars, 0);
+  assert.equal(next.progress!.outputTokens, undefined); assert.equal(next.progress!.batchSize, 5);
+  assert.equal(next.progress!.activity, 'starting'); assert.equal(next.progress!.validation, undefined);
+  assert.equal(next.progress!.latestAccepted!.length, 3);
+  assert.deepEqual(Object.keys(next.progress!.latestAccepted![0]!).sort(), ['age', 'id', 'label', 'segment']);
+  callbacks[0]!({ phase: 'receiving', outputChars: 999 });
+  assert.equal(service.get(job.id)!.progress!.outputChars, 0, 'late callback from prior request cannot affect next batch');
+  const cancelled = service.cancel(job.id)!;
+  callbacks[1]!({ phase: 'receiving', outputChars: 500, outputTokens: 80 });
+  replies[1]!.resolve(cohortBatchResponse(second)); await service.close();
+  assert.deepEqual(service.get(job.id), cancelled, 'late callbacks and final output cannot change cancelled job');
+});
+
+test('accepted batch timings stay bounded and pair with their actual persona counts', async t => {
+  const service = new LocalAgentService({ chatgpt: nativeDraft(cohortBatchResponse) }); t.after(() => service.close());
+  const completed = await terminal(service, service.start({ engine: 'chatgpt', model: 'draft-model', prompt: 'Create 501 adults', revision: 0, document: empty, cohort: { id: 'customers', size: 501 } }));
+  assert.equal(completed.status, 'completed'); assert.equal(completed.progress!.completedPersonas, 501);
+  assert.equal(completed.progress!.batchDurationsMs!.length, 20);
+  assert.deepEqual(completed.progress!.completedBatchSizes, [...Array.from({ length: 19 }, () => 25), 1]);
+  assert.ok(completed.progress!.batchDurationsMs!.every(duration => Number.isFinite(duration) && duration >= 0));
+});
+
+test('CLI progress counts only stdout characters and never exposes diagnostic or reasoning contents', async t => {
+  const entered = deferred<Invocation>(); const release = deferred<void>(); const root = await setup(t);
+  const service = new LocalAgentService({ temporaryRoot: root, spawn: fakeSpawner(async invocation => {
+    entered.resolve(invocation); await release.promise;
+    await writeFile(invocation.args[invocation.args.indexOf('--output-last-message') + 1]!, JSON.stringify(output)); invocation.child.finish();
+  }) }); t.after(() => service.close());
+  const job = service.start({ engine: 'codex', prompt: 'Prepare a workspace', revision: 0, document: empty });
+  const invocation = await entered.promise;
+  invocation.child.stderr.write('private-diagnostic-sentinel');
+  assert.equal(service.get(job.id)!.progress!.outputChars, 0);
+  const utf8 = Buffer.from('model-output-sentinel 😀');
+  invocation.child.stdout.write(utf8.subarray(0, utf8.length - 2));
+  invocation.child.stdout.write(utf8.subarray(utf8.length - 2));
+  const active = service.get(job.id)!;
+  assert.equal(active.progress!.outputChars, 'model-output-sentinel 😀'.length);
+  assert.equal(active.progress!.activity, 'receiving'); assert.equal(active.progress!.outputSource, 'cli-stdout');
+  assert.doesNotMatch(JSON.stringify(active), /private-diagnostic-sentinel|model-output-sentinel/);
+  release.resolve(); assert.equal((await terminal(service, job)).status, 'completed');
 });
 
 test('failed and cancelled progress retains checked batches and never counts invalid or late output', async t => {
@@ -160,12 +249,12 @@ test('persona and general drafting expose generating then ready without invented
     t.after(() => service.close());
     const job = service.start({ engine: 'chatgpt', model: 'draft-model', prompt: 'Prepare a draft', revision: 0, document, ...(persona ? { persona: { cohortId: 'customers', personaId: 'saved-1' } } : {}) });
     await entered.promise;
-    assert.deepEqual(service.get(job.id)?.progress, { phase: 'generating', ...(persona ? { completedPersonas: 0, totalPersonas: 1 } : {}) });
+    const active = service.get(job.id)!.progress!; assert.equal(active.phase, 'generating'); assert.equal(active.activity, 'starting'); assert.equal(active.outputChars, 0); assert.equal(active.completedPersonas, persona ? 0 : undefined); assert.equal(active.totalPersonas, persona ? 1 : undefined); assert.equal(active.batch, undefined);
     const documentJson = persona ? JSON.stringify(document.cohorts[0]!.personas[1]) : output.documentJson;
     reply.resolve(JSON.stringify({ ...output, documentJson }));
     const completed = await terminal(service, job);
     assert.equal(completed.status, 'completed');
-    assert.deepEqual(completed.progress, { phase: 'ready', ...(persona ? { completedPersonas: 1, totalPersonas: 1 } : {}) });
+    assert.equal(completed.progress?.phase, 'ready'); assert.equal(completed.progress?.completedPersonas, persona ? 1 : undefined); assert.equal(completed.progress?.totalPersonas, persona ? 1 : undefined); assert.equal(completed.progress?.validation?.status, 'passed'); assert.equal(completed.progress?.validation?.scope, persona ? 'persona' : 'workspace');
     assertJobTimes(completed, true);
   }
 });
