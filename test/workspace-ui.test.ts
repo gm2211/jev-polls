@@ -57,7 +57,7 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,updateStepPicker,validateSetupAnswers,questionParts,upsertQuestion,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,studies,review,say,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,updateStepPicker,validateSetupAnswers,questionParts,upsertQuestion,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
   if (openExistingProject) (context as any).clientTest.S.projectId = 'existing-research';
@@ -212,17 +212,14 @@ test('phase editor keeps question and cohort together with advanced controls in 
   S.pipelineId = 'study'; S.stageId = 'panel';
   const pipeline = S.doc.pipelines[0], html = advancedStageForm(pipeline, pipeline.stages[0]);
   assert.equal((html.match(/data-form="stage"/g) ?? []).length, 1);
-  for (const name of ['label', 'phasePool', 'size', 'questionId', 'questionInstructions', 'criteria', 'repeats', 'stageContext']) {
+  for (const name of ['label', 'size', 'questionId', 'questionInstructions', 'criteria', 'repeats', 'stageContext']) {
     assert.match(html, new RegExp(`name="${name}"`));
   }
-  assert.match(html, /data-section-id="question" >/);
+  assert.match(html, /data-section-id="rules" >/);assert.doesNotMatch(html,/name="phasePool"/);
   assert.doesNotMatch(html, /data-section-id="cohort"/);
-  for (const name of ['label', 'phasePool']) {
-    assert.equal((html.match(new RegExp(`name="${name}"`, 'g')) ?? []).length, 1);
-    assert.ok(html.indexOf(`name="${name}"`) < html.indexOf('data-section-panel'));
-  }
+  assert.equal((html.match(/name="label"/g)??[]).length,1);
   assert.match(html, /data-section-id="inputs" hidden/);
-  assert.match(html, /data-section-id="rules" hidden/);
+  assert.match(html, /data-section-id="instructions" hidden/);
 });
 
 test('target fields survive cohort section switches and persona filters reset pagination', async () => {
@@ -853,7 +850,7 @@ test('projects start from a question and assign cohorts only after an explicit c
   selectProject('existing-research');
   assert.equal(S.tab, 'studies');
   assert.match(html(), /<h1[^>]*>Which direction should we choose\?<\/h1>/);
-  assert.ok(html().indexOf('id="tab-studies"') < html().indexOf('id="tab-cohorts"'));
+  assert.match(html(), /aria-label="Study editor"/);assert.doesNotMatch(html(), /id="tab-cohorts"/);
   assert.equal(JSON.stringify(S.doc), before);
   S.tab = 'cohorts'; S.cohortPrompt = 'Keep this unfinished cohort prompt';
   selectProject(null); selectProject('existing-research');
@@ -1230,7 +1227,8 @@ test('workspace tabs clear cohort selections and open the project pipeline while
   S.pipelineId = 'study'; S.stageId = 'panel';
   act(null, { dataset: { act: 'tab', tab: 'studies' } });
   assert.equal(S.pipelineId, 'study'); assert.equal(S.stageId, 'panel');
-  assert.match(browser.element('app').innerHTML, /role="tablist"/);
+  assert.doesNotMatch(browser.element('app').innerHTML, /role="tablist"/);
+  assert.match(browser.element('app').innerHTML, /aria-label="Study editor"/);
   assert.deepEqual(JSON.parse(JSON.stringify(S.doc)), JSON.parse(JSON.stringify(draft)));
 });
 
@@ -1864,4 +1862,37 @@ test('answer setup distinguishes hosted probabilities from local classifier evid
   S.evaluationProvider='gliner';assert.match(stageForm(p,s),/relative option scores/);assert.match(stageForm(p,s),/not calibrated probabilities/);
   setupAction('setup-type',{dataset:{type:'score'}});assert.match(stageForm(p,s),/relative level scores/);assert.doesNotMatch(stageForm(p,s),/plus probabilities across/);
   setupAction('setup-type',{dataset:{type:'noul'}});assert.match(stageForm(p,s),/relative yes score/);
+});
+
+
+test('study navigation has clear scope, a reachable single-study library and contextual step settings', async()=>{
+  const browser=browserHarness();await settle();const {S,act,render,say}=browser.client;
+  S.tab='studies';S.pipelineId='study';S.stageId='panel';S.dirty=true;
+  S.doc.pipelines[0].stages[0].questions.answer.criteria.a={label:'Draft name',description:'Keep typed detail'};
+  const before=JSON.stringify(S.doc);render();let html=browser.element('app').innerHTML;
+  assert.doesNotMatch(html,/role="tablist"|>Advanced<|Apply phase/);assert.match(html,/← Studies/);assert.match(html,/>Questions</);assert.match(html,/>Step settings</);
+  act(null,{dataset:{act:'section-view',sectionKey:'pipeline',sectionId:'advanced'}});html=browser.element('app').innerHTML;
+  assert.match(html,/Back to question/);assert.match(html,/Step settings · 1\./);assert.doesNotMatch(html,/aria-label="Study sections"|Apply phase/);
+  for(const field of ['questionInstructions','criteria','stageContext','repeats'])assert.match(html,new RegExp('name="'+field+'"'));
+  act(null,{dataset:{act:'section-view',sectionKey:'pipeline',sectionId:'phase'}});
+  assert.match(browser.element('app').innerHTML,/Keep typed detail/);
+  act(null,{dataset:{act:'back-studies'}});assert.equal(S.pipelineId,null);render();html=browser.element('app').innerHTML;
+  assert.match(html,/Your studies|Your research questions/);assert.match(html,/role="tablist"/);assert.match(html,/New study/);assert.doesNotMatch(html,/data-form="new-pipeline"/);
+  act(null,{dataset:{act:'new-study'}});assert.match(browser.element('app').innerHTML,/data-form="new-pipeline"/);
+  act(null,{dataset:{act:'cancel-study'}});assert.doesNotMatch(browser.element('app').innerHTML,/data-form="new-pipeline"/);
+  act(null,{dataset:{act:'open-pipeline',id:'study'}});assert.equal(JSON.stringify(S.doc),before);
+  S.flushing=true;browser.element('toast').textContent='';say('Stage applied to draft.');assert.equal(browser.element('toast').textContent,'');
+  S.flushing=false;say('Draft saved.');assert.equal(browser.element('toast').textContent,'Draft saved.');
+});
+
+
+test('step settings preserve cohort assignment and structured option contracts when basic fields are absent',async()=>{
+  const browser=browserHarness();await settle();const {S,applyStage}=browser.client;S.pipelineId='study';S.stageId='panel';
+  const p=S.doc.pipelines[0],s=p.stages[0];const criteria={a:{label:'Named option',description:'Keep full meaning'},b:'Other'};
+  s.questions.answer.criteria=criteria;s.context={note:'Existing fact'};
+  const values={label:s.label,size:'',repeats:'3',join:'all',stageContext:JSON.stringify(s.context),questionId:'answer',questionLabel:s.questions.answer.label,questionInstructions:'Updated instructions',questionType:'choice',criteria:JSON.stringify(criteria)};
+  const card={querySelector:(selector:string)=>({value:values[selector.match(/name="(.+)"/)![1] as keyof typeof values]})};
+  const before=JSON.stringify(p.cohorts);applyStage({values,querySelector:()=>null,querySelectorAll:(selector:string)=>selector==='.question-card'?[card]:[]});
+  assert.equal(s.cohort,'audience');assert.equal(JSON.stringify(p.cohorts),before);assert.equal(JSON.stringify(s.questions.answer.criteria),JSON.stringify(criteria));
+  assert.equal(s.questions.answer.instructions,'Updated instructions');assert.equal(s.repeats,3);assert.equal(s.context.note,'Existing fact');
 });
