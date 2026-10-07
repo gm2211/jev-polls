@@ -57,7 +57,7 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,applyStage,applyStudySetup,setupAction,setupConnections,connectSetupAnswer,validateSetupAnswers};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,applyStage,applyStudySetup,setupAction,setupContextSummary,validateSetupAnswers};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
   if (openExistingProject) (context as any).clientTest.S.projectId = 'existing-research';
@@ -356,7 +356,7 @@ test('next phase wires a named output, keeps one question, and excludes downstre
   assert.equal(dataInputOptions(pipeline, pipeline.stages[0]).length, 0, 'a later dependent phase cannot feed its ancestor');
   assert.equal(dataInputOptions(pipeline, next)[0].id, 'panel');
   assert.deepEqual(Array.from(projectionOptions(pipeline, next.inputs.previous_result), (x: any) => x.value), ['summary', 'responses', 'winner', 'probabilities']);
-  assert.match(browser.element('app').innerHTML, /1 earlier answer connected/);
+  assert.match(browser.element('app').innerHTML, /This cohort also sees results from:/);
   assert.match(browser.element('app').innerHTML, /Who answers/);
   assert.match(browser.element('app').innerHTML, /Which customer-support approach/);
   pipeline.stages[0].questions.preference = { type: 'noul', label: 'Would this work?', instructions: 'Answer yes or no.' };
@@ -1624,25 +1624,26 @@ test('simple study setup preserves hidden contracts, stable option keys, and oth
   assert.doesNotMatch(html, /data-form="study-setup"/, 'only one editor can submit changes for a phase');
 });
 
-test('answer selection wires exact outputs, rejects cycles, and leaves custom and legacy inputs alone', async () => {
+test('earlier context stays beside follow-up questions without an empty setup tab or changing bindings', async () => {
   const browser = browserHarness(); await settle();
-  const { S, connectSetupAnswer, setupConnections } = browser.client;
-  S.pipelineId = 'study'; S.stageId = 'panel';
+  const { S, stageForm, render, setupContextSummary } = browser.client;
+  S.tab = 'studies'; S.pipelineId = 'study'; S.stageId = 'panel';
   const p = S.doc.pipelines[0], first = p.stages[0];
+  render();
+  assert.doesNotMatch(browser.element('app').innerHTML, /Use earlier answers|No earlier answers|setup-context/);
   const next = { ...structuredClone(first), id: 'review', label: 'Review', dependsOn: ['panel'], inputs: { custom: { stage: 'panel', question: 'answer', select: 'winner' } } };
   p.stages.push(next);
+  first.questions.answer.label = 'Which <title> fits?';
   const before = JSON.stringify(next);
-  assert.match(setupConnections(p, next), /Connected/);
+  assert.match(stageForm(p, next), /This cohort also sees results from: “[^”]+: Which &lt;title&gt; fits\?”/);
   assert.equal(JSON.stringify(next), before);
-  assert.throws(() => connectSetupAnswer(p, first, 'review', 'answer'), /cannot feed/);
-  connectSetupAnswer(p, next, 'panel', 'answer');
-  assert.equal(Object.keys(next.inputs).length, 0);
-  connectSetupAnswer(p, next, 'panel', 'answer');
-  assert.deepEqual(JSON.parse(JSON.stringify(next.inputs)), { answer: { stage: 'panel', question: 'answer', select: 'summary' } });
-  assert.deepEqual(Array.from(next.dependsOn), ['panel']);
   delete (next as any).inputs;
-  assert.match(setupConnections(p, next), /already receives summaries/);
-  assert.equal((next as any).inputs, undefined);
+  assert.match(setupContextSummary(p, next), new RegExp(first.label));
+  assert.equal((next as any).inputs, undefined, 'legacy summary bindings remain implicit');
+  (next as any).inputs = {};
+  assert.equal(setupContextSummary(p, next), '', 'ordering alone does not imply receiving results');
+  S.sections.pipeline = 'advanced'; S.sections['phase-review'] = 'inputs';
+  assert.match(stageForm(p, next), /Connect output/);
 });
 
 test('review saves pending setup before planning and stops on save failure or empty answer options', async () => {
@@ -1675,7 +1676,7 @@ test('browser submit flushes simple fields before navigation without touching ot
 
 test('point-and-click result selections reconcile data dependencies and compare choices without key-order sensitivity', async () => {
   const browser = browserHarness(); await settle();
-  const { S, setupAction, stageForm, connectSetupAnswer } = browser.client;
+  const { S, setupAction, stageForm } = browser.client;
   S.pipelineId = 'study';
   const p = S.doc.pipelines[0], first = p.stages[0];
   const second = { ...structuredClone(first), id: 'second', label: 'Second cohort' };
@@ -1691,10 +1692,10 @@ test('point-and-click result selections reconcile data dependencies and compare 
   p.stages.push(decision); S.stageId = 'decision';
   setupAction('setup-result', { dataset: { source: 'second', question: 'answer' } });
   assert.deepEqual(Array.from(decision.dependsOn), ['ordering', 'second']);
-  second.inputs = { prior: { stage: 'panel', question: 'answer', select: 'summary' } };
-  second.dependsOn = ['panel']; second.when = { stage: 'panel', question: 'answer', metric: 'winner', op: 'eq', value: 'a' };
-  connectSetupAnswer(p, second, 'panel', 'answer');
-  assert.deepEqual(Array.from(second.dependsOn), ['panel'], 'branch conditions keep their required source');
+  decision.when = { stage: 'panel', question: 'answer', metric: 'winner', op: 'eq', value: 'a' };
+  setupAction('setup-result', { dataset: { source: 'panel', question: 'answer' } });
+  setupAction('setup-result', { dataset: { source: 'second', question: 'answer' } });
+  assert.ok(decision.dependsOn.includes('panel'), 'branch conditions keep their required source');
 });
 
 test('new choice options never reuse deleted keys referenced by branch conditions', async () => {
