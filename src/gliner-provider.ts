@@ -32,7 +32,11 @@ export async function glinerStatus(config: GlinerConfig = {}): Promise<GlinerSta
 function labelsFor(question: Question): Record<string, string> {
   if (question.type === 'noul') return { yes: 'Yes: the condition in the question holds.', no: 'No: the condition in the question does not hold.' };
   if (question.type === 'score') return Object.fromEntries(question.criteria.map((criterion, index) => [String(index), criterion]));
-  return Object.fromEntries(Object.entries(question.criteria).map(([label, description]) => [label, description ?? label]));
+  return Object.fromEntries(Object.entries(question.criteria).map(([key, criterion]) => [key,
+    criterion && typeof criterion === 'object'
+      ? [criterion.label, criterion.description].filter(value => value.trim()).join(': ')
+      : criterion ?? key,
+  ]));
 }
 
 export function validateClassifierAnswer(answer: Answer, question: Question): void {

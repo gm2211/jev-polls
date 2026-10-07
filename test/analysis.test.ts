@@ -83,3 +83,18 @@ test('run comparisons keep runs separate and reject incomparable providers', asy
   const aliasChanged = { ...second, stages: { ...second.stages, poll: { ...second.stages.poll!, votes: second.stages.poll!.votes.map((vote) => ({ ...vote, model: 'jev-new-alias-target' })) } } };
   assert.throws(() => compareRuns([run, aliasChanged], 'poll', 'pick'), /resolved to different provider models/);
 });
+
+test('structured choice comparisons ignore property order and retain normalized weighted probabilities', async () => {
+  const run = await sampleRun();
+  const stage = run.pipeline.stages[0]!;
+  assert.ok(stage.kind === 'poll' && stage.questions.pick?.type === 'choice');
+  stage.questions.pick.criteria = { x: { label: 'Everyday', description: 'For daily use.' }, y: { label: 'Occasional', description: '' } };
+  const second = structuredClone(run); second.id = 'second';
+  const secondStage = second.pipeline.stages[0]!;
+  assert.ok(secondStage.kind === 'poll' && secondStage.questions.pick?.type === 'choice');
+  secondStage.questions.pick.criteria.x = { description: 'For daily use.', label: 'Everyday' };
+  const comparison = compareRuns([run, second], 'poll', 'pick');
+  assert.deepEqual(comparison.averagesAcrossRuns.probabilities, { x: 0.65, y: 0.35 });
+  secondStage.questions.pick.criteria.x.description = 'For rare occasions.';
+  assert.throws(() => compareRuns([run, second], 'poll', 'pick'), /different questions/);
+});

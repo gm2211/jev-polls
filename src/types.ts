@@ -5,7 +5,8 @@ export interface Persona { id: string; label: string; segment: string; age: numb
 export interface DistributionTargetBucket { label: string; percent: number; value?: string | number | boolean | null; min?: number; max?: number }
 export interface DistributionTarget { field: string; kind: 'numeric' | 'categorical'; buckets: DistributionTargetBucket[] }
 export interface Cohort { version: 1; id: string; name: string; description: string; population: string; createdAt: string; sources: Source[]; segments: Segment[]; personas: Persona[]; assumptions: string[]; generationPrompt?: string; distributionTargets?: DistributionTarget[] }
-export interface ChoiceQuestion { type: 'choice'; label: string; instructions: string; criteria: Record<string, string | null> }
+export type ChoiceCriterion = string | null | { label: string; description: string };
+export interface ChoiceQuestion { type: 'choice'; label: string; instructions: string; criteria: Record<string, ChoiceCriterion> }
 export interface NoulQuestion { type: 'noul'; label: string; instructions: string }
 export interface ScoreQuestion { type: 'score'; label: string; instructions: string; criteria: string[] }
 export type Question = ChoiceQuestion | NoulQuestion | ScoreQuestion;

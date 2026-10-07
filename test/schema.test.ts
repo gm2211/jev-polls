@@ -54,6 +54,21 @@ test('Score schemas match TypeSafe’s 2–10 level limit in validation and JSON
   assert.equal(scoreVariant?.properties?.criteria?.maxItems, 10);
 });
 
+test('Choice accepts names and descriptions without replacing stable keys or legacy criteria', () => {
+  const p = pipeline();
+  const criteria = { option_a: { label: 'Daily ritual', description: 'A compact kit for everyday use.' }, legacy: 'Existing answer', neither: null };
+  (p.stages[0] as any).questions.favorite.criteria = criteria;
+  p.stages.push({ ...structuredClone(poll), id: 'followup', dependsOn: ['first'], when: { stage: 'first', question: 'favorite', metric: 'winner', op: 'eq', value: 'option_a' } });
+  const parsed = parsePipeline(p);
+  assert.deepEqual(parsed.stages[0]?.kind === 'poll' && parsed.stages[0].questions.favorite?.type === 'choice' && parsed.stages[0].questions.favorite.criteria, criteria);
+  criteria.option_a.description = '';
+  assert.doesNotThrow(() => parsePipeline(p));
+  for (const invalid of [{ label: ' ', description: 'Missing name' }, { label: 'Name' }, { label: 'Name', description: 42 }, { label: 'Name', description: '', extra: true }]) {
+    (p.stages[0] as any).questions.favorite.criteria.option_a = invalid;
+    assert.throws(() => parsePipeline(p));
+  }
+});
+
 test('cohorts validate optional regeneration distribution targets', () => {
   const c: any = { version: 1, id: 'people', name: 'People', description: 'Example', population: 'Adult gamers', createdAt: '2026-10-03T12:00:00Z', sources: [], segments: [{ id: 'players', label: 'Players', description: 'Players', weight: 1, weightBasis: 'assumed', sourceIds: [] }], personas: [{ id: 'p1', label: 'Person', segment: 'players', age: 22, background: 'Plays games', attributes: { residence: { region: 'north' } }, sourceIds: [], syntheticFields: ['background'], weight: 1 }], assumptions: [] };
   c.distributionTargets = [

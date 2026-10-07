@@ -330,7 +330,15 @@ function validateQuestionDraft(value: unknown, path: string): void {
     const choice = object(value, path, ['type', 'label', 'instructions', 'criteria'], ['type', 'label', 'instructions', 'criteria']);
     const criteria = object(choice.criteria, `${path}.criteria`, undefined, []);
     if (Object.keys(criteria).length > 255) throw new Error(`${path}.criteria exceeds 255 entries`);
-    for (const [key, item] of Object.entries(criteria)) { safeKey(key, `${path}.criteria key`); if (item !== null) string(item, `${path}.criteria.${key}`); }
+    for (const [key, item] of Object.entries(criteria)) {
+      safeKey(key, `${path}.criteria key`);
+      if (item !== null && typeof item === 'object') {
+        const criterionPath = `${path}.criteria.${key}`;
+        const criterion = object(item, criterionPath, ['label', 'description'], ['label', 'description']);
+        string(criterion.label, `${criterionPath}.label`);
+        string(criterion.description, `${criterionPath}.description`);
+      } else if (item !== null) string(item, `${path}.criteria.${key}`);
+    }
   } else if (q.type === 'score') {
     const score = object(value, path, ['type', 'label', 'instructions', 'criteria'], ['type', 'label', 'instructions', 'criteria']);
     array(score.criteria, `${path}.criteria`, 255).forEach((item, index) => string(item, `${path}.criteria[${index}]`));

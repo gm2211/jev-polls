@@ -66,6 +66,28 @@ test('serializes competing saves and rejects a stale expected revision', async (
   assert.equal((await storeA.read()).revision, 1);
 });
 
+test('workspace preserves structured options and incomplete drafts, rejecting malformed descriptions', async t => {
+  const directory = await temporaryDirectory(); t.after(() => rm(directory, { recursive: true, force: true }));
+  const store = new WorkspaceStore(directory);
+  const draft = documentWith();
+  const stage = draft.pipelines[0]!.stages[0]!;
+  assert.ok(stage.kind === 'poll' && stage.questions.favorite?.type === 'choice');
+  const criteria = { a: { label: 'Everyday', description: 'Designed for daily use.' }, b: { label: '', description: '' } };
+  stage.questions.favorite.criteria = criteria;
+  await store.save(draft, 0);
+  const saved = await store.read();
+  const savedStage = saved.document.pipelines[0]!.stages[0]!;
+  assert.ok(savedStage.kind === 'poll' && savedStage.questions.favorite?.type === 'choice');
+  assert.deepEqual(savedStage.questions.favorite.criteria, criteria);
+  assert.throws(() => workspacePlan(saved.document, 'study'));
+  savedStage.questions.favorite.criteria.b = { label: 'Occasional', description: '' };
+  assert.doesNotThrow(() => workspacePlan(saved.document, 'study'));
+  for (const invalid of [{ label: 'Only name' }, { label: 'Name', description: 42 }, { label: 'Name', description: '', extra: true }, []]) {
+    (savedStage.questions.favorite.criteria as Record<string, unknown>).a = invalid;
+    assert.throws(() => validateWorkspaceDocument(saved.document));
+  }
+});
+
 test('serializes revision checks across separate Node processes', async (t) => {
   const directory = await temporaryDirectory(); t.after(() => rm(directory, { recursive: true, force: true }));
   const moduleUrl = pathToFileURL(join(process.cwd(), 'src/workspace-store.ts')).href;

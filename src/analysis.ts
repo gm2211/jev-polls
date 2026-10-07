@@ -214,8 +214,8 @@ function compatibleSummaries(firstStage: RunRecord['pipeline']['stages'][number]
   return first.type === 'score' && second.type === 'score' && JSON.stringify(first.criteria) === JSON.stringify(second.criteria);
 }
 
-function stableRecord(value: Record<string, string | null>): string {
-  return JSON.stringify(Object.keys(value).sort().map((key) => [key, value[key]]));
+function stableRecord(value: Record<string, unknown>): string {
+  return stableStringify(value);
 }
 
 function compatibilityHash(run: RunRecord): string {
