@@ -100,6 +100,8 @@ test('cohort progress reports connection checking and only accepted batches befo
     assert.equal(active.progress?.outputTokens, undefined);
     assert.equal(active.progress?.activity, 'starting');
     assert.equal(active.progress?.validation, undefined);
+    if (index) assert.ok(active.progress?.lastBatchChecks?.includes('Expected cohort ID and batch size'));
+    else assert.equal(active.progress?.lastBatchChecks, undefined);
     assert.equal(active.progress?.batchDurationsMs?.length ?? 0, index);
     assert.deepEqual(active.progress?.completedBatchSizes ?? [], Array.from({ length: index }, () => 25));
     assert.ok(Date.parse(active.progress!.generationStartedAt!) >= Date.parse(active.progress!.batchStartedAt!));

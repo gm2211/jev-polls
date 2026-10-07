@@ -22,7 +22,7 @@ export interface LocalAgentProgress {
   activity?: 'starting' | 'generating' | 'receiving'; lastActivityAt?: string;
   outputChars?: number; outputTokens?: number; outputSource?: 'response' | 'cli-stdout';
   /** Timings of accepted batches only, including generation and batch checks. */
-  batchDurationsMs?: number[]; completedBatchSizes?: number[];
+  batchDurationsMs?: number[]; completedBatchSizes?: number[]; lastBatchChecks?: string[];
   latestAccepted?: Array<Pick<Persona, 'id' | 'label' | 'age' | 'segment'>>;
   validation?: { scope: 'batch' | 'final' | 'persona' | 'workspace'; status: 'checking' | 'passed'; checks: string[]; checkedPersonas: number };
 }
@@ -394,6 +394,7 @@ export class LocalAgentService {
         if (projectedBytes > MAX_WORKSPACE_BYTES) throw new DraftFailure('The completed cohort would exceed the workspace size limit. Use a smaller persona count or reduce saved workspace data.');
       }
       this.updateProgress(entry, 'validating', `Checked batch ${batchIndex + 1} of ${batches} (${personas.length}/${request.size} personas)…`, { completedPersonas: personas.length, completedBatches: batchIndex + 1, batchDurationsMs: [...(entry.public.progress?.batchDurationsMs ?? []), Math.max(0, Date.now() - Date.parse(entry.public.progress!.batchStartedAt!))].slice(-MAX_BATCH_TIMINGS), completedBatchSizes: [...(entry.public.progress?.completedBatchSizes ?? []), batchSize].slice(-MAX_BATCH_TIMINGS), latestAccepted: personas.slice(-3).map(({ id, label, age, segment }) => ({ id, label, age, segment })), validation: { scope: 'batch', status: 'passed', checks: ['Required fields and adult ages', 'Expected cohort ID and batch size', ...(originalMetadata || batchIndex > 0 ? ['Saved cohort details unchanged'] : []), ...(targets.length ? ['Requested distribution targets'] : []), 'Workspace size limit'], checkedPersonas: batchSize } });
+      entry.public.progress!.lastBatchChecks = [...entry.public.progress!.validation!.checks];
     }
     if (entry.cancelled || !metadata || personas.length !== request.size) throw Error();
     this.updateProgress(entry, 'validating', `Checking the complete cohort and workspace (${personas.length}/${request.size} personas)…`, { validation: { scope: 'final', status: 'checking', checks: [], checkedPersonas: 0 } });
