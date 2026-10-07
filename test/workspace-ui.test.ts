@@ -842,6 +842,39 @@ test('workspace opens at projects and keeps another project out of cohort, pipel
   assert.equal(S.cohortPrompt, 'Unsaved first project brief'); assert.equal(S.localPrompt, 'First assistant brief');
 });
 
+test('projects start from a question and assign cohorts only after an explicit choice', async () => {
+  const browser = browserHarness(false); await settle();
+  const { S, selectProject, render, freshPipeline, act } = browser.client;
+  const html = () => browser.element('app').innerHTML;
+  const study = S.doc.pipelines[0];
+  study.context = { decisionQuestion: 'Earlier question' };
+  study.description = 'Which direction should we choose?';
+  const before = JSON.stringify(S.doc);
+  selectProject('existing-research');
+  assert.equal(S.tab, 'studies');
+  assert.match(html(), /<h1[^>]*>Which direction should we choose\?<\/h1>/);
+  assert.ok(html().indexOf('id="tab-studies"') < html().indexOf('id="tab-cohorts"'));
+  assert.equal(JSON.stringify(S.doc), before);
+  S.tab = 'cohorts'; S.cohortPrompt = 'Keep this unfinished cohort prompt';
+  selectProject(null); selectProject('existing-research');
+  assert.equal(S.tab, 'cohorts');
+  assert.equal(S.cohortPrompt, 'Keep this unfinished cohort prompt');
+
+  S.doc.pipelines = []; S.doc.projects[0].pipelineIds = [];
+  S.tab = 'studies'; render();
+  assert.match(html(), /What question do you want to answer\?/);
+  assert.doesNotMatch(html(), /data-act="new-cohort"|A clean research bench/);
+  assert.equal(freshPipeline('Question first').cohorts.audience, '');
+  S.preferredCohortId = 'cohort';
+  assert.equal(freshPipeline('Use this audience').cohorts.audience, 'cohort');
+  S.newQuestion = 'Which name best fits our game?';
+  act(null, { dataset: { act: 'draft-question' } });
+  assert.equal(S.tab, 'agents');
+  assert.match(S.localPrompt, /Which name best fits our game\?/);
+  assert.equal(S.doc.pipelines.length, 0);
+  assert.equal(S.doc.cohorts.length, 1);
+});
+
 test('project creation requires explicit entry and cancellation preserves its draft without changing projects', async () => {
   const browser = browserHarness(false); await settle();
   const { S, act, render, selectProject } = browser.client;
