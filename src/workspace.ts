@@ -162,7 +162,7 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
     response.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
     response.setHeader('Content-Security-Policy', report
       ? "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; base-uri 'none'; frame-ancestors 'none'"
-      : `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; style-src-attr 'unsafe-inline'; connect-src 'self'; img-src data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`);
+      : `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; style-src-attr 'unsafe-inline'; connect-src 'self'; img-src data:; font-src data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`);
   }
   function send(response: ServerResponse, status: number, value: unknown, html = false, report = false) {
     headers(response, report);
