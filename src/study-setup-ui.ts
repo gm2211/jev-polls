@@ -1,0 +1,133 @@
+/** Point-and-click study setup. Existing pipeline contracts remain unchanged. */
+export const STUDY_SETUP_CLIENT = String.raw`
+function answerName(type){return {choice:'Pick one',noul:'Yes / no',score:'Rating'}[type]||'Result'}
+function setupQuestion(s){const entries=Object.entries(s.questions||{});return entries.find(([key])=>key===S.sections['setup-question-'+s.id])||entries[0]}
+function stageForm(p,s){
+  if(s.kind!=='poll')return resultSetup(p,s);
+  const mode=S.sections.pipeline||'phase',tabs='';
+  if(mode==='advanced')return tabs+advancedStageForm(p,s);
+  const entry=setupQuestion(s),pool=poolForPhase(p,s);
+  const picker='<div class="phase-picker">'+select('phasePicker',p.stages.map(x=>({value:x.id,label:x.label})),s.id,'Selected step')+'</div>';
+  if(mode==='connections')return tabs+panel('Use earlier answers','Choose what this cohort sees before answering.',setupConnections(p,s),picker);
+  if(!entry)return tabs+panel('Add a question','','<button class="button primary" data-act="add-question">Add question</button>',picker);
+  const [qid,q]=entry,entries=Object.entries(s.questions),cohorts=pageItems(projectCohorts(),'setup-cohorts-'+s.id,4);
+  const questionPicker=entries.length>1?'<nav class="section-tabs" aria-label="Questions in this step">'+entries.map(([key,value])=>'<button type="button" class="button small" data-act="setup-question" data-id="'+attr(key)+'" aria-pressed="'+(key===qid)+'">'+esc(value.label||key)+'</button>').join('')+'</nav>':'';
+  const cohortChoices=cohorts.items.map(c=>'<button type="button" class="setup-choice" data-act="setup-cohort" data-id="'+attr(c.id)+'" aria-pressed="'+(pool?.id===c.id)+'"><strong>'+esc(c.name)+'</strong><span>'+c.personas.length.toLocaleString('en-US')+(c.personas.length===1?' persona':' personas')+(pool?.id===c.id?' · Selected':'')+'</span></button>').join('');
+  const types='<div class="row setup-types" aria-label="Answer format">'+['choice','noul','score'].map(type=>'<button type="button" class="button" data-act="setup-type" data-type="'+type+'" aria-pressed="'+(q.type===type)+'">'+answerName(type)+'</button>').join('')+'</div>';
+  const options=q.type==='choice'?Object.entries(q.criteria).map(([key,label])=>({key,label:label??key})):q.type==='score'?q.criteria.map((label,i)=>({key:String(i),label})):[];
+  const optionPage=pageItems(options,'setup-options-'+s.id+'-'+qid,4);
+  const optionRows=optionPage.items.map((o,offset)=>{const i=optionPage.start+offset;return '<div class="setup-option" data-setup-option="'+attr(o.key)+'"><span aria-hidden="true">'+(i+1)+'</span><input name="setupOption" aria-label="'+(q.type==='score'?'Rating level ':'Option ')+(i+1)+'" value="'+attr(o.label)+'"><button type="button" class="button small" data-act="setup-remove-option" data-key="'+attr(o.key)+'" aria-label="Remove '+(q.type==='score'?'level ':'option ')+(i+1)+'" '+(options.length<=2?'disabled':'')+'>×</button></div>'}).join('');
+  const answer=types+(q.type==='noul'?'<p class="subtle">Each persona answers yes or no to your question.</p>':'<p class="subtle">'+(q.type==='choice'?'Enter the options people can choose from.':'Describe each rating level, from lowest to highest.')+'</p><div class="setup-options">'+optionRows+'</div>'+optionPage.controls+'<button type="button" class="button small" data-act="setup-add-option" '+(options.length>=(q.type==='score'?10:255)?'disabled':'')+'>＋ Add '+(q.type==='score'?'level':'option')+'</button>');
+  const form='<form data-form="study-setup" data-question-id="'+attr(qid)+'">'+questionPicker+'<div class="setup-prompt-row">'+area('What do you want to ask?','setupPrompt',q.label,'','2')+picker+'</div><div class="setup-columns"><section><h3>Who answers?</h3><div class="setup-cohorts">'+cohortChoices+'</div>'+cohorts.controls+(!pool?'<p class="subtle">Choose a cohort for this question.</p>':'<p class="subtle">Selected: '+esc(pool.name)+'</p>')+(!projectCohorts().length?'<button type="button" class="button" data-act="new-cohort">Generate a cohort</button>':'')+'</section><section><h3>How should they answer?</h3>'+answer+'</section></div></form>';
+  const connected=Object.keys(s.inputs||{}).length;
+  return '<section class="panel setup-panel">'+form+'<div class="setup-footer"><span class="subtle">'+(connected?connected+' earlier answer'+(connected===1?'':'s')+' connected.':'')+'</span><button class="button" data-act="next-phase">＋ Ask a follow-up</button></div></section>';
+}
+function applyStudySetup(form){
+  const s=selectedStage(),qid=form.dataset.questionId,q=s?.questions?.[qid];if(!q)return;
+  const d=new FormData(form),label=String(d.get('setupPrompt')??q.label);
+  // Preserve custom instructions; remove only the duplicated question from our old default.
+  const suffix='\nChoose the option that best answers this question. Select no-match if none is suitable.';
+  if(label!==q.label&&q.instructions===q.label+suffix)q.instructions='Answer the question using your persona and the supplied context.';
+  q.label=label;
+  for(const row of form.querySelectorAll('[data-setup-option]')){
+    const key=row.dataset.setupOption,value=row.querySelector('input').value;
+    if(q.type==='choice'){if(value!==(q.criteria[key]??key))q.criteria[key]=value}
+    else if(q.type==='score')q.criteria[Number(key)]=value;
+  }
+  S.dirty=true;S.plan=null;
+}
+function assignSetupCohort(p,s,cid){
+  if(!projectCohorts().some(c=>c.id===cid))throw Error('Choose a cohort from this project.');
+  let alias=Object.entries(p.cohorts).find(([,value])=>value===cid)?.[0];
+  if(!alias){alias='cohort';let n=2;while(Object.hasOwn(p.cohorts,alias))alias='cohort_'+n++;p.cohorts[alias]=cid}
+  s.cohort=alias;
+}
+function setupConnections(p,s){
+  if(s.inputs===undefined&&s.dependsOn.length)return '<p>This step already receives summaries from: '+s.dependsOn.map(id=>esc(p.stages.find(x=>x.id===id)?.label||id)).join(', ')+'.</p><button class="button" data-act="setup-explicit-inputs">Choose individual answers</button>';
+  const outputs=dataInputOptions(p,s).flatMap(source=>phaseOutput(p,source).map(q=>({source,q})));
+  const page=pageItems(outputs,'setup-answers-'+s.id,5);
+  return (page.items.length?'<div class="setup-connections">'+page.items.map(({source,q})=>{
+    const bindings=Object.entries(s.inputs||{}).filter(([,input])=>input.stage===source.id&&input.question===q.id),selected=bindings.length>0;
+    return '<button class="setup-choice" data-act="setup-connect" data-source="'+attr(source.id)+'" data-question="'+attr(q.id)+'" aria-pressed="'+selected+'"><span class="setup-check" aria-hidden="true">'+(selected?'✓':'+')+'</span><span><strong>'+esc(q.label||source.label)+'</strong><span>'+esc(source.label)+' · '+answerName(q.type)+(selected?' · Connected':'')+'</span></span></button>';
+  }).join('')+'</div>'+page.controls:'<p class="subtle">No earlier answers available. Add a follow-up from the study flow to use this step’s answer.</p>')+'<p class="subtle">Selected answers become context for this question. New connections pass the full result summary.</p>';
+}
+function connectSetupAnswer(p,s,sourceId,qid){
+  const source=dataInputOptions(p,s).find(x=>x.id===sourceId);
+  if(!source||!phaseOutput(p,source).some(q=>q.id===qid))throw Error('This answer cannot feed this step.');
+  s.inputs??={};const matches=Object.entries(s.inputs).filter(([,x])=>x.stage===sourceId&&x.question===qid);
+  if(matches.length){for(const [name] of matches)delete s.inputs[name];reconcileSetupDependencies(s,[sourceId],Object.values(s.inputs).map(x=>x.stage));return}
+  let key='answer',n=2;while(Object.hasOwn(s.inputs,key))key='answer_'+n++;
+  s.inputs[key]={stage:sourceId,question:qid,select:'summary'};
+  if(!s.dependsOn.includes(sourceId))s.dependsOn.push(sourceId);
+}
+function reconcileSetupDependencies(s,removed,remaining){
+  const conditional=new Set();
+  const visit=node=>{if(!node)return;if(node.stage)conditional.add(node.stage);for(const child of node.all||node.any||[])visit(child);if(node.not)visit(node.not)};visit(s.when);
+  s.dependsOn=s.dependsOn.filter(id=>!removed.includes(id)||remaining.includes(id)||conditional.has(id));
+  for(const id of remaining)if(id&&!s.dependsOn.includes(id))s.dependsOn.push(id);
+}
+function setupAnswerSignature(q){return JSON.stringify([q?.type,q?.type==='choice'?Object.entries(q.criteria||{}).sort(([a],[b])=>a.localeCompare(b)):q?.criteria])}
+function resultSetup(p,s){
+  const mode=S.sections.pipeline||'phase',tabs='';
+  if(mode==='advanced')return tabs+advancedStageForm(p,s);
+  const current=s.kind==='decision'?[s.from]:s.inputs,first=current.find(x=>x.stage&&x.question),base=first?resolvedQuestion(p,first.stage,first.question):null;
+  const compatible=q=>!base||setupAnswerSignature(q)===setupAnswerSignature(base);
+  const outputs=dataInputOptions(p,s).flatMap(source=>phaseOutput(p,source).map(q=>({source,q}))).filter(({source,q})=>s.kind==='decision'?q.type==='choice':compatible(resolvedQuestion(p,source.id,q.id)||{}));
+  const page=pageItems(outputs,'setup-results-'+s.id,5);
+  const content=page.items.map(({source,q})=>{
+    const selected=current.some(x=>x.stage===source.id&&x.question===q.id);
+    return '<button class="setup-choice" data-act="setup-result" data-source="'+attr(source.id)+'" data-question="'+attr(q.id)+'" aria-pressed="'+selected+'"><strong>'+esc(q.label||source.label)+'</strong><span>'+esc(source.label)+' · '+answerName(q.type)+(selected?' · Selected':'')+'</span></button>';
+  }).join('');
+  return tabs+panel(s.kind==='decision'?'Which answer should supply the result?':'Which answers should be combined?',s.kind==='decision'?'Uses the leading option from one earlier answer.':'Choose answers with matching options or rating levels. New selections get equal weight.','<div class="setup-connections">'+(content||'<p>No compatible earlier answers available.</p>')+'</div>'+page.controls,'<div class="phase-picker">'+select('phasePicker',p.stages.map(x=>({value:x.id,label:x.label})),s.id,'Selected step')+'</div>');
+}
+function setupAction(a,el){
+  if(!a.startsWith('setup-'))return false;
+  const p=pipeline(),s=selectedStage();if(!p||!s)return true;
+  if(a==='setup-result'){
+    const source=dataInputOptions(p,s).find(x=>x.id===el.dataset.source),qid=el.dataset.question,q=source&&resolvedQuestion(p,source.id,qid);
+    if(!q||!phaseOutput(p,source).some(x=>x.id===qid))throw Error('Choose an available earlier answer.');
+    const before=s.kind==='decision'?[s.from.stage]:s.kind==='aggregate'?s.inputs.map(x=>x.stage):[];
+    if(s.kind==='decision'){if(q.type!=='choice')throw Error('Select a pick-one answer.');s.from={stage:source.id,question:qid}}
+    else if(s.kind==='aggregate'){
+      const index=s.inputs.findIndex(x=>x.stage===source.id&&x.question===qid),base=s.inputs[0]&&resolvedQuestion(p,s.inputs[0].stage,s.inputs[0].question);
+      if(index>=0)s.inputs.splice(index,1);
+      else {if(base&&setupAnswerSignature(q)!==setupAnswerSignature(base))throw Error('Combined answers must use matching options or rating levels.');s.inputs.push({stage:source.id,question:qid,weight:1})}
+    }else return true;
+    reconcileSetupDependencies(s,before,s.kind==='decision'?[s.from.stage]:s.inputs.map(x=>x.stage));
+    S.dirty=true;S.plan=null;render();return true;
+  }
+  if(s.kind!=='poll')return true;
+  const entry=setupQuestion(s),q=entry?.[1];
+  if(a==='setup-question'){S.sections['setup-question-'+s.id]=el.dataset.id;render();return true}
+  if(a==='setup-cohort')assignSetupCohort(p,s,el.dataset.id);
+  else if(a==='setup-type'){
+    const type=el.dataset.type;if(!['choice','noul','score'].includes(type)||q.type===type)return true;
+    // Cache formats per question so exploring formats never destroys typed options.
+    const key=p.id+':'+s.id+':'+entry[0];setupFormats[key]??={};setupFormats[key][q.type]=clone(q);
+    s.questions[entry[0]]=setupFormats[key][type]?{...clone(setupFormats[key][type]),label:q.label}:{type,label:q.label,instructions:'Answer the question using your persona and the supplied context.',...(type==='choice'?{criteria:{option_1:'',option_2:''}}:type==='score'?{criteria:['Does not meet the stated goal','Partly meets the stated goal','Fully meets the stated goal']}: {})};
+  }else if(a==='setup-add-option'){
+    if(q.type==='choice'){if(Object.keys(q.criteria).length>=255)return true;let key='option_'+id();while(Object.hasOwn(q.criteria,key))key='option_'+id();q.criteria[key]=''}
+    else if(q.type==='score'&&q.criteria.length<10)q.criteria.push('');
+    const count=q.type==='choice'?Object.keys(q.criteria).length:q.criteria.length;S.listPages[S.projectId+':setup-options-'+s.id+'-'+entry[0]]=Math.floor((count-1)/4);
+  }else if(a==='setup-remove-option'){
+    if(q.type==='choice'&&Object.keys(q.criteria).length>2)delete q.criteria[el.dataset.key];
+    if(q.type==='score'&&q.criteria.length>2)q.criteria.splice(Number(el.dataset.key),1);
+  }else if(a==='setup-connect')connectSetupAnswer(p,s,el.dataset.source,el.dataset.question);
+  else if(a==='setup-explicit-inputs'){
+    s.inputs={};for(const sourceId of s.dependsOn){const source=p.stages.find(x=>x.id===sourceId);if(source)for(const q of phaseOutput(p,source))connectSetupAnswer(p,s,sourceId,q.id)}
+  }else return false;
+  S.dirty=true;S.plan=null;render();return true;
+}
+const setupFormats={};
+function validateSetupAnswers(p){
+  for(const s of p?.stages||[])if(s.kind==='poll')for(const [qid,q] of Object.entries(s.questions)){
+    const missing=!q.label.trim()||(q.type==='choice'&&Object.values(q.criteria).some(value=>typeof value==='string'&&!value.trim()))||(q.type==='score'&&q.criteria.some(value=>!value.trim()));
+    if(missing){S.stageId=s.id;S.sections.pipeline='phase';S.sections.pipeline='phase';S.sections['setup-question-'+s.id]=qid;render();throw Error('Add the question and text for every answer option before reviewing.');}
+  }
+}
+`;
+
+export const STUDY_SETUP_CSS = `
+.setup-prompt-row{display:grid;grid-template-columns:minmax(0,1fr) 240px;gap:24px;align-items:start;margin-bottom:14px}.setup-prompt-row .phase-picker{margin-top:0}.setup-columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:28px}.setup-columns h3{margin:4px 0 12px;font-size:14px}.setup-columns>section{min-width:0}.setup-cohorts,.setup-connections{display:grid;gap:8px}.setup-choice{appearance:none;width:100%;min-height:54px;text-align:left;font:inherit;color:var(--ink);background:var(--paper);border:1px solid var(--line);padding:12px;cursor:pointer;border-radius:2px}.setup-choice strong,.setup-choice span span{display:block}.setup-choice strong{font-size:13px;overflow-wrap:anywhere}.setup-choice span{font-size:12px;color:var(--muted)}.setup-choice[aria-pressed=true]{border-color:var(--blue);box-shadow:inset 3px 0 var(--blue)}.setup-choice:hover{border-color:var(--ink)}.setup-choice:focus-visible{outline:3px solid var(--blue);outline-offset:2px}.setup-types [aria-pressed=true]{background:var(--blue);color:var(--button-ink);border-color:var(--blue)}.setup-options{display:grid;gap:6px;margin:8px 0}.setup-option{display:grid;grid-template-columns:18px minmax(0,1fr) 44px;align-items:center;gap:6px}.setup-option>span{color:var(--muted);font-size:12px}.setup-option .button{min-width:44px}.setup-footer{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:18px;padding-top:12px;border-top:1px solid var(--line)}.setup-connections .setup-choice{display:flex;gap:12px;align-items:center}.setup-check{width:24px;flex:none;color:var(--blue)!important;font-size:20px!important}[data-form=study-setup]> .field{margin-bottom:20px}[data-form=study-setup] textarea{min-height:70px}
+@media(max-width:650px){.setup-prompt-row{grid-template-columns:minmax(0,1fr);gap:4px}.setup-prompt-row .phase-picker{grid-row:1;width:100%}.setup-prompt-row textarea{min-height:70px}.setup-columns{grid-template-columns:minmax(0,1fr);gap:18px}.setup-footer{flex-wrap:wrap}.setup-types{gap:6px}}
+`;
