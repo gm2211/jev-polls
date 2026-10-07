@@ -82,14 +82,16 @@ function contrast(first: string, second: string): number {
 test('both theme palettes keep normal, muted, placeholder, and disabled text readable', () => {
   for (const [theme, palette] of Object.entries(WORKSPACE_PALETTES)) {
     for (const text of ['ink', 'muted', 'faint'] as const) {
-      for (const surface of ['paper', 'surface', 'raised', 'field', 'hover'] as const) {
+      for (const surface of ['paper', 'surface', 'raised', 'field', 'hover', 'selection'] as const) {
         assert.ok(contrast(palette[text], palette[surface]) >= 4.5, `${theme} ${text} on ${surface} needs 4.5:1`);
       }
     }
     for (const accent of ['blue', 'teal', 'amber'] as const) {
       assert.ok(contrast(palette[accent], palette[`${accent}-soft`]) >= 4.5, `${theme} ${accent} status text needs 4.5:1`);
     }
-    assert.ok(contrast(palette['button-ink'], palette.blue) >= 4.5, `${theme} primary and selected controls need 4.5:1`);
+    for (const action of ['action', 'action-hover'] as const) {
+      assert.ok(contrast(palette['button-ink'], palette[action]) >= 4.5, `${theme} primary action text needs 4.5:1`);
+    }
     assert.ok(contrast(palette['disabled-ink'], palette.raised) >= 4.5, `${theme} disabled controls need 4.5:1`);
   }
 });
@@ -97,7 +99,7 @@ test('both theme palettes keep normal, muted, placeholder, and disabled text rea
 test('both theme palettes distinguish control boundaries and focus from nearby surfaces', () => {
   for (const [theme, palette] of Object.entries(WORKSPACE_PALETTES)) {
     for (const indicator of ['control-line', 'focus'] as const) {
-      for (const surface of ['paper', 'surface', 'raised', 'field', 'hover'] as const) {
+      for (const surface of ['paper', 'surface', 'raised', 'field', 'hover', 'selection'] as const) {
         assert.ok(contrast(palette[indicator], palette[surface]) >= 3, `${theme} ${indicator} against ${surface} needs 3:1`);
       }
     }
