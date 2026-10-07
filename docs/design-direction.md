@@ -3,7 +3,7 @@
 The approved direction is a working research instrument: clear readouts, aligned records, visible controls, and one focused task surface. Avoid ornamental dashboards and nested rounded cards.
 
 - Use Space Grotesk for headings and numeric readouts; IBM Plex Sans for controls and prose. Licensed font subsets ship locally in `assets/fonts`; no CDN is needed.
-- Use a pale chassis in light mode and graphite in dark mode. Orange identifies primary actions and the active channel; green identifies successful progress. Text and field boundaries must remain readable in both modes.
+- Use neutral gray surfaces in light mode and charcoal in dark mode, without green undertones. Orange identifies primary actions and the active channel; steel blue identifies successful progress. Text and field boundaries must remain readable in both modes.
 - Separate regions with alignment, rules, and surface contrast. Use small radii and no decorative elevation. Reserve shadows for dialogs.
 - Keep the workspace bar compact and visible. Cohort sections form a side selector on wide screens and wrapping tabs on narrow screens.
 - Present cohort libraries as records and personas as rows. Show effective cohort share next to each persona. Paginate collections; keep page membership stable when the viewport changes.

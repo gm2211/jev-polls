@@ -32,18 +32,18 @@ export const THEME_INIT = String.raw`(()=>{
 /** Colors shared by CSS and contrast checks. Surfaces express their role, not nesting depth. */
 export const WORKSPACE_PALETTES = {
   light: {
-    paper: '#e4e7e2', surface: '#f6f7f3', raised: '#e8ece6', field: '#ffffff', hover: '#dce4da',
-    ink: '#18201b', muted: '#48564b', faint: '#516052', line: '#b9c3b8', 'control-line': '#687865',
+    paper: '#e6e6e6', surface: '#f7f7f7', raised: '#ececec', field: '#ffffff', hover: '#dddddd',
+    ink: '#1c1c1c', muted: '#505050', faint: '#595959', line: '#bdbdbd', 'control-line': '#707070',
     blue: '#ad3514', 'blue-dark': '#8c290e', 'blue-soft': '#fbece1',
-    teal: '#236445', 'teal-soft': '#e1eee3', amber: '#765800', 'amber-soft': '#f4edce', red: '#a32b25',
-    'button-ink': '#ffffff', 'disabled-ink': '#516052', focus: '#ad3514',
+    teal: '#335f82', 'teal-soft': '#e6edf3', amber: '#765800', 'amber-soft': '#f4edce', red: '#a32b25',
+    'button-ink': '#ffffff', 'disabled-ink': '#595959', focus: '#ad3514',
   },
   dark: {
-    paper: '#161b18', surface: '#232a25', raised: '#303931', field: '#101612', hover: '#384539',
-    ink: '#f3f6ef', muted: '#c2cebf', faint: '#b8c6b5', line: '#4a5a4b', 'control-line': '#9eaf9a',
+    paper: '#181818', surface: '#252525', raised: '#323232', field: '#111111', hover: '#3b3b3b',
+    ink: '#f4f4f4', muted: '#c9c9c9', faint: '#bebebe', line: '#555555', 'control-line': '#a5a5a5',
     blue: '#ff9a73', 'blue-dark': '#ffb396', 'blue-soft': '#4e2b1f',
-    teal: '#a9dbaa', 'teal-soft': '#213d29', amber: '#edcf7e', 'amber-soft': '#40351b', red: '#ffb5ac',
-    'button-ink': '#161b18', 'disabled-ink': '#b8c6b5', focus: '#ff9a73',
+    teal: '#b0cfee', 'teal-soft': '#273746', amber: '#edcf7e', 'amber-soft': '#40351b', red: '#ffb5ac',
+    'button-ink': '#181818', 'disabled-ink': '#bebebe', focus: '#ff9a73',
   },
 } as const;
 
@@ -104,7 +104,7 @@ input{accent-color:var(--blue)}input[type=number],.weight-summary,.distribution-
 .distribution-row{min-height:44px;border-bottom:1px solid var(--line);font-size:13px}.distribution-track{height:14px;background:var(--raised);border-radius:0}.distribution-fill{background:var(--teal)}.distribution-chart{gap:0}.target-summary{font-size:13px}.source-empty{background:var(--teal-soft);color:var(--ink)}
 .phase-canvas{background:var(--raised);border-block:1px solid var(--line);padding:20px 12px}.stage-card,.phase-canvas .stage-card{background:var(--surface);border:1px solid var(--control-line);border-radius:3px}.stage-card:before{border-radius:0}.phase-ports{background:var(--raised);border-radius:0}.phase-select{border-radius:0}.phase-port{color:var(--muted)}.phase-port button{min-height:44px;padding:5px 7px;border:1px solid var(--control-line);border-radius:2px;color:var(--ink);background:var(--surface)}.phase-input{background:var(--teal-soft);border-color:var(--teal);border-radius:2px}.phase-canvas .stage-card[data-selected=true],.stage-card[aria-pressed=true]{border-color:var(--blue);box-shadow:inset 0 0 0 1px var(--blue)}
 :is(.badge,.seg-pill,.output-tag){border-radius:2px;font-weight:500}.badge{background:var(--raised);color:var(--muted)}.badge.blue{background:var(--blue-soft);color:var(--blue)}.badge.teal,.notice{background:var(--teal-soft);color:var(--teal)}.badge.amber,.warning,.workspace-sync,.output-tag{background:var(--amber-soft);color:var(--amber)}.badge.red,.workspace-error{background:var(--surface);color:var(--red);border-color:var(--red)}.notice,.warning,.workspace-sync,.workspace-error{border-radius:0}.empty,.callout{background:var(--surface);border-color:var(--line);border-radius:2px;color:var(--muted)}.empty{padding:24px;text-align:left}.empty p{margin:6px 0 12px}.empty strong,.empty-pool strong{font:600 20px var(--display)}
-.auth-dialog{border-radius:4px;background:var(--surface);border-color:var(--control-line);box-shadow:0 16px 60px #0005}.auth-dialog h2{font:600 25px var(--display)}.auth-dialog::backdrop{background:#101713aa}.close-dialog{width:44px;height:44px}.ai-pill,.data-pill{border-radius:3px}.back-link{min-height:44px;border:1px solid var(--control-line);border-radius:3px;padding:8px 12px;background:var(--surface);color:var(--ink)}.back-link:hover{text-decoration:none;background:var(--hover)}
+.auth-dialog{border-radius:4px;background:var(--surface);border-color:var(--control-line);box-shadow:0 16px 60px #0005}.auth-dialog h2{font:600 25px var(--display)}.auth-dialog::backdrop{background:#111111aa}.close-dialog{width:44px;height:44px}.ai-pill,.data-pill{border-radius:3px}.back-link{min-height:44px;border:1px solid var(--control-line);border-radius:3px;padding:8px 12px;background:var(--surface);color:var(--ink)}.back-link:hover{text-decoration:none;background:var(--hover)}
 .listrow,.run-card,.review-persona{background:var(--surface);border-radius:2px;border-color:var(--line)}.toast{background:var(--ink);color:var(--paper);border-radius:3px}.pulse.good{background:var(--teal);box-shadow:none}.busy{opacity:1}
 /* Real telemetry is the signature display; all numbers come from job state. */
 .panel.draft-progress{padding:20px;border:1px solid var(--control-line);border-top:4px solid var(--blue);border-radius:3px;background:var(--surface)}.draft-progress h2{font:600 20px var(--display)}.draft-metrics{margin:20px 0 0;padding:20px;background:var(--field);border:1px solid var(--line);border-bottom:0}.draft-count strong{font:600 clamp(40px,5vw,64px)/1 var(--numeric);letter-spacing:-.05em}.draft-count strong span{font-size:.5em}.draft-count{font-size:12px}.draft-estimate strong{font-family:var(--numeric);font-size:23px}.draft-progress progress{height:8px}.draft-steps{padding:0;margin-top:14px;gap:0;border:1px solid var(--line)}.draft-steps li{padding:12px;border-right:1px solid var(--line);font-size:12px}.draft-steps li:last-child{border-right:0}.draft-steps li[data-state=current]{background:var(--blue-soft);color:var(--blue)}.draft-live{padding:16px 0;margin:0 0 12px;border-top:0}.draft-inspect-tabs .button{min-height:44px}.draft-inspect-tabs{margin-bottom:12px}.draft-progress-status{font-size:16px}.draft-inspect{padding:12px 0 0}.draft-recent{gap:14px}
