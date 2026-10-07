@@ -52,12 +52,12 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
       return { ok: !failure, json: async () => JSON.parse(JSON.stringify(failure ? { error: { message: failure } } : data)) };
     },
     setTimeout: (fn: Function) => { timeouts.push(fn); return timeouts.length; }, clearTimeout() {}, setInterval: (fn: Function) => { intervals.push(fn); return 1; },
-    navigator: {}, URL, Blob, confirm: () => { throw new Error('Unexpected native confirmation'); },
+    navigator: {}, URL, Blob, TextEncoder, confirm: () => { throw new Error('Unexpected native confirmation'); },
     FormData: TestFormData,
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,applyStage,applyStudySetup,setupAction,setupContextSummary,validateSetupAnswers};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,applyStage,applyStudySetup,setupAction,setupContextSummary,validateSetupAnswers,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
   if (openExistingProject) (context as any).clientTest.S.projectId = 'existing-research';
@@ -1709,4 +1709,79 @@ test('new choice options never reuse deleted keys referenced by branch condition
   assert.equal(Object.keys(s.questions.answer.criteria).length, 3);
   assert.equal(Object.hasOwn(s.questions.answer.criteria, 'option_1'), false);
   assert.equal(p.stages[1].when.value, 'option_1', 'review will flag a missing option instead of reinterpreting the rule');
+});
+
+
+test('bulk choice lists preview without mutation, retain matching IDs, and reject duplicates or limits atomically', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, openAnswerList, applyAnswerList, updateAnswerList } = browser.client;
+  S.pipelineId = 'study'; S.stageId = 'panel';
+  const q = S.doc.pipelines[0].stages[0].questions.answer;
+  const original = JSON.stringify(q);
+  openAnswerList();
+  browser.element('answerListText').value = 'B, "New, improved", A';
+  updateAnswerList();
+  assert.equal(JSON.stringify(q), original);
+  assert.match(browser.element('answerListPreview').innerHTML, /3 options/);
+  applyAnswerList(false);
+  assert.deepEqual(Object.values(q.criteria), ['B', 'New, improved', 'A']);
+  assert.equal(q.criteria.a, 'A'); assert.equal(q.criteria.b, 'B');
+  assert.equal(q.instructions, 'Choose an option.');
+  assert.equal(S.dirty, true); assert.equal(S.plan, null);
+  assert.equal(browser.bodies.length, 0, 'bulk editing neither saves nor starts inference');
+  const changed = JSON.stringify(q);
+  openAnswerList(); browser.element('answerListText').value = 'Same, Same';
+  assert.throws(() => applyAnswerList(false), /different text/);
+  assert.equal(JSON.stringify(q), changed);
+  browser.element('answerListText').value = Array.from({ length: 256 }, (_, i) => 'Option ' + i).join(',');
+  assert.throws(() => applyAnswerList(false), /2–255/);
+  assert.equal(JSON.stringify(q), changed);
+  browser.element('answerListText').value = 'One additional option'; applyAnswerList(true);
+  assert.deepEqual(Object.values(q.criteria), ['B', 'New, improved', 'A', 'One additional option']);
+});
+
+test('CSV import selects one column, supports headers and preserves rating order', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, setupAction, openAnswerList, readAnswerListFile, answerListValues, applyAnswerList } = browser.client;
+  S.pipelineId = 'study'; S.stageId = 'panel'; setupAction('setup-type', { dataset: { type: 'score' } });
+  const q = S.doc.pipelines[0].stages[0].questions.answer;
+  openAnswerList(); const original = JSON.stringify(q);
+  await readAnswerListFile({ name: 'levels.csv', size: 80, text: async () => '\uFEFFlevel,code\r\nLow,L\r\n"Medium, steady",M\r\nHigh,H' });
+  browser.element('answerListColumn').value = '0'; browser.element('answerListHeader').checked = true;
+  await browser.listeners.get('change')!({ target: { id: 'answerListHeader' } });
+  assert.equal(JSON.stringify(q), original);
+  assert.deepEqual(Array.from(answerListValues()), ['Low', 'Medium, steady', 'High']);
+  applyAnswerList(false);
+  assert.deepEqual(Array.from(q.criteria), ['Low', 'Medium, steady', 'High']);
+  openAnswerList(); browser.element('answerListText').value = Array.from({ length: 11 }, (_, i) => 'Level ' + i).join(',');
+  assert.throws(() => applyAnswerList(false), /2–10/);
+  assert.deepEqual(Array.from(q.criteria), ['Low', 'Medium, steady', 'High']);
+});
+
+test('file imports reject oversize or malformed data and cannot apply to a changed or dismissed question', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, openAnswerList, closeAnswerList, readAnswerListFile, applyAnswerList } = browser.client;
+  S.pipelineId = 'study'; S.stageId = 'panel';
+  openAnswerList();
+  await readAnswerListFile({ name: 'big.csv', size: 262145, text: async () => { throw Error('Must not read oversized file'); } });
+  assert.match(browser.element('answerListError').textContent, /too large/);
+  await readAnswerListFile({ name: 'bad.csv', size: 5, text: async () => '"bad' });
+  assert.match(browser.element('answerListError').textContent, /unterminated/);
+  let finish!: (text: string) => void;
+  const pending = readAnswerListFile({ name: 'slow.csv', size: 9, text: () => new Promise<string>(resolve => { finish = resolve; }) });
+  closeAnswerList(); openAnswerList(); browser.element('answerListText').value = 'Fresh, List';
+  finish('Old, File'); await pending;
+  assert.equal(browser.element('answerListText').value, 'Fresh, List');
+  const earlier = readAnswerListFile({ name: 'earlier.csv', size: 9, text: () => new Promise<string>(resolve => { finish = resolve; }) });
+  await readAnswerListFile({ name: 'latest.csv', size: 9, text: async () => 'Latest, File' });
+  finish('Earlier, File'); await earlier;
+  assert.equal(browser.element('answerListText').value, 'Latest, File', 'last selected file wins');
+  const typing = readAnswerListFile({ name: 'pending.csv', size: 9, text: () => new Promise<string>(resolve => { finish = resolve; }) });
+  browser.element('answerListText').value = 'Typed, List';
+  browser.listeners.get('input')!({ target: { id: 'answerListText' } });
+  finish('Ignore, File'); await typing;
+  assert.equal(browser.element('answerListText').value, 'Typed, List', 'typing supersedes a pending file');
+  const q = S.doc.pipelines[0].stages[0].questions.answer; q.criteria.a = 'Changed elsewhere';
+  assert.throws(() => applyAnswerList(false), /question changed/);
+  assert.equal(q.criteria.a, 'Changed elsewhere');
 });
