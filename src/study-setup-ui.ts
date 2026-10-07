@@ -1,13 +1,30 @@
 /** Point-and-click study setup. Existing pipeline contracts remain unchanged. */
 export const STUDY_SETUP_CLIENT = String.raw`
 function answerName(type){return {choice:'Pick one',noul:'Yes / no',score:'Rating'}[type]||'Result'}
+function stepTitle(p,s){
+  const questions=Object.values(s.questions||{}),question=questions[0]?.label?.trim();
+  const custom=s.label?.trim(),prefix=s.kind==='poll'&&custom&&!['First question','Next question','New question'].includes(custom)&&custom!==question?custom+': ':'';
+  const title=s.kind==='poll'?prefix+(question&&question!=='What should this phase decide?'?question:'Untitled question')+(questions.length>1?' + '+(questions.length-1)+' more':''):(s.label?.trim()||(s.kind==='aggregate'?'Combine answers':'Final result'));
+  return (p.stages.findIndex(x=>x.id===s.id)+1)+'. '+title.replace(/\s+/g,' ');
+}
+function inputTitle(p,input){
+  const source=p.stages.find(x=>x.id===input.stage);if(!source)return input.stage;
+  const question=source.questions?.[input.question];
+  return stepTitle(p,question?{...source,questions:{[input.question]:question}}:source);
+}
+function updateStepPicker(form){
+  const p=pipeline(),s=selectedStage(),qid=form.dataset.questionId;if(!p||!s||!s.questions?.[qid])return;
+  const prompt=form.querySelector('[name=setupPrompt]')?.value;if(prompt===undefined)return;
+  const draft={...s,questions:{...s.questions,[qid]:{...s.questions[qid],label:prompt}}};
+  root.querySelectorAll('[name=phasePicker] option').forEach(option=>{if(option.value===s.id)option.textContent=stepTitle(p,draft)});
+}
 function setupQuestion(s){const entries=Object.entries(s.questions||{});return entries.find(([key])=>key===S.sections['setup-question-'+s.id])||entries[0]}
 function stageForm(p,s){
   if(s.kind!=='poll')return resultSetup(p,s);
   const mode=S.sections.pipeline||'phase',tabs='';
   if(mode==='advanced')return tabs+advancedStageForm(p,s);
   const entry=setupQuestion(s),pool=poolForPhase(p,s);
-  const picker='<div class="phase-picker">'+select('phasePicker',p.stages.map(x=>({value:x.id,label:x.label})),s.id,'Selected step')+'</div>';
+  const picker='<div class="phase-picker">'+select('phasePicker',p.stages.map(x=>({value:x.id,label:stepTitle(p,x)})),s.id,'Selected step')+'</div>';
   if(!entry)return tabs+panel('Add a question','','<button class="button primary" data-act="add-question">Add question</button>',picker);
   const [qid,q]=entry,entries=Object.entries(s.questions),cohorts=pageItems(projectCohorts(),'setup-cohorts-'+s.id,4);
   const questionPicker=entries.length>1?'<nav class="section-tabs" aria-label="Questions in this step">'+entries.map(([key,value])=>'<button type="button" class="button small" data-act="setup-question" data-id="'+attr(key)+'" aria-pressed="'+(key===qid)+'">'+esc(value.label||key)+'</button>').join('')+'</nav>':'';
@@ -41,10 +58,7 @@ function assignSetupCohort(p,s,cid){
   s.cohort=alias;
 }
 function setupContextSummary(p,s){
-  const sources=s.inputs===undefined?s.dependsOn.map(id=>p.stages.find(x=>x.id===id)?.label||id):Object.values(s.inputs).map(input=>{
-    const source=p.stages.find(x=>x.id===input.stage);
-    return source?source.label+': '+(phaseOutput(p,source).find(q=>q.id===input.question)?.label||input.question):input.stage;
-  });
+  const sources=s.inputs===undefined?s.dependsOn.map(id=>{const source=p.stages.find(x=>x.id===id);return source?stepTitle(p,source):id}):Object.values(s.inputs).map(input=>inputTitle(p,input));
   const labels=[...new Set(sources)];
   return labels.length?'<p class="setup-context subtle">This cohort also sees results from: '+labels.map(label=>'“'+esc(label)+'”').join('; ')+'.</p>':'';
 }
@@ -64,9 +78,9 @@ function resultSetup(p,s){
   const page=pageItems(outputs,'setup-results-'+s.id,5);
   const content=page.items.map(({source,q})=>{
     const selected=current.some(x=>x.stage===source.id&&x.question===q.id);
-    return '<button class="setup-choice" data-act="setup-result" data-source="'+attr(source.id)+'" data-question="'+attr(q.id)+'" aria-pressed="'+selected+'"><strong>'+esc(q.label||source.label)+'</strong><span>'+esc(source.label)+' · '+answerName(q.type)+(selected?' · Selected':'')+'</span></button>';
+    return '<button class="setup-choice" data-act="setup-result" data-source="'+attr(source.id)+'" data-question="'+attr(q.id)+'" aria-pressed="'+selected+'"><strong>'+esc(q.label||source.label)+'</strong><span>'+'Step '+(p.stages.indexOf(source)+1)+' · '+answerName(q.type)+(selected?' · Selected':'')+'</span></button>';
   }).join('');
-  return tabs+panel(s.kind==='decision'?'Which answer should supply the result?':'Which answers should be combined?',s.kind==='decision'?'Uses the leading option from one earlier answer.':'Choose answers with matching options or rating levels. New selections get equal weight.','<div class="setup-connections">'+(content||'<p>No compatible earlier answers available.</p>')+'</div>'+page.controls,'<div class="phase-picker">'+select('phasePicker',p.stages.map(x=>({value:x.id,label:x.label})),s.id,'Selected step')+'</div>');
+  return tabs+panel(s.kind==='decision'?'Which answer should supply the result?':'Which answers should be combined?',s.kind==='decision'?'Uses the leading option from one earlier answer.':'Choose answers with matching options or rating levels. New selections get equal weight.','<div class="setup-connections">'+(content||'<p>No compatible earlier answers available.</p>')+'</div>'+page.controls,'<div class="phase-picker">'+select('phasePicker',p.stages.map(x=>({value:x.id,label:stepTitle(p,x)})),s.id,'Selected step')+'</div>');
 }
 function setupAction(a,el){
   if(!a.startsWith('setup-'))return false;

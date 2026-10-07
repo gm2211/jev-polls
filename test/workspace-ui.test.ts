@@ -57,7 +57,7 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,applyStage,applyStudySetup,setupAction,setupContextSummary,validateSetupAnswers,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,updateStepPicker,validateSetupAnswers,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
   if (openExistingProject) (context as any).clientTest.S.projectId = 'existing-research';
@@ -1635,10 +1635,10 @@ test('earlier context stays beside follow-up questions without an empty setup ta
   p.stages.push(next);
   first.questions.answer.label = 'Which <title> fits?';
   const before = JSON.stringify(next);
-  assert.match(stageForm(p, next), /This cohort also sees results from: “[^”]+: Which &lt;title&gt; fits\?”/);
+  assert.match(stageForm(p, next), /This cohort also sees results from: “1\. Which &lt;title&gt; fits\?”/);
   assert.equal(JSON.stringify(next), before);
   delete (next as any).inputs;
-  assert.match(setupContextSummary(p, next), new RegExp(first.label));
+  assert.match(setupContextSummary(p, next), /1\. Which &lt;title&gt; fits\?/);
   assert.equal((next as any).inputs, undefined, 'legacy summary bindings remain implicit');
   (next as any).inputs = {};
   assert.equal(setupContextSummary(p, next), '', 'ordering alone does not imply receiving results');
@@ -1784,4 +1784,49 @@ test('file imports reject oversize or malformed data and cannot apply to a chang
   const q = S.doc.pipelines[0].stages[0].questions.answer; q.criteria.a = 'Changed elsewhere';
   assert.throws(() => applyAnswerList(false), /question changed/);
   assert.equal(q.criteria.a, 'Changed elsewhere');
+});
+
+
+test('step navigation uses numbered questions consistently without rewriting saved labels or bindings', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, stageForm, stageMap, stepTitle, inputTitle, advancedStageForm } = browser.client;
+  S.pipelineId = 'study'; S.stageId = 'panel';
+  const p = S.doc.pipelines[0], first = p.stages[0];
+  const next = { ...structuredClone(first), id: 'follow', label: 'Next question', questions: { answer: { ...first.questions.answer, label: 'What should this phase decide?' } }, dependsOn: ['panel'] };
+  next.inputs = { previous_result: { stage: first.id, question: 'answer', select: 'summary' } };
+  p.stages.push(next);
+  const before = JSON.stringify(p);
+  for (const html of [stageForm(p, first), advancedStageForm(p, first), stageMap(p)]) {
+    assert.match(html, /1\. Which option fits\?/);
+    assert.match(html, /2\. Untitled question/);
+    assert.doesNotMatch(html, />First question<|>Next question</);
+  }
+  assert.doesNotMatch(stageMap(p), /From First question/);
+  assert.match(stageMap(p), /From 1\. Which option fits\?/);
+  assert.equal(JSON.stringify(p), before, 'display labels preserve stored identity and execution contracts');
+  next.questions.answer.label = 'Which launch date fits?';
+  assert.equal(stepTitle(p, next), '2. Which launch date fits?');
+  next.questions.answer.label = '   ';
+  assert.equal(stepTitle(p, next), '2. Untitled question');
+  first.questions.second = { ...first.questions.answer, label: 'Would people buy it?' };
+  assert.equal(stepTitle(p, first), '1. Which option fits? + 1 more');
+  assert.equal(inputTitle(p, { stage: first.id, question: 'second' }), '1. Would people buy it?');
+  p.stages.push({ id: 'result', kind: 'decision', label: 'Launch recommendation' });
+  assert.equal(stepTitle(p, p.stages[2]), '3. Launch recommendation');
+});
+
+test('typing a question refreshes its picker label without replacing the form or committing pending fields', async () => {
+  const browser = browserHarness(); await settle();
+  const { S } = browser.client;
+  S.pipelineId = 'study'; S.stageId = 'panel';
+  const option = { value: 'panel', textContent: '1. Which option fits?' };
+  const other = { value: 'other', textContent: '2. Another question' };
+  browser.element('app').querySelectorAll = (selector: string) => selector === '[name=phasePicker] option' ? [option, other] : [];
+  const form = { dataset: { form: 'study-setup', questionId: 'answer' }, querySelector: () => ({ value: 'Which <name> works?\nExplain why.' }) };
+  const before = JSON.stringify(S.doc);
+  await browser.listeners.get('input')!({ target: { name: 'setupPrompt', closest: () => form } });
+  assert.equal(option.textContent, '1. Which <name> works? Explain why.');
+  assert.equal(other.textContent, '2. Another question');
+  assert.equal(JSON.stringify(S.doc), before);
+  assert.equal(S.dirty, true);
 });
