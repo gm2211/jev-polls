@@ -8,7 +8,6 @@ function stageForm(p,s){
   if(mode==='advanced')return tabs+advancedStageForm(p,s);
   const entry=setupQuestion(s),pool=poolForPhase(p,s);
   const picker='<div class="phase-picker">'+select('phasePicker',p.stages.map(x=>({value:x.id,label:x.label})),s.id,'Selected step')+'</div>';
-  if(mode==='connections')return tabs+panel('Use earlier answers','Choose what this cohort sees before answering.',setupConnections(p,s),picker);
   if(!entry)return tabs+panel('Add a question','','<button class="button primary" data-act="add-question">Add question</button>',picker);
   const [qid,q]=entry,entries=Object.entries(s.questions),cohorts=pageItems(projectCohorts(),'setup-cohorts-'+s.id,4);
   const questionPicker=entries.length>1?'<nav class="section-tabs" aria-label="Questions in this step">'+entries.map(([key,value])=>'<button type="button" class="button small" data-act="setup-question" data-id="'+attr(key)+'" aria-pressed="'+(key===qid)+'">'+esc(value.label||key)+'</button>').join('')+'</nav>':'';
@@ -18,9 +17,8 @@ function stageForm(p,s){
   const optionPage=pageItems(options,'setup-options-'+s.id+'-'+qid,4);
   const optionRows=optionPage.items.map((o,offset)=>{const i=optionPage.start+offset;return '<div class="setup-option" data-setup-option="'+attr(o.key)+'"><span aria-hidden="true">'+(i+1)+'</span><input name="setupOption" aria-label="'+(q.type==='score'?'Rating level ':'Option ')+(i+1)+'" value="'+attr(o.label)+'"><button type="button" class="button small" data-act="setup-remove-option" data-key="'+attr(o.key)+'" aria-label="Remove '+(q.type==='score'?'level ':'option ')+(i+1)+'" '+(options.length<=2?'disabled':'')+'>×</button></div>'}).join('');
   const answer=types+(q.type==='noul'?'<p class="subtle">Each persona answers yes or no to your question.</p>':'<p class="subtle">'+(q.type==='choice'?'Enter the options people can choose from.':'Describe each rating level, from lowest to highest.')+'</p><div class="setup-options">'+optionRows+'</div>'+optionPage.controls+'<button type="button" class="button small" data-act="setup-add-option" '+(options.length>=(q.type==='score'?10:255)?'disabled':'')+'>＋ Add '+(q.type==='score'?'level':'option')+'</button>');
-  const form='<form data-form="study-setup" data-question-id="'+attr(qid)+'">'+questionPicker+'<div class="setup-prompt-row">'+area('What do you want to ask?','setupPrompt',q.label,'','2')+picker+'</div><div class="setup-columns"><section><h3>Who answers?</h3><div class="setup-cohorts">'+cohortChoices+'</div>'+cohorts.controls+(!pool?'<p class="subtle">Choose a cohort for this question.</p>':'<p class="subtle">Selected: '+esc(pool.name)+'</p>')+(!projectCohorts().length?'<button type="button" class="button" data-act="new-cohort">Generate a cohort</button>':'')+'</section><section><h3>How should they answer?</h3>'+answer+'</section></div></form>';
-  const connected=Object.keys(s.inputs||{}).length;
-  return '<section class="panel setup-panel">'+form+'<div class="setup-footer"><span class="subtle">'+(connected?connected+' earlier answer'+(connected===1?'':'s')+' connected.':'')+'</span><button class="button" data-act="next-phase">＋ Ask a follow-up</button></div></section>';
+  const form='<form data-form="study-setup" data-question-id="'+attr(qid)+'">'+questionPicker+'<div class="setup-prompt-row">'+area('What do you want to ask?','setupPrompt',q.label,'','2')+picker+'</div>'+setupContextSummary(p,s)+'<div class="setup-columns"><section><h3>Who answers?</h3><div class="setup-cohorts">'+cohortChoices+'</div>'+cohorts.controls+(!pool?'<p class="subtle">Choose a cohort for this question.</p>':'<p class="subtle">Selected: '+esc(pool.name)+'</p>')+(!projectCohorts().length?'<button type="button" class="button" data-act="new-cohort">Generate a cohort</button>':'')+'</section><section><h3>How should they answer?</h3>'+answer+'</section></div></form>';
+  return '<section class="panel setup-panel">'+form+'<div class="setup-footer"><button class="button" data-act="next-phase">＋ Ask a follow-up</button></div></section>';
 }
 function applyStudySetup(form){
   const s=selectedStage(),qid=form.dataset.questionId,q=s?.questions?.[qid];if(!q)return;
@@ -42,23 +40,13 @@ function assignSetupCohort(p,s,cid){
   if(!alias){alias='cohort';let n=2;while(Object.hasOwn(p.cohorts,alias))alias='cohort_'+n++;p.cohorts[alias]=cid}
   s.cohort=alias;
 }
-function setupConnections(p,s){
-  if(s.inputs===undefined&&s.dependsOn.length)return '<p>This step already receives summaries from: '+s.dependsOn.map(id=>esc(p.stages.find(x=>x.id===id)?.label||id)).join(', ')+'.</p><button class="button" data-act="setup-explicit-inputs">Choose individual answers</button>';
-  const outputs=dataInputOptions(p,s).flatMap(source=>phaseOutput(p,source).map(q=>({source,q})));
-  const page=pageItems(outputs,'setup-answers-'+s.id,5);
-  return (page.items.length?'<div class="setup-connections">'+page.items.map(({source,q})=>{
-    const bindings=Object.entries(s.inputs||{}).filter(([,input])=>input.stage===source.id&&input.question===q.id),selected=bindings.length>0;
-    return '<button class="setup-choice" data-act="setup-connect" data-source="'+attr(source.id)+'" data-question="'+attr(q.id)+'" aria-pressed="'+selected+'"><span class="setup-check" aria-hidden="true">'+(selected?'✓':'+')+'</span><span><strong>'+esc(q.label||source.label)+'</strong><span>'+esc(source.label)+' · '+answerName(q.type)+(selected?' · Connected':'')+'</span></span></button>';
-  }).join('')+'</div>'+page.controls:'<p class="subtle">No earlier answers available. Add a follow-up from the study flow to use this step’s answer.</p>')+'<p class="subtle">Selected answers become context for this question. New connections pass the full result summary.</p>';
-}
-function connectSetupAnswer(p,s,sourceId,qid){
-  const source=dataInputOptions(p,s).find(x=>x.id===sourceId);
-  if(!source||!phaseOutput(p,source).some(q=>q.id===qid))throw Error('This answer cannot feed this step.');
-  s.inputs??={};const matches=Object.entries(s.inputs).filter(([,x])=>x.stage===sourceId&&x.question===qid);
-  if(matches.length){for(const [name] of matches)delete s.inputs[name];reconcileSetupDependencies(s,[sourceId],Object.values(s.inputs).map(x=>x.stage));return}
-  let key='answer',n=2;while(Object.hasOwn(s.inputs,key))key='answer_'+n++;
-  s.inputs[key]={stage:sourceId,question:qid,select:'summary'};
-  if(!s.dependsOn.includes(sourceId))s.dependsOn.push(sourceId);
+function setupContextSummary(p,s){
+  const sources=s.inputs===undefined?s.dependsOn.map(id=>p.stages.find(x=>x.id===id)?.label||id):Object.values(s.inputs).map(input=>{
+    const source=p.stages.find(x=>x.id===input.stage);
+    return source?source.label+': '+(phaseOutput(p,source).find(q=>q.id===input.question)?.label||input.question):input.stage;
+  });
+  const labels=[...new Set(sources)];
+  return labels.length?'<p class="setup-context subtle">This cohort also sees results from: '+labels.map(label=>'“'+esc(label)+'”').join('; ')+'.</p>':'';
 }
 function reconcileSetupDependencies(s,removed,remaining){
   const conditional=new Set();
@@ -112,9 +100,6 @@ function setupAction(a,el){
   }else if(a==='setup-remove-option'){
     if(q.type==='choice'&&Object.keys(q.criteria).length>2)delete q.criteria[el.dataset.key];
     if(q.type==='score'&&q.criteria.length>2)q.criteria.splice(Number(el.dataset.key),1);
-  }else if(a==='setup-connect')connectSetupAnswer(p,s,el.dataset.source,el.dataset.question);
-  else if(a==='setup-explicit-inputs'){
-    s.inputs={};for(const sourceId of s.dependsOn){const source=p.stages.find(x=>x.id===sourceId);if(source)for(const q of phaseOutput(p,source))connectSetupAnswer(p,s,sourceId,q.id)}
   }else return false;
   S.dirty=true;S.plan=null;render();return true;
 }
@@ -128,6 +113,6 @@ function validateSetupAnswers(p){
 `;
 
 export const STUDY_SETUP_CSS = `
-.setup-prompt-row{display:grid;grid-template-columns:minmax(0,1fr) 240px;gap:24px;align-items:start;margin-bottom:14px}.setup-prompt-row .phase-picker{margin-top:0}.setup-columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:28px}.setup-columns h3{margin:4px 0 12px;font-size:14px}.setup-columns>section{min-width:0}.setup-cohorts,.setup-connections{display:grid;gap:8px}.setup-choice{appearance:none;width:100%;min-height:54px;text-align:left;font:inherit;color:var(--ink);background:var(--paper);border:1px solid var(--line);padding:12px;cursor:pointer;border-radius:2px}.setup-choice strong,.setup-choice span span{display:block}.setup-choice strong{font-size:13px;overflow-wrap:anywhere}.setup-choice span{font-size:12px;color:var(--muted)}.setup-choice[aria-pressed=true]{border-color:var(--blue);box-shadow:inset 3px 0 var(--blue)}.setup-choice:hover{border-color:var(--ink)}.setup-choice:focus-visible{outline:3px solid var(--blue);outline-offset:2px}.setup-types [aria-pressed=true]{background:var(--blue);color:var(--button-ink);border-color:var(--blue)}.setup-options{display:grid;gap:6px;margin:8px 0}.setup-option{display:grid;grid-template-columns:18px minmax(0,1fr) 44px;align-items:center;gap:6px}.setup-option>span{color:var(--muted);font-size:12px}.setup-option .button{min-width:44px}.setup-footer{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:18px;padding-top:12px;border-top:1px solid var(--line)}.setup-connections .setup-choice{display:flex;gap:12px;align-items:center}.setup-check{width:24px;flex:none;color:var(--blue)!important;font-size:20px!important}[data-form=study-setup]> .field{margin-bottom:20px}[data-form=study-setup] textarea{min-height:70px}
+.setup-prompt-row{display:grid;grid-template-columns:minmax(0,1fr) 240px;gap:24px;align-items:start;margin-bottom:14px}.setup-prompt-row .phase-picker{margin-top:0}.setup-columns{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:28px}.setup-columns h3{margin:4px 0 12px;font-size:14px}.setup-columns>section{min-width:0}.setup-cohorts,.setup-connections{display:grid;gap:8px}.setup-choice{appearance:none;width:100%;min-height:54px;text-align:left;font:inherit;color:var(--ink);background:var(--paper);border:1px solid var(--line);padding:12px;cursor:pointer;border-radius:2px}.setup-choice strong,.setup-choice span span{display:block}.setup-choice strong{font-size:13px;overflow-wrap:anywhere}.setup-choice span{font-size:12px;color:var(--muted)}.setup-choice[aria-pressed=true]{border-color:var(--blue);box-shadow:inset 3px 0 var(--blue)}.setup-choice:hover{border-color:var(--ink)}.setup-choice:focus-visible{outline:3px solid var(--blue);outline-offset:2px}.setup-types [aria-pressed=true]{background:var(--blue);color:var(--button-ink);border-color:var(--blue)}.setup-options{display:grid;gap:6px;margin:8px 0}.setup-option{display:grid;grid-template-columns:18px minmax(0,1fr) 44px;align-items:center;gap:6px}.setup-option>span{color:var(--muted);font-size:12px}.setup-option .button{min-width:44px}.setup-context{margin:0 0 18px;overflow-wrap:anywhere}.setup-footer{display:flex;justify-content:flex-end;align-items:center;gap:12px;margin-top:18px;padding-top:12px;border-top:1px solid var(--line)}.setup-connections .setup-choice{display:flex;gap:12px;align-items:center}[data-form=study-setup]> .field{margin-bottom:20px}[data-form=study-setup] textarea{min-height:70px}
 @media(max-width:650px){.setup-prompt-row{grid-template-columns:minmax(0,1fr);gap:4px}.setup-prompt-row .phase-picker{grid-row:1;width:100%}.setup-prompt-row textarea{min-height:70px}.setup-columns{grid-template-columns:minmax(0,1fr);gap:18px}.setup-footer{flex-wrap:wrap}.setup-types{gap:6px}}
 `;
