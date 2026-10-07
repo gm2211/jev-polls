@@ -74,6 +74,22 @@ test('TypeSafe maps labels into instructions and validates a complete response',
   assert.equal('label' in (questions.choice?.instructions as object), false);
 });
 
+test('TypeSafe sends structured option names and descriptions and retains probability keys', async () => {
+  const criteria = { option_a: { label: 'Daily ritual', description: 'A compact kit for everyday use.' }, option_b: { label: 'Weekend escape', description: '' }, neither: null };
+  let submitted: any;
+  const fetch = async (_input: string, init?: RequestInit): Promise<Response> => {
+    submitted = JSON.parse(String(init?.body));
+    return Response.json({ model: 'jev-test', answers: { pick: { type: 'choice', choice: 'option_a', probabilities: { option_a: 0.6, option_b: 0.3, neither: 0.1 }, confidence: 0.4 } }, usage: { input_tokens: 25, output_tokens: 3 } });
+  };
+  const result = await createProvider('typesafe', { apiKey: 'fake-provider-test-key', fetch }).evaluate({ ...request, questions: { pick: { type: 'choice', label: 'Which concept fits?', instructions: 'Compare the described concepts.', criteria } } });
+  assert.deepEqual(submitted.questions.pick.criteria, criteria);
+  const answer = result.answers.pick;
+  assert.ok(answer?.type === 'choice');
+  assert.equal(answer.choice, 'option_a');
+  assert.deepEqual(answer.probabilities, { option_a: 0.6, option_b: 0.3, neither: 0.1 });
+  assert.ok(Math.abs(Object.values(answer.probabilities).reduce((sum, value) => sum + value, 0) - 1) < 1e-8);
+});
+
 test('TypeSafe hides response bodies and secrets on errors', async () => {
   const secret = 'fake-secret-that-must-not-leak';
   const failingFetch = async (): Promise<Response> => Response.json({ error: secret, detail: secret }, { status: 401 });

@@ -16,7 +16,7 @@ const distributionTargetBucket = z.object({ label: z.string().trim().min(1).max(
 const distributionTarget = z.object({ field: z.string().min(1).max(256), kind: z.enum(['numeric', 'categorical']), buckets: z.array(distributionTargetBucket).min(1).max(100) }).strict();
 export const cohortSchema = z.object({ version: z.literal(1), id, name: text, description: text, population: text, createdAt: date, sources: z.array(source), segments: z.array(segment).min(1), personas: z.array(persona).min(1), assumptions: z.array(text), generationPrompt: text.max(10_000).optional(), distributionTargets: z.array(distributionTarget).max(100).optional() }).strict();
 export const questionSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('choice'), label: text, instructions: text, criteria: z.record(safeKey, z.string().nullable()).refine(v => Object.keys(v).length >= 2 && Object.keys(v).length <= 255, 'Choice requires 2–255 options') }).strict(),
+  z.object({ type: z.literal('choice'), label: text, instructions: text, criteria: z.record(safeKey, z.union([z.string(), z.null(), z.object({ label: text, description: z.string() }).strict()])).refine(v => Object.keys(v).length >= 2 && Object.keys(v).length <= 255, 'Choice requires 2–255 options') }).strict(),
   z.object({ type: z.literal('noul'), label: text, instructions: text }).strict(),
   z.object({ type: z.literal('score'), label: text, instructions: text, criteria: z.array(text).min(2).max(10, 'Score requires 2–10 levels') }).strict(),
 ]);

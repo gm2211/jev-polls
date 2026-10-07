@@ -57,7 +57,7 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,updateStepPicker,validateSetupAnswers,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,updateStepPicker,validateSetupAnswers,questionParts,upsertQuestion,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
   if (openExistingProject) (context as any).clientTest.S.projectId = 'existing-research';
@@ -1607,16 +1607,16 @@ test('simple study setup preserves hidden contracts, stable option keys, and oth
   let html = stageForm(p, s);
   assert.match(html, /data-form="study-setup"/);
   assert.doesNotMatch(html, /name="(?:questionId|questionInstructions|phasePool|stageContext|repeats)"|Apply phase/);
-  const row = (key: string, value: string) => ({ dataset: { setupOption: key }, querySelector: () => ({ value }) });
+  const row = (key: string, value: string) => ({ dataset: { setupOption: key }, querySelector: (selector: string) => selector==='[name=setupOption]'?{value}:null });
   applyStudySetup({ dataset: { questionId: 'answer' }, values: { setupPrompt: 'Which game title fits?' }, querySelectorAll: () => [row('a', 'Project Dawn'), row('b', 'Afterlight')] });
-  assert.deepEqual(JSON.parse(JSON.stringify(s.questions.answer.criteria)), { a: 'Project Dawn', b: 'Afterlight' });
+  assert.deepEqual(JSON.parse(JSON.stringify(s.questions.answer.criteria)), { a: {label:'Project Dawn',description:''}, b: {label:'Afterlight',description:''} });
   assert.equal(s.questions.answer.instructions, before.questions.answer.instructions);
   for (const key of ['context', 'repeats', 'size', 'when']) assert.equal(JSON.stringify(s[key]), JSON.stringify(before[key]));
   assert.equal(JSON.stringify(s.questions.other), JSON.stringify(before.questions.other));
   assert.equal(s.inputs, undefined);
   setupAction('setup-type', { dataset: { type: 'noul' } });
   setupAction('setup-type', { dataset: { type: 'choice' } });
-  assert.deepEqual(JSON.parse(JSON.stringify(s.questions.answer.criteria)), { a: 'Project Dawn', b: 'Afterlight' });
+  assert.deepEqual(JSON.parse(JSON.stringify(s.questions.answer.criteria)), { a: {label:'Project Dawn',description:''}, b: {label:'Afterlight',description:''} });
   setupAction('setup-cohort', { dataset: { id: 'cohort' } });
   assert.equal(p.cohorts[s.cohort], 'cohort');
   S.sections.pipeline = 'advanced'; html = stageForm(p, s);
@@ -1829,4 +1829,39 @@ test('typing a question refreshes its picker label without replacing the form or
   assert.equal(other.textContent, '2. Another question');
   assert.equal(JSON.stringify(S.doc), before);
   assert.equal(S.dirty, true);
+});
+
+
+test('option comparisons preserve descriptions, stable keys and paginated answers across format and advanced edits', async () => {
+  const browser=browserHarness();await settle();
+  const {S,stageForm,applyStudySetup,setupAction,questionParts,upsertQuestion,openAnswerList,applyAnswerList,validateSetupAnswers}=browser.client;
+  S.pipelineId='study';S.stageId='panel';const p=S.doc.pipelines[0],s=p.stages[0],q=s.questions.answer;
+  q.criteria={a:{label:'Afterlight',description:'A hopeful title about exploration.'},b:{label:'Project Dawn',description:'A bold title about a new beginning.'},c:'None of these',d:'Other',e:{label:'Hidden option',description:'Preserve this off-page description.'}};
+  const html=stageForm(p,s);
+  assert.match(html,/Compare options/);assert.match(html,/Ordered scale/);assert.doesNotMatch(html,/>Rating</);
+  assert.match(html,/Option 1 name/);assert.match(html,/Option 1 description/);assert.match(html,/A hopeful title/);assert.doesNotMatch(html,/Hidden option/);
+  assert.match(html,/0–1, totaling 1/);
+  const row={dataset:{setupOption:'a'},querySelector:(selector:string)=>({value:selector==='[name=setupOption]'?'Afterglow':'Warm and reflective.'})};
+  applyStudySetup({dataset:{questionId:'answer'},values:{setupPrompt:q.label},querySelectorAll:()=>[row]});
+  assert.equal(q.criteria.a.label,'Afterglow');assert.equal(q.criteria.a.description,'Warm and reflective.');assert.equal(q.criteria.e.description,'Preserve this off-page description.');
+  setupAction('setup-type',{dataset:{type:'score'}});setupAction('setup-type',{dataset:{type:'choice'}});
+  assert.equal(s.questions.answer.criteria.a.description,'Warm and reflective.');
+  openAnswerList();browser.element('answerListText').value='Project Dawn, Afterglow, New title';applyAnswerList(false);
+  const edited=s.questions.answer;assert.equal(edited.criteria.a.description,'Warm and reflective.');assert.equal(edited.criteria.b.description,'A bold title about a new beginning.');
+  assert.equal(Object.keys(edited.criteria).length,3);assert.doesNotThrow(()=>validateSetupAnswers(p));
+  const advanced=questionParts('answer',edited)[1].html;assert.doesNotMatch(advanced,/\[object Object\]/);assert.match(advanced,/Option definitions \(JSON\)/);
+  const values={questionId:'answer',questionType:'choice',questionLabel:edited.label,questionInstructions:edited.instructions,criteria:JSON.stringify(edited.criteria)};
+  const restored={questions:{}};upsertQuestion(restored,{querySelector:(selector:string)=>({value:values[selector.match(/name="([^"\]]+)"/)![1] as keyof typeof values]})});
+  assert.equal(JSON.stringify(restored.questions),JSON.stringify({answer:edited}));
+  edited.criteria.a.label=' ';assert.throws(()=>validateSetupAnswers(p),/text for every answer/);
+});
+
+
+test('answer setup distinguishes hosted probabilities from local classifier evidence for every format',async()=>{
+  const browser=browserHarness();await settle();const {S,stageForm,setupAction}=browser.client;
+  S.pipelineId='study';S.stageId='panel';const p=S.doc.pipelines[0],s=p.stages[0];S.evaluationProvider='typesafe';
+  assert.match(stageForm(p,s),/probability for every option: 0–1, totaling 1/);
+  S.evaluationProvider='gliner';assert.match(stageForm(p,s),/relative option scores/);assert.match(stageForm(p,s),/not calibrated probabilities/);
+  setupAction('setup-type',{dataset:{type:'score'}});assert.match(stageForm(p,s),/relative level scores/);assert.doesNotMatch(stageForm(p,s),/plus probabilities across/);
+  setupAction('setup-type',{dataset:{type:'noul'}});assert.match(stageForm(p,s),/relative yes score/);
 });

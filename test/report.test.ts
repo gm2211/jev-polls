@@ -114,3 +114,18 @@ test('keeps branch outcomes faithful when a conditional stage is skipped or fail
   assert.equal(decoded.run.pipeline.stages[1].when?.stage, 'concept');
   assert.match(html, /Run ended with failures/);
 });
+
+
+test('structured criteria use editable names in findings and retain full descriptions in report data', () => {
+  const run=fixture();const question=run.pipeline.stages[0];assert.equal(question.kind,'poll');
+  if(question.kind!=='poll')return;
+  const q=question.questions.title;assert.equal(q.type,'choice');if(q.type!=='choice')return;q.criteria={north:{label:'Northern Light',description:'A reflective album about hope.'},room:{label:'Small Room',description:'An intimate acoustic collection.'}};
+  const html=renderReport(run),script=html.match(/<script>\s*([\s\S]*?)<\/script>/)![1];
+  const fn=script.match(/function choiceLabel\(question,key\)\{[^\n]+/ )![0];
+  const label=new Script('('+fn+')').runInNewContext();
+  assert.equal(label(question.questions.title,'north'),'Northern Light');
+  assert.equal(label({type:'choice',criteria:{legacy:'Legacy name'}},'legacy'),'Legacy name');
+  const data=JSON.parse(html.match(/<script id="reportData" type="application\/json">([\s\S]*?)<\/script>/)![1]);
+  assert.equal(data.run.pipeline.stages[0].questions.title.criteria.north.description,'A reflective album about hope.');
+  assert.doesNotMatch(html,/\[object Object\]/);
+});

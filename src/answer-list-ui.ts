@@ -20,7 +20,7 @@ function openAnswerList(importFile=false){
   const p=pipeline(),s=selectedStage(),entry=s&&setupQuestion(s),q=entry?.[1];
   if(!q||!['choice','score'].includes(q.type))return;
   answerListDraft={projectId:S.projectId,pipelineId:p.id,stageId:s.id,questionId:entry[0],type:q.type,criteria:JSON.stringify(q.criteria),page:0,file:false,column:-1,header:false,readVersion:0};
-  document.getElementById('answerListTitle').textContent=q.type==='score'?'Populate rating levels':'Populate options';
+  document.getElementById('answerListTitle').textContent=q.type==='score'?'Populate ordered levels':'Populate options';
   document.getElementById('answerListHint').textContent=q.type==='score'?'Keep levels in order, from lowest to highest. 2–10 levels.':'Paste a list or choose a CSV, then replace or add to your options. 2–255 options.';
   document.getElementById('answerListText').value='';document.getElementById('answerListFilename').textContent='';document.getElementById('answerListFile').value='';
   document.getElementById('answerListHeader').checked=false;
@@ -39,12 +39,12 @@ function answerListValues(){
   return (d.column<0?selected.flat():selected.map(row=>row[d.column]||'')).filter(value=>value.length>0).map(value=>value.replace(/\r?\n/g,' '));
 }
 function answerListResult(q,values,append){
-  if(!values.length)throw Error('Enter at least one option or rating level.');
-  const old=q.type==='choice'?Object.entries(q.criteria).map(([key,label])=>label??key):q.criteria;
+  if(!values.length)throw Error('Enter at least one option or ordered level.');
+  const old=q.type==='choice'?Object.entries(q.criteria).map(([key,value])=>optionName(key,value)):q.criteria;
   const result=append?[...old.filter(value=>value.trim()),...values]:values;
   const max=q.type==='score'?10:255;
-  if(result.length<2||result.length>max)throw Error('Use 2–'+max+' '+(q.type==='score'?'rating levels':'options')+'. This list would have '+result.length+'.');
-  if(new Set(result.map(value=>value.trim())).size!==result.length)throw Error('Each option or rating level needs different text. Remove duplicates.');
+  if(result.length<2||result.length>max)throw Error('Use 2–'+max+' '+(q.type==='score'?'ordered levels':'options')+'. This list would have '+result.length+'.');
+  if(new Set(result.map(value=>value.trim())).size!==result.length)throw Error('Each option or ordered level needs different text. Remove duplicates.');
   return result;
 }
 function updateAnswerList(){
@@ -82,11 +82,11 @@ function applyAnswerList(append){
   if(q.type==='score')q.criteria=values;
   else {
     const old=Object.entries(q.criteria),used=new Set(),criteria={};
-    for(const label of values){let key=old.find(([key,value])=>!used.has(key)&&(value??key)===label)?.[0];if(!key){do{key='option_'+id()}while(Object.hasOwn(q.criteria,key)||used.has(key))}used.add(key);criteria[key]=label}
+    for(const label of values){let key=old.find(([key,value])=>!used.has(key)&&optionName(key,value)===label)?.[0];if(!key){do{key='option_'+id()}while(Object.hasOwn(q.criteria,key)||used.has(key))}used.add(key);criteria[key]=Object.hasOwn(q.criteria,key)?q.criteria[key]:label}
     q.criteria=criteria;
   }
   S.listPages[S.projectId+':setup-options-'+d.stageId+'-'+d.questionId]=0;S.dirty=true;S.plan=null;
-  closeAnswerList();render();say(values.length+' '+(q.type==='score'?'rating levels':'options')+' ready to edit.');
+  closeAnswerList();render();say(values.length+' '+(q.type==='score'?'ordered levels':'options')+' ready to edit.');
 }
 function answerListAction(a){
   if(!a.startsWith('answer-list-'))return false;

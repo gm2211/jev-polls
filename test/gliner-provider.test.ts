@@ -90,6 +90,22 @@ test('GLiNER rejects unsupported models before starting subprocess', async t => 
   await provider.close!();
 });
 
+test('GLiNER sends both structured option names and descriptions while retaining native score evidence', async t => {
+  const { config, captured } = await fixture(t);
+  const provider = createProvider('gliner', { gliner: config }); t.after(() => provider.close!());
+  const structuredRequest: EvaluationRequest = { ...request, questions: { choose: { type: 'choice', label: 'Which concept fits?', instructions: 'Use persona budget.', criteria: { option_a: { label: 'Daily ritual', description: 'A compact kit for everyday use.' }, option_b: { label: 'Weekend escape', description: '' }, legacy: 'Existing answer', neither: null } } } };
+  const result = await provider.evaluate(structuredRequest);
+  validateEvaluation(result, structuredRequest.questions);
+  const call = JSON.parse((await readFile(captured, 'utf8')).trim());
+  assert.deepEqual(call.heads.choose.labels, { option_a: 'Daily ritual: A compact kit for everyday use.', option_b: 'Weekend escape', legacy: 'Existing answer', neither: 'neither' });
+  const answer = result.answers.choose;
+  assert.ok(answer?.type === 'choice');
+  assert.deepEqual(Object.keys(answer.probabilities), ['option_a', 'option_b', 'legacy', 'neither']);
+  assert.equal(answer.classifier?.semantics, 'independent_sigmoid');
+  assert.equal('confidence' in answer, false);
+  assert.ok(Math.abs(Object.values(answer.probabilities).reduce((sum, value) => sum + value, 0) - 1) < 1e-8);
+});
+
 test('GLiNER close during asynchronous setup probe prevents subprocess creation', async t => {
   const { config, pid } = await fixture(t);
   const provider = createProvider('gliner', { gliner: config });
