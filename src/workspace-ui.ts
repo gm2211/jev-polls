@@ -173,7 +173,7 @@ function questionParts(qid,q){
   ];
 }
 
-const segmentColors=['#387d87','#5c71b2','#b5813f','#957399','#789351'];
+const segmentColors=['#58748c','#727aaf','#b5813f','#957399','#888888'];
 function poolComposition(c){const total=c.segments.reduce((n,s)=>n+Math.max(0,s.weight),0);return '<div class="composition" role="img" aria-label="'+attr(c.segments.map(s=>s.label+': '+(total?Math.round(100*s.weight/total):0)+' percent').join(', '))+'">'+c.segments.map((s,i)=>'<span style="--segment-color:'+segmentColors[i%segmentColors.length]+';--segment-share:'+Math.max(0,s.weight)+'"></span>').join('')+'</div><div class="segment-legend">'+c.segments.map((s,i)=>'<span style="--segment-color:'+segmentColors[i%segmentColors.length]+'">'+esc(s.label)+' '+(total?Math.round(100*s.weight/total):0)+'%</span>').join('')+'</div>'}
 function poolCloud(c){return '<div class="pool-cloud" aria-hidden="true">'+c.personas.slice(0,90).map(p=>'<span style="--segment-color:'+segmentColors[Math.max(0,c.segments.findIndex(s=>s.id===p.segment))%segmentColors.length]+'"></span>').join('')+'</div>'}
 
