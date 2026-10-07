@@ -57,7 +57,7 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,applyStage};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,applyStage,applyStudySetup,setupAction,setupConnections,connectSetupAnswer,validateSetupAnswers};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
   if (openExistingProject) (context as any).clientTest.S.projectId = 'existing-research';
@@ -208,9 +208,9 @@ test('invalid form blocks a tab change and hidden field validation reveals every
 
 test('phase editor keeps question and cohort together with advanced controls in tabs', async () => {
   const browser = browserHarness(); await settle();
-  const { S, stageForm } = browser.client;
+  const { S, advancedStageForm } = browser.client;
   S.pipelineId = 'study'; S.stageId = 'panel';
-  const pipeline = S.doc.pipelines[0], html = stageForm(pipeline, pipeline.stages[0]);
+  const pipeline = S.doc.pipelines[0], html = advancedStageForm(pipeline, pipeline.stages[0]);
   assert.equal((html.match(/data-form="stage"/g) ?? []).length, 1);
   for (const name of ['label', 'phasePool', 'size', 'questionId', 'questionInstructions', 'criteria', 'repeats', 'stageContext']) {
     assert.match(html, new RegExp(`name="${name}"`));
@@ -356,8 +356,8 @@ test('next phase wires a named output, keeps one question, and excludes downstre
   assert.equal(dataInputOptions(pipeline, pipeline.stages[0]).length, 0, 'a later dependent phase cannot feed its ancestor');
   assert.equal(dataInputOptions(pipeline, next)[0].id, 'panel');
   assert.deepEqual(Array.from(projectionOptions(pipeline, next.inputs.previous_result), (x: any) => x.value), ['summary', 'responses', 'winner', 'probabilities']);
-  assert.match(browser.element('app').innerHTML, /previous_result/);
-  assert.match(browser.element('app').innerHTML, /Who answers this question/);
+  assert.match(browser.element('app').innerHTML, /1 earlier answer connected/);
+  assert.match(browser.element('app').innerHTML, /Who answers/);
   assert.match(browser.element('app').innerHTML, /Which customer-support approach/);
   pipeline.stages[0].questions.preference = { type: 'noul', label: 'Would this work?', instructions: 'Answer yes or no.' };
   assert.deepEqual(Array.from(projectionOptions(pipeline, next.inputs.previous_result), (x: any) => x.value), ['summary', 'responses', 'mean']);
@@ -1592,4 +1592,120 @@ test('progress polling preserves keyboard focus on its current action', async ()
   (browser.document as any).activeElement={closest:()=>true,dataset:{act:'draft-progress-section',section:'checks'}};
   browser.element('app').querySelector=(selector:string)=>selector==='[data-act=draft-progress-section][data-section="checks"]'?{focus(){focused=true}}:null;
   browser.client.render(); assert.equal(focused,true);
+});
+
+test('simple study setup preserves hidden contracts, stable option keys, and other questions', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, stageForm, applyStudySetup, setupAction } = browser.client;
+  S.pipelineId = 'study'; S.stageId = 'panel';
+  const p = S.doc.pipelines[0], s = p.stages[0];
+  s.context = { policy: 'Keep this' }; s.repeats = 3; s.size = 1;
+  s.when = { stage: 'prior', question: 'x', metric: 'mean', op: 'gt', value: 0.5 };
+  s.questions.other = { type: 'noul', label: 'Independent check', instructions: 'Preserve these instructions.' };
+  delete s.inputs;
+  const before = structuredClone(s);
+  let html = stageForm(p, s);
+  assert.match(html, /data-form="study-setup"/);
+  assert.doesNotMatch(html, /name="(?:questionId|questionInstructions|phasePool|stageContext|repeats)"|Apply phase/);
+  const row = (key: string, value: string) => ({ dataset: { setupOption: key }, querySelector: () => ({ value }) });
+  applyStudySetup({ dataset: { questionId: 'answer' }, values: { setupPrompt: 'Which game title fits?' }, querySelectorAll: () => [row('a', 'Project Dawn'), row('b', 'Afterlight')] });
+  assert.deepEqual(JSON.parse(JSON.stringify(s.questions.answer.criteria)), { a: 'Project Dawn', b: 'Afterlight' });
+  assert.equal(s.questions.answer.instructions, before.questions.answer.instructions);
+  for (const key of ['context', 'repeats', 'size', 'when']) assert.equal(JSON.stringify(s[key]), JSON.stringify(before[key]));
+  assert.equal(JSON.stringify(s.questions.other), JSON.stringify(before.questions.other));
+  assert.equal(s.inputs, undefined);
+  setupAction('setup-type', { dataset: { type: 'noul' } });
+  setupAction('setup-type', { dataset: { type: 'choice' } });
+  assert.deepEqual(JSON.parse(JSON.stringify(s.questions.answer.criteria)), { a: 'Project Dawn', b: 'Afterlight' });
+  setupAction('setup-cohort', { dataset: { id: 'cohort' } });
+  assert.equal(p.cohorts[s.cohort], 'cohort');
+  S.sections.pipeline = 'advanced'; html = stageForm(p, s);
+  assert.match(html, /name="questionInstructions"/);
+  assert.doesNotMatch(html, /data-form="study-setup"/, 'only one editor can submit changes for a phase');
+});
+
+test('answer selection wires exact outputs, rejects cycles, and leaves custom and legacy inputs alone', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, connectSetupAnswer, setupConnections } = browser.client;
+  S.pipelineId = 'study'; S.stageId = 'panel';
+  const p = S.doc.pipelines[0], first = p.stages[0];
+  const next = { ...structuredClone(first), id: 'review', label: 'Review', dependsOn: ['panel'], inputs: { custom: { stage: 'panel', question: 'answer', select: 'winner' } } };
+  p.stages.push(next);
+  const before = JSON.stringify(next);
+  assert.match(setupConnections(p, next), /Connected/);
+  assert.equal(JSON.stringify(next), before);
+  assert.throws(() => connectSetupAnswer(p, first, 'review', 'answer'), /cannot feed/);
+  connectSetupAnswer(p, next, 'panel', 'answer');
+  assert.equal(Object.keys(next.inputs).length, 0);
+  connectSetupAnswer(p, next, 'panel', 'answer');
+  assert.deepEqual(JSON.parse(JSON.stringify(next.inputs)), { answer: { stage: 'panel', question: 'answer', select: 'summary' } });
+  assert.deepEqual(Array.from(next.dependsOn), ['panel']);
+  delete (next as any).inputs;
+  assert.match(setupConnections(p, next), /already receives summaries/);
+  assert.equal((next as any).inputs, undefined);
+});
+
+test('review saves pending setup before planning and stops on save failure or empty answer options', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, reviewPlan } = browser.client;
+  S.pipelineId = 'study'; S.stageId = 'panel'; S.dirty = true;
+  browser.respond('/api/workspace', { document: S.doc, revision: 2 }, 'POST');
+  browser.respond('/api/plan', { provider: 'typesafe', pipelineId: 'study', revision: 2, maxRequests: 1, stages: [], warnings: [] }, 'POST');
+  await reviewPlan();
+  assert.deepEqual(browser.bodies.slice(-2).map(x => x.path), ['/api/workspace', '/api/plan']);
+  assert.equal(S.revision, 2);
+  S.dirty = true;
+  browser.fail('/api/workspace', 'Save conflict', 'POST');
+  const plans = browser.bodies.filter(x => x.path === '/api/plan').length;
+  await assert.rejects(reviewPlan(), /Save conflict/);
+  assert.equal(S.dirty, true);
+  assert.equal(browser.bodies.filter(x => x.path === '/api/plan').length, plans);
+  S.doc.pipelines[0].stages[0].questions.answer.criteria.a = '';
+  await assert.rejects(reviewPlan(), /text for every answer option/);
+  assert.equal(S.sections.pipeline, 'phase');
+});
+
+test('browser submit flushes simple fields before navigation without touching other questions', async () => {
+  const browser = browserHarness(); await settle();
+  const { S } = browser.client; S.pipelineId = 'study'; S.stageId = 'panel'; S.dirty = true;
+  const form = { dataset: { form: 'study-setup', questionId: 'answer' }, values: { setupPrompt: 'Updated from form dispatch' }, querySelectorAll: () => [] };
+  browser.listeners.get('submit')!({ target: { closest: () => form }, preventDefault() {} });
+  assert.equal(S.doc.pipelines[0].stages[0].questions.answer.label, 'Updated from form dispatch');
+});
+
+test('point-and-click result selections reconcile data dependencies and compare choices without key-order sensitivity', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, setupAction, stageForm, connectSetupAnswer } = browser.client;
+  S.pipelineId = 'study';
+  const p = S.doc.pipelines[0], first = p.stages[0];
+  const second = { ...structuredClone(first), id: 'second', label: 'Second cohort' };
+  second.questions.answer.criteria = { b: 'B', a: 'A' };
+  const combine = { id: 'combine', label: 'Combined', kind: 'aggregate', outputQuestion: 'combined', inputs: [{ stage: first.id, question: 'answer', weight: 2 }], dependsOn: ['panel', 'ordering'] };
+  p.stages.push(second, combine); S.stageId = 'combine';
+  assert.match(stageForm(p, combine), /Second cohort/);
+  setupAction('setup-result', { dataset: { source: 'second', question: 'answer' } });
+  assert.equal(combine.inputs.length, 2); assert.equal(combine.inputs[0].weight, 2);
+  setupAction('setup-result', { dataset: { source: 'panel', question: 'answer' } });
+  assert.deepEqual(Array.from(combine.dependsOn), ['ordering', 'second']);
+  const decision = { id: 'decision', label: 'Decision', kind: 'decision', from: { stage: 'panel', question: 'answer' }, outputQuestion: 'result', dependsOn: ['panel', 'ordering'] };
+  p.stages.push(decision); S.stageId = 'decision';
+  setupAction('setup-result', { dataset: { source: 'second', question: 'answer' } });
+  assert.deepEqual(Array.from(decision.dependsOn), ['ordering', 'second']);
+  second.inputs = { prior: { stage: 'panel', question: 'answer', select: 'summary' } };
+  second.dependsOn = ['panel']; second.when = { stage: 'panel', question: 'answer', metric: 'winner', op: 'eq', value: 'a' };
+  connectSetupAnswer(p, second, 'panel', 'answer');
+  assert.deepEqual(Array.from(second.dependsOn), ['panel'], 'branch conditions keep their required source');
+});
+
+test('new choice options never reuse deleted keys referenced by branch conditions', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, setupAction } = browser.client; S.pipelineId = 'study'; S.stageId = 'panel';
+  const p = S.doc.pipelines[0], s = p.stages[0];
+  s.questions.answer.criteria = { option_1: 'Old title', option_2: 'Keep', option_3: 'Keep too' };
+  p.stages.push({ id: 'branch', kind: 'decision', label: 'Conditional', from: { stage: 'panel', question: 'answer' }, outputQuestion: 'winner', dependsOn: ['panel'], when: { stage: 'panel', question: 'answer', metric: 'winner', op: 'eq', value: 'option_1' } });
+  setupAction('setup-remove-option', { dataset: { key: 'option_1' } });
+  setupAction('setup-add-option', { dataset: {} });
+  assert.equal(Object.keys(s.questions.answer.criteria).length, 3);
+  assert.equal(Object.hasOwn(s.questions.answer.criteria, 'option_1'), false);
+  assert.equal(p.stages[1].when.value, 'option_1', 'review will flag a missing option instead of reinterpreting the rule');
 });
