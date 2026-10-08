@@ -294,6 +294,7 @@ export async function runPipeline(pipeline: Pipeline, cohorts: Record<string, Co
           weight: populationWeight * (persona.weight / selectedWeight) / repeats,
         })));
       });
+      for (const job of jobs) options.onMemberProgress?.({ stage: stage.id, personaId: job.persona.id, label: job.persona.label, segment: job.segmentId, age: job.persona.age, repeat: job.repeat, status: 'queued' });
       const votes: Vote[] = [];
       let done = 0;
       const failures: string[] = [];
@@ -302,6 +303,8 @@ export async function runPipeline(pipeline: Pipeline, cohorts: Record<string, Co
       const workers = Array.from({ length: perStageConcurrency }, async () => {
         while (cursor < jobs.length) {
           const job = jobs[cursor++]!;
+          const member = { stage: stage.id, personaId: job.persona.id, label: job.persona.label, segment: job.segmentId, age: job.persona.age, repeat: job.repeat };
+          options.onMemberProgress?.({ ...member, status: 'running' });
           const requestSeed = `${options.seed}:${stage.id}:${job.persona.id}:${job.repeat}`;
           const state: Record<string, Json> = {
             pipelineContext: pipeline.context,
@@ -338,8 +341,11 @@ export async function runPipeline(pipeline: Pipeline, cohorts: Record<string, Co
               });
             }
             votes.push({ personaId: job.persona.id, cohortId: cohort.id, segment: job.segmentId, repeat: job.repeat, weight: job.weight, answers: evaluation.answers, cacheHit, model: evaluation.model });
+            options.onMemberProgress?.({ ...member, status: 'completed', answers: evaluation.answers, model: evaluation.model, cacheHit });
           } catch (error) {
-            failures.push(`${job.persona.id} (repeat ${job.repeat}): ${safeRequestFailure(error)}`);
+            const reason = safeRequestFailure(error);
+            failures.push(`${job.persona.id} (repeat ${job.repeat}): ${reason}`);
+            options.onMemberProgress?.({ ...member, status: 'failed', reason });
           } finally {
             done += 1;
             options.onProgress?.({ stage: stage.id, completed: done, total: jobs.length });

@@ -9,6 +9,7 @@ export interface WorkspaceRun {
   id: string; projectId: string; pipelineId: string; pipelineName: string; status: 'running' | 'completed' | 'failed';
   provider?: 'typesafe' | 'gliner';
   createdAt: string; message: string; progress?: { stage: string; completed: number; total: number };
+  liveMembers?: { stage: string; personaId: string; label: string; segment: string; age: number; repeat: number; status: 'queued' | 'running' | 'completed' | 'failed'; answers?: Record<string, unknown>; model?: string; cacheHit?: boolean; reason?: string }[];
   usage?: Usage; reportUrl?: string;
 }
 export interface WorkspaceSnapshot extends WorkspaceSaved { auth: AuthStatus; gliner?: { ready: boolean; model: string; message?: string }; runs: WorkspaceRun[]; activeRun: WorkspaceRun | null }

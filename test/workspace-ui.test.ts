@@ -57,7 +57,7 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,studies,review,say,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,studyQuestionList,validateSetupAnswers,questionParts,upsertQuestion,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={commandApplyProposal,commandJobVisible,S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,studies,review,say,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,studyQuestionList,validateSetupAnswers,questionParts,upsertQuestion,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
   if (openExistingProject) (context as any).clientTest.S.projectId = 'existing-research';
@@ -935,7 +935,8 @@ test('projects start from a question and assign cohorts only after an explicit c
   assert.equal(freshPipeline('Use this audience').cohorts.audience, 'cohort');
   S.newQuestion = 'Which name best fits our game?';
   act(null, { dataset: { act: 'draft-question' } });
-  assert.equal(S.tab, 'agents');
+  assert.equal(S.tab, 'studies');
+  assert.match(html(), /aria-labelledby="draftPanelTitle"/);
   assert.match(S.localPrompt, /Which name best fits our game\?/);
   assert.equal(S.doc.pipelines.length, 0);
   assert.equal(S.doc.cohorts.length, 1);
@@ -1255,7 +1256,7 @@ test('empty study cohort selection opens generation and returns without losing t
   S.tab = 'studies'; S.pipelineId = 'study'; S.stageId = 'panel';
   S.doc.cohorts = []; S.doc.projects[0].cohortIds = [];
   S.doc.pipelines[0].stages[0].questions.answer.label = 'Unsaved question about our game';
-  S.sections['setup-wizard-study-panel-answer'] = 'cohort'; S.dirty = true;
+  S.sections['setup-wizard-study-panel-answer'] = 'cohort'; S.sections['flow-inspector']='cohort'; S.dirty = true;
   const before = JSON.stringify(S.doc);
   render();
   assert.match(browser.element('app').innerHTML, /Generate a cohort/);
@@ -1268,7 +1269,8 @@ test('empty study cohort selection opens generation and returns without losing t
   assert.equal(S.tab, 'studies'); assert.equal(S.pipelineId, 'study'); assert.equal(S.stageId, 'panel');
   assert.equal(S.sections['setup-wizard-study-panel-answer'], 'cohort');
   assert.equal(JSON.stringify(S.doc), before); assert.equal(S.dirty, true);
-  assert.match(browser.element('app').innerHTML, /data-setup-pane="cohort" >/);
+  assert.match(browser.element('app').innerHTML, /data-inspector-tab="cohort"/);
+  assert.match(browser.element('app').innerHTML, /Generate a cohort/);
 
   act(null, { dataset: { act: 'new-cohort' } });
   act(null, { dataset: { act: 'manual-cohort' } });
@@ -1354,7 +1356,7 @@ test('project detail submission saves metadata and pipeline creation assigns own
   assert.equal(S.doc.pipelines.length, 1);
   assert.equal(S.doc.projects[0].pipelineIds[0], S.doc.pipelines[0].id);
   assert.equal(S.doc.pipelines[0].name, 'Renamed project study');
-  assert.equal(S.sections.pipeline, 'phase');
+  assert.equal(S.sections.pipeline, 'flow');
   assert.equal(S.sections['phase-' + S.stageId], 'question');
   const beforeRejected = JSON.stringify(S.doc), selectedId = S.pipelineId;
   submit('new-pipeline', { question: 'Second pipeline?' });
@@ -1625,7 +1627,7 @@ test('changing an intermediate cohort keeps other phase cohorts and inputs indep
     S.tab = 'studies'; S.pipelineId = pipeline.id; S.stageId = 'panel';
     S.sections.pipeline = 'flow'; S.sections['phase-middle'] = 'rules';
     act(null, { dataset: { act: 'stage', id: 'middle' } });
-    assert.equal(S.sections.pipeline, 'phase');
+    assert.equal(S.sections.pipeline, 'flow');
     assert.equal(S.sections['phase-middle'], 'question');
     const before = JSON.stringify([first, last]);
     const values: Record<string, string> = {
@@ -1769,7 +1771,7 @@ test('review saves pending setup before planning and stops on save failure or em
   assert.equal(browser.bodies.filter(x => x.path === '/api/plan').length, plans);
   S.doc.pipelines[0].stages[0].questions.answer.criteria.a = '';
   await assert.rejects(reviewPlan(), /text for every answer option/);
-  assert.equal(S.sections.pipeline, 'phase');
+  assert.equal(S.sections.pipeline, 'flow');
 });
 
 test('browser submit flushes simple fields before navigation without touching other questions', async () => {
@@ -2015,10 +2017,10 @@ test('every project tab selects its matching panel directly and keeps pending st
   assert.equal(q.label,'Which title should we choose?','leaving editor flushes pending fields before render');
   root.querySelectorAll=()=>[];
   const before=JSON.stringify(S.doc);
-  for(const [tab,label,content] of [['studies','Studies','Your research questions'],['cohorts','Cohorts','Your virtual cohorts'],['runs','Runs','Study runs'],['agents','Assistant','Draft a cohort or study']]){
+  for(const [tab,label,content] of [['studies','Studies','Your research questions'],['cohorts','Cohorts','Your virtual cohorts'],['runs','Runs','Study runs']]){
     click({act:'tab',tab});
     const buttons=[...html().matchAll(/<button[^>]*role="tab"[^>]*>/g)].map(match=>match[0]);
-    assert.equal(buttons.length,4);
+    assert.equal(buttons.length,3);
     assert.equal(buttons.filter(button=>button.includes('aria-selected="true"')).length,1);
     for(const button of buttons){
       const selected=button.includes('id="tab-'+tab+'"');
@@ -2032,12 +2034,13 @@ test('every project tab selects its matching panel directly and keeps pending st
     assert.match(html(),/data-act="projects" aria-label="Back to projects"/);
     assert.doesNotMatch(html(),/aria-label="Project sections"/);
   }
+  click({act:'tab',tab:'agents'});assert.equal(S.tab,'runs');assert.match(html(),/aria-labelledby="draftPanelTitle"/);assert.match(html(),/Unfinished assistant brief/);click({act:'draft-panel-close'});
   click({act:'project-settings'});click({act:'project-overview'});
   assert.equal(S.tab,'studies');assert.equal(S.studyLibrary,true);assert.equal(S.pipelineId,null);
   click({act:'projects'});click({act:'open-project',id:'existing-research'});click({act:'open-pipeline',id:'study'});
   assert.equal(JSON.stringify(S.doc),before);assert.equal(S.dirty,true);
   assert.equal(S.sections['setup-wizard-study-panel-answer'],'options');
-  assert.match(html(),/data-setup-pane="options" >/);
+  assert.match(html(),/aria-label="Study flow"/);
   assert.equal(S.cohortPrompt,'Unfinished cohort brief');assert.equal(S.localPrompt,'Unfinished assistant brief');assert.equal(S.newQuestion,'Unfinished new study');
   assert.equal(browser.bodies.length,0,'navigation never saves or launches a draft');
 });
@@ -2047,7 +2050,7 @@ test('study navigation has clear scope, a reachable single-study library and con
   S.tab='studies';S.pipelineId='study';S.stageId='panel';S.dirty=true;
   S.doc.pipelines[0].stages[0].questions.answer.criteria.a={label:'Draft name',description:'Keep typed detail'};
   const before=JSON.stringify(S.doc);render();let html=browser.element('app').innerHTML;
-  assert.doesNotMatch(html,/role="tablist"|>Advanced<|Apply phase/);assert.match(html,/data-act="back-studies" aria-label="Back to studies"/);const location=html.match(/<nav class="study-location"[\s\S]*?<\/nav>/)![0];assert.equal((location.match(/<button/g)||[]).length,4);assert.equal((location.match(/class="button /g)||[]).length,1);assert.match(location,/class="breadcrumb-link" data-act="projects"/);assert.doesNotMatch(html,/← Studies|← Projects/);assert.match(html,/>Questions</);assert.match(html,/aria-label="Step settings" title="Step settings"/);
+  assert.doesNotMatch(html,/role="tablist"|>Advanced<|Apply phase/);assert.match(html,/data-act="back-studies" aria-label="Back to studies"/);const location=html.match(/<nav class="study-location"[\s\S]*?<\/nav>/)![0];assert.equal((location.match(/<button/g)||[]).length,4);assert.equal((location.match(/class="button /g)||[]).length,1);assert.match(location,/class="breadcrumb-link" data-act="projects"/);assert.doesNotMatch(html,/← Studies|← Projects/);assert.match(html,/>Pipeline</);assert.match(html,/aria-label="Step settings" title="Step settings"/);
   act(null,{dataset:{act:'section-view',sectionKey:'pipeline',sectionId:'advanced'}});html=browser.element('app').innerHTML;
   assert.match(html,/Back to question/);assert.match(html,/Step settings · 1\./);assert.doesNotMatch(html,/aria-label="Study sections"|Apply phase/);
   assert.match(html,/data-settings-mode="simple"/);
@@ -2217,7 +2220,7 @@ test('question outline replaces dropdown, preserves pending fields and returns t
   S.tab='studies';S.pipelineId='study';S.stageId='panel';const p=S.doc.pipelines[0],first=p.stages[0];
   const follow={...structuredClone(first),id:'follow',questions:{answer:{...first.questions.answer,label:'What should this phase decide?'}},dependsOn:['panel'],inputs:{prior:{stage:'panel',question:'answer',select:'summary'}}};
   const another={...structuredClone(follow),id:'another'};p.stages.push(follow,another);S.dirty=true;
-  S.sections['setup-wizard-study-panel-answer']='options';render();assert.doesNotMatch(browser.element('app').innerHTML,/name="phasePicker"|>Study question</);
+  S.sections.pipeline='phase';S.sections['setup-wizard-study-panel-answer']='options';render();assert.doesNotMatch(browser.element('app').innerHTML,/name="phasePicker"|>Study question</);
   const form:any={dataset:{form:'study-setup',questionId:'answer'},values:{setupPrompt:'Which title fits our game?'},reportValidity:()=>true,querySelectorAll:()=>[],requestSubmit:()=>applyStudySetup(form)};
   browser.element('app').querySelectorAll=(selector:string)=>selector==='[data-form]'?[form]:[];
   browser.listeners.get('click')!({preventDefault(){},target:{closest:()=>({dataset:{act:'setup-question-list'}})}});
@@ -2300,4 +2303,62 @@ test('project deletion refuses active target runs and cached drafts before openi
   S.projectViews['existing-research']={localJob:{status:'running'}};
   assert.throws(()=>act(null,{dataset:{act:'delete-project',id:'existing-research'}}),/drafting job/);
   assert.equal(JSON.stringify(S.doc),before);
+});
+
+
+test('served workspace wires command keyboard navigation and in-context proposal apply', async () => {
+  const browser=browserHarness();await settle();const {S,act,commandApplyProposal,commandJobVisible}=browser.client;
+  (browser.document as any).querySelector=()=>null;
+  browser.element('commandSearch').setAttribute=()=>{};browser.element('commandSearch').removeAttribute=()=>{};
+  const keyboard=browser.listeners.get('keydown')!;
+  keyboard({metaKey:true,key:'k',preventDefault(){}});
+  assert.match(browser.element('app').innerHTML,/role="combobox"/);
+  browser.listeners.get('input')!({target:{id:'commandSearch',value:'First question'}});
+  keyboard({key:'Enter',target:{id:'commandSearch'},preventDefault(){}});
+  assert.equal(S.pipelineId,'study');assert.equal(S.stageId,'panel');assert.equal(S.sections.pipeline,'flow');
+  assert.doesNotMatch(browser.element('app').innerHTML,/class="command-backdrop"/);
+  act(null,{dataset:{act:'draft-panel-open'}});await settle();assert.equal(commandJobVisible(),true);
+  const proposal=structuredClone(S.doc);proposal.pipelines[0].name='Generated pipeline';
+  S.localJob={id:'inline',status:'completed',revision:S.revision,projectId:S.projectId,proposal:{document:proposal,explanation:'Refined study'}};
+  S.dirty=false;browser.respond('/api/agent/jobs/inline/apply',{revision:S.revision+1,document:proposal});
+  await commandApplyProposal();
+  assert.equal(commandJobVisible(),false);assert.equal(S.tab,'studies');assert.equal(S.pipelineId,'study');assert.equal(S.sections.pipeline,'flow');
+  assert.equal(S.doc.pipelines[0].name,'Generated pipeline');
+  assert.ok(browser.requests.includes('/api/agent/jobs/inline/apply'));
+  assert.equal(browser.bodies.filter(x=>x.path.includes('/api/runs')).length,0);
+});
+
+test('live run navigation pins selected stage and member while polling advances execution',async()=>{
+  const browser=browserHarness();await settle();const {S,act,render,applySnapshot}=browser.client;
+  S.tab='runs';S.liveRunId='history';
+  const members=Array.from({length:52},(_,i)=>({stage:'screen',personaId:'person-'+i,label:'Person '+i,repeat:1,status:i===0?'running':'queued',segment:'Audience',age:30}));
+  const run:any={id:'run-live',projectId:S.projectId,pipelineName:'Live study',createdAt:'2026-10-08T12:00:00Z',status:'running',message:'Evaluating',liveMembers:members};
+  S.snap.runs=[run];render();assert.match(browser.element('app').innerHTML,/data-act="live-open"/);
+  act(null,{dataset:{act:'live-open',id:run.id}});assert.match(browser.element('app').innerHTML,/aria-label="Live cohort behavior"/);
+  act(null,{dataset:{act:'live-page',page:'2',stage:'screen'}});assert.equal(S.liveMemberPage,2);assert.equal(S.liveStage,'screen');
+  assert.match(browser.element('app').innerHTML,/Page 3 of 3/);assert.match(browser.element('app').innerHTML,/Person 51/);
+  act(null,{dataset:{act:'live-member',key:'screen:person-51:1',stage:'screen',page:'2'}});
+  assert.equal(S.liveMemberKey,'screen:person-51:1');assert.match(browser.element('app').innerHTML,/<h3>Person 51<\/h3>/);
+  const next=structuredClone(S.snap);next.runs[0].liveMembers.forEach((m:any)=>m.status='completed');next.runs[0].liveMembers.push({stage:'follow-up',personaId:'next',label:'Next member',repeat:1,status:'running',segment:'Audience',age:35});
+  next.runs[0].liveMembers[51].answers={interest:{type:'noul',noul:.8}};
+  applySnapshot(next);
+  assert.equal(S.liveStage,'screen');assert.equal(S.liveMemberPage,2);assert.equal(S.liveMemberKey,'screen:person-51:1');
+  assert.match(browser.element('app').innerHTML,/<h3>Person 51<\/h3>/);assert.match(browser.element('app').innerHTML,/Yes · 80%/);
+  act(null,{dataset:{act:'live-stage',stage:'follow-up'}});assert.equal(S.liveMemberPage,0);assert.equal(S.liveMemberKey,'');assert.match(browser.element('app').innerHTML,/<h3>Next member<\/h3>/);
+  act(null,{dataset:{act:'live-close'}});assert.equal(S.liveRunId,'history');assert.match(browser.element('app').innerHTML,/Study runs/);
+  applySnapshot({...next,runs:[{...next.runs[0],message:'Still evaluating'}]});assert.doesNotMatch(browser.element('app').innerHTML,/aria-label="Live cohort behavior"/);
+  act(null,{dataset:{act:'live-open',id:run.id}});assert.equal(S.liveMemberPage,0);assert.equal(S.liveMemberKey,'');assert.equal(S.liveStage,'');
+});
+
+test('run polling preserves draft panel prompt focus and text selection',async()=>{
+  const browser=browserHarness();await settle();const {S,act,applySnapshot}=browser.client;
+  S.tab='runs';act(null,{dataset:{act:'draft-panel-open'}});await settle();
+  const form={dataset:{form:'assistant'}};
+  browser.listeners.get('input')!({target:{id:'assistantPrompt',name:'localPrompt',value:'Compare these names across cohorts',closest:()=>form}});
+  (browser.document as any).activeElement={id:'assistantPrompt',selectionStart:8,selectionEnd:19,scrollTop:17};
+  const input=browser.element('assistantPrompt');let focused=false,selection:number[]=[];
+  input.focus=()=>focused=true;input.setSelectionRange=(start:number,end:number)=>selection=[start,end];
+  applySnapshot({...S.snap,runs:[{id:'poll-focus',projectId:S.projectId,pipelineName:'Another run',status:'completed',message:'Done',createdAt:'2026-10-08T12:00:00Z'}]});
+  assert.equal(focused,true);assert.deepEqual(selection,[8,19]);assert.equal(input.scrollTop,17);
+  assert.equal(S.localPrompt,'Compare these names across cohorts');assert.match(browser.element('app').innerHTML,/Compare these names across cohorts/);
 });
