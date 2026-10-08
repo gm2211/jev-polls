@@ -1870,13 +1870,11 @@ test('project entry and back navigation visit every breadcrumb level and preserv
   const browser=browserHarness(false);await settle();const {S,act}=browser.client;
   const html=()=>browser.element('app').innerHTML;
   act(null,{dataset:{act:'open-project',id:'existing-research'}});
-  assert.equal(S.pipelineId,null);assert.equal(S.tab,'overview');
-  assert.match(html(),/aria-label="Project sections"/);
-  assert.match(html(),/data-act="projects">Projects<\/button>.*<span aria-current="page">Existing research<\/span>/);
-  assert.doesNotMatch(html(),/<span aria-current="page">Studies/);
-  act(null,{dataset:{act:'tab',tab:'studies'}});
+  assert.equal(S.pipelineId,null);assert.equal(S.stageId,null);assert.equal(S.tab,'studies');assert.equal(S.studyLibrary,true);
+  assert.doesNotMatch(html(),/aria-label="Project sections"|class="project-overview"/);
+  assert.match(html(),/data-act="projects">Projects<\/button>.*data-act="project-overview">Existing research<\/button>.*<span aria-current="page">Studies<\/span>/);
   assert.match(html(),/Your research questions/);
-  assert.match(html(),/data-act="project-overview" aria-label="Back to project"/);
+  assert.match(html(),/data-act="projects" aria-label="Back to projects"/);
   act(null,{dataset:{act:'open-pipeline',id:'study'}});
   assert.match(html(),/data-act="projects">Projects<\/button>.*data-act="project-overview">Existing research<\/button>.*data-act="back-studies">Studies<\/button>/);
   assert.match(html(),/<h1[^>]*aria-current="page"/);
@@ -1884,14 +1882,58 @@ test('project entry and back navigation visit every breadcrumb level and preserv
   S.sections['setup-wizard-study-panel-answer']='options';const before=JSON.stringify(S.doc);
   act(null,{dataset:{act:'back-studies'}});assert.equal(S.projectId,'existing-research');assert.equal(S.pipelineId,null);
   assert.match(html(),/Your research questions/);
-  act(null,{dataset:{act:'project-overview'}});assert.equal(S.projectId,'existing-research');assert.equal(S.tab,'overview');
-  assert.match(html(),/<span aria-current="page">Existing research<\/span>/);
+  act(null,{dataset:{act:'open-pipeline',id:'study'}});
+  act(null,{dataset:{act:'project-overview'}});assert.equal(S.projectId,'existing-research');assert.equal(S.tab,'studies');assert.equal(S.studyLibrary,true);assert.equal(S.pipelineId,null);assert.equal(S.stageId,null);
+  assert.match(html(),/Your research questions/);
   act(null,{dataset:{act:'projects'}});assert.equal(S.projectId,null);
   act(null,{dataset:{act:'open-project',id:'existing-research'}});
-  assert.equal(S.pipelineId,null);assert.equal(S.tab,'overview');
-  act(null,{dataset:{act:'tab',tab:'studies'}});
+  assert.equal(S.pipelineId,null);assert.equal(S.tab,'studies');assert.equal(S.studyLibrary,true);
   act(null,{dataset:{act:'open-pipeline',id:'study'}});
   assert.equal(JSON.stringify(S.doc),before);assert.equal(S.dirty,true);assert.equal(S.sections['setup-wizard-study-panel-answer'],'options');
+});
+
+test('every project tab selects its matching panel directly and keeps pending study fields and wizard state',async()=>{
+  const browser=browserHarness(false);await settle();const {S,applyStudySetup}=browser.client;
+  const root=browser.element('app'),html=()=>root.innerHTML;
+  const click=(dataset:Record<string,string>)=>browser.listeners.get('click')!({preventDefault(){},target:{closest:()=>({dataset})}});
+  click({act:'open-project',id:'existing-research'});
+  click({act:'open-pipeline',id:'study'});
+  const q=S.doc.pipelines[0].stages[0].questions.answer;
+  q.criteria.a={label:'Draft option',description:'Keep this description'};
+  S.sections['setup-wizard-study-panel-answer']='options';
+  S.cohortPrompt='Unfinished cohort brief';S.localPrompt='Unfinished assistant brief';S.newQuestion='Unfinished new study';
+  const form:any={dataset:{form:'study-setup',questionId:'answer'},values:{setupPrompt:'Which title should we choose?'},reportValidity:()=>true,querySelectorAll:()=>[],requestSubmit:()=>applyStudySetup(form)};
+  root.querySelectorAll=(selector:string)=>selector==='[data-form]'?[form]:[];
+  browser.listeners.get('input')!({target:{name:'setupPrompt',closest:()=>form}});
+  click({act:'tab',tab:'cohorts'});
+  assert.equal(q.label,'Which title should we choose?','leaving editor flushes pending fields before render');
+  root.querySelectorAll=()=>[];
+  const before=JSON.stringify(S.doc);
+  for(const [tab,label,content] of [['studies','Studies','Your research questions'],['cohorts','Cohorts','Your virtual cohorts'],['runs','Runs','Study runs'],['agents','Assistant','Local assistant']]){
+    click({act:'tab',tab});
+    const buttons=[...html().matchAll(/<button[^>]*role="tab"[^>]*>/g)].map(match=>match[0]);
+    assert.equal(buttons.length,4);
+    assert.equal(buttons.filter(button=>button.includes('aria-selected="true"')).length,1);
+    for(const button of buttons){
+      const selected=button.includes('id="tab-'+tab+'"');
+      assert.match(button,new RegExp('aria-selected="'+selected+'"'));
+      assert.match(button,new RegExp('tabindex="'+(selected?'0':'-1')+'"'));
+    }
+    const panels=[...html().matchAll(/<section[^>]*role="tabpanel"[^>]*>/g)].map(match=>match[0]);
+    assert.equal(panels.length,1);
+    assert.match(panels[0]!,new RegExp('id="view-'+tab+'".*aria-labelledby="tab-'+tab+'"'));
+    assert.ok(html().includes(content),label+' displays its content');
+    assert.match(html(),/data-act="projects" aria-label="Back to projects"/);
+    assert.doesNotMatch(html(),/aria-label="Project sections"/);
+  }
+  click({act:'project-settings'});click({act:'project-overview'});
+  assert.equal(S.tab,'studies');assert.equal(S.studyLibrary,true);assert.equal(S.pipelineId,null);
+  click({act:'projects'});click({act:'open-project',id:'existing-research'});click({act:'open-pipeline',id:'study'});
+  assert.equal(JSON.stringify(S.doc),before);assert.equal(S.dirty,true);
+  assert.equal(S.sections['setup-wizard-study-panel-answer'],'options');
+  assert.match(html(),/data-setup-pane="options" >/);
+  assert.equal(S.cohortPrompt,'Unfinished cohort brief');assert.equal(S.localPrompt,'Unfinished assistant brief');assert.equal(S.newQuestion,'Unfinished new study');
+  assert.equal(browser.bodies.length,0,'navigation never saves or launches a draft');
 });
 
 test('study navigation has clear scope, a reachable single-study library and contextual step settings', async()=>{
