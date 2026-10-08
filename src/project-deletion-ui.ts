@@ -28,7 +28,7 @@ function deleteProjectFromDraft(){
   if(optionAgentDraft?.projectId===target.id)optionAgentDraft=null;
   if(answerListDraft?.projectId===target.id)closeAnswerList();
   if(pipelines.has(S.flowSource?.pipelineId)){S.flowSource=null;S.flowAdd=null;}
-  try{sessionStorage.removeItem('jev-local-job:'+location.origin+':'+target.id)}catch{}
+  try{sessionStorage.removeItem('jev-local-job:'+location.origin+':'+target.id);sessionStorage.removeItem('jev-local-job-target:'+location.origin+':'+target.id)}catch{}
   S.projectDeletion=null;S.plan=null;S.dirty=true;
   document.getElementById('deleteProjectDialog').close();
   if(S.projectId===target.id)selectProject(null);else render();

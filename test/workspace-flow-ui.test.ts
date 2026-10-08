@@ -35,7 +35,7 @@ async function flowHarness() {
   };
   const html = renderWorkspace('flow-test', 'token');
   const script = html.match(/<script nonce="flow-test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.flowTest={S,flowAction,flowConnect,flowDisconnect,flowInputs,flowNode,flowReadiness,flowConnections};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.flowTest={S,flowAction,flowConnect,flowDisconnect,flowInputs,flowNode,flowReadiness,flowConnections,flowCohortMap};})();');
   new Script(exposed).runInNewContext(context);
   await new Promise<void>(resolve => setImmediate(resolve));
   const client = context.flowTest;
@@ -187,6 +187,8 @@ test('attached add actions create connected follow-up, combine, and final result
     assert.deepEqual(plain(added.dependsOn), ['source']);
     if (kind === 'poll') {
       assert.equal(added.cohort, source.cohort);
+      assert.equal(S.sections['flow-inspector'], 'cohort');
+      assert.equal(S.flowCohortPick, true);
       assert.ok(Object.values<any>(added.inputs).some(input => input.stage === 'source' && input.question === 'answer'));
     } else if (kind === 'aggregate') {
       assert.deepEqual(plain(added.inputs), [{ stage: 'source', question: 'answer', weight: 1 }]);
@@ -293,4 +295,20 @@ test('question and incoming-result labels are escaped in flow markup without mut
   assert.match(html, /&lt;script&gt;/);
   assert.match(html, /&lt;img/);
   assert.equal(JSON.stringify(pipeline), before);
+});
+
+
+test('independent question starts cohort selection inside pipeline without changing existing nodes', async () => {
+  const { S, pipeline, flowAction, flowCohortMap } = await flowHarness();
+  const before = JSON.stringify(pipeline.stages);
+  flowAction('flow-add', { dataset: { kind: 'independent' } });
+  const added = pipeline.stages.at(-1);
+  assert.equal(JSON.stringify(pipeline.stages.slice(0, -1)), before);
+  assert.equal(added.kind, 'poll');
+  assert.deepEqual(plain(added.dependsOn), []);
+  assert.equal(S.tab, 'studies');
+  assert.equal(S.sections['flow-inspector'], 'cohort');
+  const html = flowCohortMap(pipeline, added);
+  assert.match(html, /data-act="new-cohort"/);
+  assert.doesNotMatch(html, /name="setupPrompt"/);
 });

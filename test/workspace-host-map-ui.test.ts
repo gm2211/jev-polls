@@ -6,7 +6,7 @@ import { WORKSPACE_HOST_MAP_CLIENT } from '../src/workspace-host-map-ui.js';
 
 function harness() {
   const escape = (value: unknown) => String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');
-  const context: any = { S: {}, poolForPhase: (_p:unknown,s:any) => s.pool, esc: escape, attr: escape, icon: () => '', render() {}, root: { querySelectorAll: () => [], querySelector: () => null } };
+  const context: any = { S: {}, inlineCohortTarget: () => false, poolForPhase: (_p:unknown,s:any) => s.pool, esc: escape, attr: escape, icon: () => '', render() {}, root: { querySelectorAll: () => [], querySelector: () => null } };
   new Script(WORKSPACE_HOST_MAP_CLIENT + WORKSPACE_FLOW_CLIENT + ';globalThis.api={hostMap,hostMapMember,hostMapDetails,hostMapAction,hostMapState,flowCohortMap}').runInNewContext(context);
   return context.api;
 }
