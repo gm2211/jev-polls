@@ -150,7 +150,7 @@ test('review settings survive tab switches and request plans paginate for deskto
   assert.match(html, /name="seed"[^>]*value="saved-seed"/);
   assert.match(html, /name="concurrency"[^>]*value="3"/);
   assert.match(html, /name="maxRequests"[^>]*value="17"/);
-  assert.match(html, /1–3 of 7/); assert.doesNotMatch(html, />Step 4 /);
+  assert.match(html, /1–2 of 7/); assert.doesNotMatch(html, />Step 4 /);
   (browser.window as any).innerWidth = 390;
   const narrow = review();
   assert.match(narrow, /1–1 of 7/); assert.doesNotMatch(narrow, />Step 2 /);
@@ -2768,4 +2768,24 @@ test('AI destination IDs match visible command destinations in project and globa
   S.snap.runs=[{id:'run-one',projectId:S.projectId,pipelineId:'study',pipelineName:'Original study',status:'completed'}];compare();
   act(null,{dataset:{act:'projects'}});compare();
   act(null,{dataset:{act:'open-project',id:'existing-research'}});S.snap.runs=[];S.doc.projects[0].pipelineIds=[];compare();
+});
+
+
+test('run review explains real questions, data flow, conditions and cohort terminology', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, review } = browser.client;
+  S.pipelineId = 'study'; S.tab = 'studies';
+  const pipeline = S.doc.pipelines[0];
+  pipeline.context = { brief: '<unsafe> game brief' };
+  pipeline.stages[0].when = { stage: 'panel', question: 'answer', metric: 'margin', op: 'lt', value: 0.1 };
+  S.plan = { ...runReviewPlan(), stages: [{ id: 'panel', label: 'First question', kind: 'poll', dependsOn: [], cohort: 'audience', profiles: 24, repeats: 2, requests: 48 }] };
+  const html = review();
+  for (const text of ['Original cohort', '24 cohort members', '2 evaluations each', 'Inputs', 'Outputs', 'Which option fits?', 'Choose an option.', 'weighted distribution', 'lead margin less than 0.1', '&lt;unsafe&gt; game brief']) assert.ok(html.includes(text), text);
+  assert.doesNotMatch(html, /24 profiles|<unsafe>/);
+  pipeline.stages.push({ id: 'combined', label: 'Combine', kind: 'aggregate', dependsOn: ['panel'], inputs: [{ stage: 'panel', question: 'answer', weight: 2 }], outputQuestion: 'combined_answer' });
+  S.plan.stages = [{ id: 'combined', label: 'Combine', kind: 'aggregate', dependsOn: ['panel'], requests: 0 }];
+  assert.match(review(), /First question → Which option fits\?/);
+  assert.match(review(), /weight 2/);
+  assert.match(review(), /Combined weighted result: combined_answer/);
+  assert.equal(browser.requests.filter(path => path === '/api/run').length, 0);
 });
