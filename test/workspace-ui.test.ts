@@ -2489,25 +2489,29 @@ test('run review retains clickable breadcrumbs and returns to the same study',as
   assert.equal(browser.requests.filter(path=>path==='/api/run').length,0);
 });
 
-test('run review paginates evidence separately and preserves settings across pages', async () => {
+test('run review keeps nonblocking assumptions optional and preserves run settings', async () => {
   const browser = browserHarness(); await settle();
   const { S, review, act } = browser.client;
   S.pipelineId = 'study'; S.tab = 'studies';
-  S.plan = { provider: 'typesafe', model: 'jev', stages: [], warnings: Array.from({ length: 14 }, (_, i) => 'Evidence note ' + (i + 1) + ' <unsafe>') };
+  S.plan = { provider: 'typesafe', model: 'jev', stages: [], warnings: Array.from({ length: 14 }, (_, i) => 'Assumption ' + (i + 1) + ' <unsafe>') };
   const form = { dataset: { form: 'run-options' } };
   browser.listeners.get('input')!({ target: { name: 'seed', value: 'retained-seed', closest: () => form } });
-  act(null, { dataset: { act: 'section-view', sectionKey: 'run-review', sectionId: 'warnings' } });
+  // A previously selected notes tab falls back to the request plan.
+  S.sections['run-review'] = 'warnings';
   let html = review();
-  assert.match(html, /Evidence notes \(14\)/);
-  assert.match(html, /1–3 of 14/);
-  assert.match(html, /&lt;unsafe&gt;/); assert.doesNotMatch(html, /<unsafe>/);
-  assert.doesNotMatch(html, /Evidence note 4 /);
-  assert.doesNotMatch(html.match(/<form data-form="run-options">[\s\S]*?<\/form>/)![0], /Evidence note/);
-  act(null, { dataset: { act: 'page-action', pageKey: 'existing-research:run-warnings', page: '1' } });
-  html = review(); assert.match(html, /4–6 of 14/); assert.match(html, /Evidence note 4 /);
+  assert.doesNotMatch(html, /Evidence notes|run-warnings|class="warning"/);
+  assert.match(html, /<summary>Assumptions and model limits<\/summary>/);
+  assert.match(html, /They do not block this run or require dismissal/);
+  const details = html.match(/<details class="review-caveats"[\s\S]*?<\/details>/)![0];
+  assert.doesNotMatch(details, /<details[^>]*\bopen\b|<button|<input|<select/);
+  assert.match(details, /Assumption 14 &lt;unsafe&gt;/);
+  assert.doesNotMatch(html, /<unsafe>/);
+  assert.match(html, /data-act="start-run" >Run study/);
   act(null, { dataset: { act: 'section-view', sectionKey: 'run-review', sectionId: 'settings' } });
   assert.match(review(), /name="seed"[^>]*value="retained-seed"/);
-  (browser.window as any).innerWidth = 390; S.listPages = {};
-  html = review(); assert.match(html, /1–1 of 14/); assert.doesNotMatch(html, /Evidence note 2 /);
+  (browser.window as any).innerWidth = 390;
+  assert.match(review(), /Assumptions and model limits/);
+  S.plan.warnings = [];
+  assert.doesNotMatch(review(), /<details class="review-caveats"/);
   assert.equal(browser.requests.filter(path => path === '/api/run').length, 0);
 });
