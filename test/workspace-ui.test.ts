@@ -2693,3 +2693,15 @@ test('an automatically opened active arena stays visible when the run completes'
   assert.match(browser.element('app').innerHTML,/aria-label="Live cohort behavior"/);
   assert.equal(S.liveRunId,'finishing');
 });
+
+
+test('cohort rows open through a named native button and keep delete separate',async()=>{
+  const browser=browserHarness();await settle();const {S,act,cohortCard}=browser.client;
+  const html=cohortCard(S.doc.cohorts[0]);
+  assert.match(html,/class="cohort-open" data-act="open-cohort" data-id="cohort" aria-label="Open cohort: Original cohort"/);
+  assert.doesNotMatch(html,/Configure cohort/);
+  assert.equal((html.match(/<button/g)||[]).length,2);
+  act(null,{dataset:{act:'open-cohort',id:'cohort'}});
+  assert.equal(S.cohortId,'cohort');
+  assert.equal(browser.element('deleteCohortDialog').open,false);
+});
