@@ -143,3 +143,9 @@ test('report provenance uses actual run provider and recorded model identifiers'
   run.provider = 'gliner';
   assert.match(renderReport(run), /Recorded GLiNER model results/);
 });
+
+
+test('workspace reports offer a direct return link without browser history', () => {
+  assert.match(renderReport(fixture(), { workspace: true }), /<a class="button report-back" href="\/">← Back to workspace<\/a>/);
+  assert.doesNotMatch(renderReport(fixture()), /href="\/"/);
+});

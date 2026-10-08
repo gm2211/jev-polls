@@ -193,6 +193,7 @@ test('workspace never runs on connect/save/review and requires a fresh explicit 
   assert.equal(rebuilt.status, 200); assert.match(rebuilt.headers.get('content-type')!, /text\/html/);
   const rebuiltHtml = await rebuilt.text(); assert.match(rebuiltHtml, /My reviewed study/); assert.doesNotMatch(rebuiltHtml, /Stale unrelated report sentinel/);
   assert.equal((await fetch(new URL(`/reports/${historicalIds.pendingOwner}`, server.url))).status, 200, 'Recovery needs a valid record and owner, never an HTML file');
+  assert.match(await (await fetch(new URL(`/reports/${historicalIds.pendingOwner}`, server.url))).text(), /href="\/">← Back to workspace<\/a>/);
   await writeFile(join(runFolder, 'run.json'), '{ invalid record');
   for (const path of [job.reportUrl, `/api/run/${job.id}/record`]) {
     const unavailable = await fetch(new URL(path, server.url));

@@ -344,7 +344,7 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
     }
     if (method === 'GET' && pathname.startsWith('/reports/')) {
       const job = await ownedRun(pathname.slice('/reports/'.length));
-      send(response, 200, renderReport(await savedRunRecord(job)), true, true); return;
+      send(response, 200, renderReport(await savedRunRecord(job), { workspace: true }), true, true); return;
     }
     if (method === 'GET' && pathname === '/report') {
       const latest = ownedRuns((await store.read()).document).sort((a,b) => b.createdAt.localeCompare(a.createdAt)).find(job => job.reportUrl);
