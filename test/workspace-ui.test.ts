@@ -57,7 +57,7 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,studies,review,say,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,updateStepPicker,validateSetupAnswers,questionParts,upsertQuestion,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,studies,review,say,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,studyQuestionList,validateSetupAnswers,questionParts,upsertQuestion,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
   if (openExistingProject) (context as any).clientTest.S.projectId = 'existing-research';
@@ -1681,7 +1681,7 @@ test('point-and-click result selections reconcile data dependencies and compare 
   second.questions.answer.criteria = { b: 'B', a: 'A' };
   const combine = { id: 'combine', label: 'Combined', kind: 'aggregate', outputQuestion: 'combined', inputs: [{ stage: first.id, question: 'answer', weight: 2 }], dependsOn: ['panel', 'ordering'] };
   p.stages.push(second, combine); S.stageId = 'combine';
-  assert.match(stageForm(p, combine), /Second cohort/);
+  assert.match(browser.client.studyQuestionList(p), /Second cohort/);assert.doesNotMatch(stageForm(p,combine),/phasePicker/);
   setupAction('setup-result', { dataset: { source: 'second', question: 'answer' } });
   assert.equal(combine.inputs.length, 2); assert.equal(combine.inputs[0].weight, 2);
   setupAction('setup-result', { dataset: { source: 'panel', question: 'answer' } });
@@ -1794,9 +1794,10 @@ test('step navigation uses numbered questions consistently without rewriting sav
   next.inputs = { previous_result: { stage: first.id, question: 'answer', select: 'summary' } };
   p.stages.push(next);
   const before = JSON.stringify(p);
-  for (const html of [stageForm(p, first), advancedStageForm(p, first), stageMap(p)]) {
-    assert.match(html, /1\. Which option fits\?/);
-    assert.match(html, /2\. Untitled question/);
+  assert.doesNotMatch(stageForm(p,first),/name="phasePicker"/);
+  for (const html of [browser.client.studyQuestionList(p), advancedStageForm(p, first), stageMap(p)]) {
+    assert.match(html, /Which option fits\?/);
+    assert.match(html, /Untitled question|Follow-up 1/);
     assert.doesNotMatch(html, />First question<|>Next question</);
   }
   assert.doesNotMatch(stageMap(p), /From First question/);
@@ -1813,20 +1814,12 @@ test('step navigation uses numbered questions consistently without rewriting sav
   assert.equal(stepTitle(p, p.stages[2]), '3. Launch recommendation');
 });
 
-test('typing a question refreshes its picker label without replacing the form or committing pending fields', async () => {
-  const browser = browserHarness(); await settle();
-  const { S } = browser.client;
-  S.pipelineId = 'study'; S.stageId = 'panel';
-  const option = { value: 'panel', textContent: '1. Which option fits?' };
-  const other = { value: 'other', textContent: '2. Another question' };
-  browser.element('app').querySelectorAll = (selector: string) => selector === '[name=phasePicker] option' ? [option, other] : [];
-  const form = { dataset: { form: 'study-setup', questionId: 'answer' }, querySelector: () => ({ value: 'Which <name> works?\nExplain why.' }) };
-  const before = JSON.stringify(S.doc);
-  await browser.listeners.get('input')!({ target: { name: 'setupPrompt', closest: () => form } });
-  assert.equal(option.textContent, '1. Which <name> works? Explain why.');
-  assert.equal(other.textContent, '2. Another question');
-  assert.equal(JSON.stringify(S.doc), before);
-  assert.equal(S.dirty, true);
+test('typing a question keeps the current form and pending document intact',async()=>{
+  const browser=browserHarness();await settle();const {S}=browser.client;S.pipelineId='study';S.stageId='panel';
+  const form={dataset:{form:'study-setup',questionId:'answer'},querySelector:()=>({value:'Which name works?'})};
+  const before=JSON.stringify(S.doc),html=browser.element('app').innerHTML;
+  await browser.listeners.get('input')!({target:{name:'setupPrompt',closest:()=>form}});
+  assert.equal(JSON.stringify(S.doc),before);assert.equal(browser.element('app').innerHTML,html);assert.equal(S.dirty,true);
 });
 
 
@@ -1993,4 +1986,46 @@ test('new and legacy placeholder follow-ups do not count as completed questions'
     setupAction('setup-wizard',{dataset:{step:'cohort',forward:'true'}});
     assert.match(stageForm(p,s),/Write the question before continuing/);
   }
+});
+
+
+test('question outline replaces dropdown, preserves pending fields and returns to each scoped task',async()=>{
+  const browser=browserHarness();await settle();const {S,render,applyStudySetup,setupAction,studyQuestionList,stageForm}=browser.client;
+  S.tab='studies';S.pipelineId='study';S.stageId='panel';const p=S.doc.pipelines[0],first=p.stages[0];
+  const follow={...structuredClone(first),id:'follow',questions:{answer:{...first.questions.answer,label:'What should this phase decide?'}},dependsOn:['panel'],inputs:{prior:{stage:'panel',question:'answer',select:'summary'}}};
+  const another={...structuredClone(follow),id:'another'};p.stages.push(follow,another);S.dirty=true;
+  S.sections['setup-wizard-study-panel-answer']='options';render();assert.doesNotMatch(browser.element('app').innerHTML,/name="phasePicker"|>Study question</);
+  const form:any={dataset:{form:'study-setup',questionId:'answer'},values:{setupPrompt:'Which title fits our game?'},reportValidity:()=>true,querySelectorAll:()=>[],requestSubmit:()=>applyStudySetup(form)};
+  browser.element('app').querySelectorAll=(selector:string)=>selector==='[data-form]'?[form]:[];
+  browser.listeners.get('click')!({preventDefault(){},target:{closest:()=>({dataset:{act:'setup-question-list'}})}});
+  assert.equal(first.questions.answer.label,'Which title fits our game?');let html=browser.element('app').innerHTML;
+  assert.match(html,/Questions in this study/);assert.match(html,/Follow-up 1/);assert.match(html,/Follow-up 2/);assert.match(html,/Question needed/);assert.doesNotMatch(html,/data-form="study-setup"|Untitled question|What should this phase decide/);
+  browser.element('app').querySelectorAll=()=>[];
+  setupAction('setup-edit-step',{dataset:{id:'follow'}});html=stageForm(p,follow);
+  assert.match(html,/Follow-up 1/);assert.match(html,/name="setupPrompt" rows="3"><\/textarea>/);assert.doesNotMatch(html,/aria-label="Cohort, complete"|aria-label="Options, complete"/);
+  const before=JSON.stringify(follow);applyStudySetup({dataset:{questionId:'answer'},values:{setupPrompt:''},querySelectorAll:()=>[]});assert.equal(JSON.stringify(follow),before,'navigation does not rewrite legacy placeholder data');
+  setupAction('setup-question-list',{dataset:{}});setupAction('setup-edit-step',{dataset:{id:'panel'}});
+  assert.match(stageForm(p,first),/data-setup-pane="options" >/);assert.equal(first.questions.answer.label,'Which title fits our game?');
+  assert.match(studyQuestionList(p),/Which title fits our game/);
+  const single={...p,stages:[first]};assert.doesNotMatch(stageForm(single,first),/setup-question-list|phasePicker/,'single question needs no navigation choice');
+});
+
+test('outline reaches result steps and validation returns from outline to missing question',async()=>{
+  const browser=browserHarness();await settle();const {S,setupAction,studyQuestionList,stageForm,validateSetupAnswers,render}=browser.client;
+  S.tab='studies';S.pipelineId='study';S.stageId='panel';const p=S.doc.pipelines[0],first=p.stages[0];
+  const result={id:'combine',kind:'aggregate',label:'Combined result',inputs:[],dependsOn:[],outputQuestion:'combined'};p.stages.push(result);
+  assert.match(stageForm(p,first),/Study outline/);assert.match(studyQuestionList(p),/Combined answer/);assert.match(studyQuestionList(p),/Choose earlier answers/);
+  setupAction('setup-edit-step',{dataset:{id:'combine'}});assert.equal(S.stageId,'combine');assert.match(stageForm(p,result),/Which answers should be combined/);assert.doesNotMatch(stageForm(p,result),/phasePicker/);
+  first.questions.answer.label='';setupAction('setup-question-list',{dataset:{}});assert.throws(()=>validateSetupAnswers(p),/Add the question/);render();
+  assert.equal(S.sections['question-list-study'],false);assert.equal(S.stageId,'panel');assert.match(browser.element('app').innerHTML,/data-form="study-setup"/);
+});
+
+
+test('advanced settings selector retains stage switching without adding a dropdown to question setup',async()=>{
+  const browser=browserHarness();await settle();const {S,stageForm,advancedStageForm}=browser.client;
+  S.pipelineId='study';S.stageId='panel';const p=S.doc.pipelines[0],first=p.stages[0],next={...structuredClone(first),id:'second'};p.stages.push(next);
+  S.sections.pipeline='advanced';assert.match(advancedStageForm(p,first),/name="phasePicker"/);
+  await browser.listeners.get('change')!({target:{name:'phasePicker',value:'second'}});
+  assert.equal(S.stageId,'second');assert.equal(S.sections.pipeline,'advanced');S.sections.pipeline='phase';
+  assert.doesNotMatch(stageForm(p,next),/name="phasePicker"/);
 });
