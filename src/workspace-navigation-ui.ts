@@ -48,6 +48,7 @@ export const NAVIGATION_CSS = `
 [hidden]{display:none!important}
 .shell{padding:14px 24px 16px;max-width:1440px}
 .project-navigation{margin-bottom:12px;padding-bottom:10px;gap:12px}
+.breadcrumb-link{appearance:none;border:0;border-radius:3px;background:transparent;padding:0;min-width:0;color:var(--muted);font:inherit;text-align:left;overflow-wrap:anywhere;cursor:pointer}.breadcrumb-link:hover{color:var(--blue);text-decoration:underline;text-underline-offset:3px}.breadcrumb-link:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
 .project-path{display:flex;align-items:center;flex-wrap:wrap;gap:6px;font-size:12px;color:var(--muted)}.project-path>span{overflow-wrap:anywhere}.project-path>[aria-current=page]{color:var(--ink)}
 .project-navigation strong{font-size:13px}.project-navigation p{display:none}
 .masthead{margin-bottom:14px;align-items:center}.masthead h1{font-size:27px;line-height:1.2;margin:3px 0 5px}.masthead p{font-size:12px;margin:0}.masthead .eyebrow{display:none}

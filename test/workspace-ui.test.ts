@@ -1871,9 +1871,9 @@ test('project entry and back navigation keep every breadcrumb level and preserve
   const html=()=>browser.element('app').innerHTML;
   act(null,{dataset:{act:'open-project',id:'existing-research'}});
   assert.equal(S.pipelineId,null);assert.match(html(),/Your research questions/);
-  assert.match(html(),/<span>Projects<\/span>.*<span>Existing research<\/span>.*<span aria-current="page">Studies<\/span>/);
+  assert.match(html(),/data-act="projects">Projects<\/button>.*data-act="open-project" data-id="existing-research">Existing research<\/button>.*<span aria-current="page">Studies<\/span>/);
   act(null,{dataset:{act:'open-pipeline',id:'study'}});
-  assert.match(html(),/<span>Projects<\/span>.*<span>Existing research<\/span>.*<span>Studies<\/span>/);
+  assert.match(html(),/data-act="projects">Projects<\/button>.*data-act="open-project" data-id="existing-research">Existing research<\/button>.*data-act="back-studies">Studies<\/button>/);
   assert.match(html(),/<h1[^>]*aria-current="page"/);
   S.doc.pipelines[0].description='Unfinished study question';S.dirty=true;
   S.sections['setup-wizard-study-panel-answer']='options';const before=JSON.stringify(S.doc);
@@ -1891,7 +1891,7 @@ test('study navigation has clear scope, a reachable single-study library and con
   S.tab='studies';S.pipelineId='study';S.stageId='panel';S.dirty=true;
   S.doc.pipelines[0].stages[0].questions.answer.criteria.a={label:'Draft name',description:'Keep typed detail'};
   const before=JSON.stringify(S.doc);render();let html=browser.element('app').innerHTML;
-  assert.doesNotMatch(html,/role="tablist"|>Advanced<|Apply phase/);assert.match(html,/data-act="back-studies" aria-label="Back to studies"/);const location=html.match(/<nav class="study-location"[\s\S]*?<\/nav>/)![0];assert.equal((location.match(/<button/g)||[]).length,1);assert.doesNotMatch(location,/data-act="projects"/);assert.doesNotMatch(html,/← Studies|← Projects/);assert.match(html,/>Questions</);assert.match(html,/aria-label="Step settings" title="Step settings"/);
+  assert.doesNotMatch(html,/role="tablist"|>Advanced<|Apply phase/);assert.match(html,/data-act="back-studies" aria-label="Back to studies"/);const location=html.match(/<nav class="study-location"[\s\S]*?<\/nav>/)![0];assert.equal((location.match(/<button/g)||[]).length,4);assert.equal((location.match(/class="button /g)||[]).length,1);assert.match(location,/class="breadcrumb-link" data-act="projects"/);assert.doesNotMatch(html,/← Studies|← Projects/);assert.match(html,/>Questions</);assert.match(html,/aria-label="Step settings" title="Step settings"/);
   act(null,{dataset:{act:'section-view',sectionKey:'pipeline',sectionId:'advanced'}});html=browser.element('app').innerHTML;
   assert.match(html,/Back to question/);assert.match(html,/Step settings · 1\./);assert.doesNotMatch(html,/aria-label="Study sections"|Apply phase/);
   for(const field of ['questionInstructions','criteria','stageContext','repeats'])assert.match(html,new RegExp('name="'+field+'"'));
