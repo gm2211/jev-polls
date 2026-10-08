@@ -2695,6 +2695,18 @@ test('an automatically opened active arena stays visible when the run completes'
   assert.equal(S.liveRunId,'finishing');
 });
 
+
+test('cohort rows open through a named native button and keep delete separate',async()=>{
+  const browser=browserHarness();await settle();const {S,act,cohortCard}=browser.client;
+  const html=cohortCard(S.doc.cohorts[0]);
+  assert.match(html,/class="cohort-open" data-act="open-cohort" data-id="cohort" aria-label="Open cohort: Original cohort"/);
+  assert.doesNotMatch(html,/Configure cohort/);
+  assert.equal((html.match(/<button/g)||[]).length,2);
+  act(null,{dataset:{act:'open-cohort',id:'cohort'}});
+  assert.equal(S.cohortId,'cohort');
+  assert.equal(browser.element('deleteCohortDialog').open,false);
+});
+
 test('one breadcrumb trail covers creation, cohorts, personas, settings and live runs',async()=>{
   const browser=browserHarness(false);await settle();const {S,act,render}=browser.client;
   function trail(labels:string[]){
