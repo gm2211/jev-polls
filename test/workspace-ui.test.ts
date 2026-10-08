@@ -2570,3 +2570,13 @@ test('replay scrub preserves bounds and selecting a member pauses playback', asy
   assert.match(browser.element('app').innerHTML,/0 of 1 members revealed/);
   assert.doesNotMatch(browser.element('app').innerHTML,/Yes · 40%/);
 });
+
+test('an automatically opened active arena stays visible when the run completes', async () => {
+  const browser=browserHarness();await settle();const {S,render,applySnapshot}=browser.client;
+  S.tab='runs';S.liveRunId=null;
+  S.snap.runs=[{id:'finishing',projectId:S.projectId,pipelineName:'Finishing',status:'running',liveMembers:[]}];
+  render();assert.equal(S.liveRunId,'finishing');
+  applySnapshot({...S.snap,runs:[{...S.snap.runs[0],status:'completed',message:'Done'}]});
+  assert.match(browser.element('app').innerHTML,/aria-label="Live cohort behavior"/);
+  assert.equal(S.liveRunId,'finishing');
+});
