@@ -57,7 +57,7 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={runCaveats,commandApplyProposal,commandJobVisible,S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,studies,review,say,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,studyQuestionList,validateSetupAnswers,questionParts,upsertQuestion,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={runCaveats,beginRun,commandApplyProposal,commandJobVisible,S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,studies,review,say,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,studyQuestionList,validateSetupAnswers,questionParts,upsertQuestion,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
   if (openExistingProject) (context as any).clientTest.S.projectId = 'existing-research';
@@ -93,6 +93,106 @@ test('evaluation provider is global, persists, and invalidates only its reviewed
   assert.equal(S.plan, null); assert.equal(S.evaluationProvider, 'typesafe');
   assert.equal(preferences.get('jev-evaluation-provider'), 'typesafe');
   assert.equal(JSON.stringify(S.doc), before); assert.equal(S.dirty, false);
+});
+
+function ancestorsOfRunAction(html: string) {
+  const ancestors: string[] = [];
+  for (const match of html.matchAll(/<\/?([a-z][a-z0-9]*)\b[^>]*>/gi)) {
+    const tag = match[0], name = match[1]!.toLowerCase();
+    if (tag.startsWith('</')) { ancestors.pop(); continue; }
+    if (tag.includes('data-act="start-run"')) return ancestors;
+    if (!['input', 'br', 'hr', 'img', 'meta', 'link', 'area', 'base', 'embed', 'param', 'source', 'track', 'wbr'].includes(name) && !tag.endsWith('/>')) ancestors.push(tag);
+  }
+  assert.fail('Run action missing from reviewed plan');
+}
+
+function runReviewPlan() {
+  return { pipelineId: 'study', provider: 'typesafe', model: 'jev', maxRequests: 7, revision: 1, planToken: 'reviewed-plan', warnings: [], stages: Array.from({ length: 7 }, (_, i) => ({ id: 'stage-' + i, label: 'Step ' + (i + 1), kind: 'poll', dependsOn: [], cohort: 'audience', profiles: 1, repeats: 1, requests: 1 })) };
+}
+
+test('review exposes one run action outside tab panels and retains provider readiness gating', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, review, act } = browser.client;
+  S.pipelineId = 'study'; S.tab = 'studies'; S.plan = runReviewPlan();
+  for (const selected of ['plan', 'settings']) {
+    act(null, { dataset: { act: 'section-view', sectionKey: 'run-review', sectionId: selected } });
+    const html = review();
+    assert.equal([...html.matchAll(/data-act="start-run"/g)].length, 1);
+    assert.ok(ancestorsOfRunAction(html).every(tag => !/data-section-panel|\bhidden\b/.test(tag)), 'Run action must remain outside hidden or switchable panels');
+    assert.doesNotMatch(html.match(/<button[^>]*data-act="start-run"[^>]*>/)![0], /\bdisabled\b/);
+  }
+  for (const provider of ['typesafe', 'gliner']) {
+    S.plan.provider = provider; S.snap.auth.configured = false; S.snap.gliner = { ready: false };
+    const blocked = review();
+    assert.match(blocked.match(/<button[^>]*data-act="start-run"[^>]*>/)![0], /\bdisabled\b/);
+    assert.doesNotMatch(blocked.match(/<button[^>]*data-act="evaluation-settings"[^>]*>/)![0], /\bhidden\b/);
+    S.snap.auth.configured = true; S.snap.gliner.ready = true;
+    assert.doesNotMatch(review().match(/<button[^>]*data-act="start-run"[^>]*>/)![0], /\bdisabled\b/);
+  }
+  assert.equal(browser.requests.filter(path => path === '/api/run').length, 0, 'Reviewing or switching tabs must never start inference');
+});
+
+test('review settings survive tab switches and request plans paginate for desktop and narrow views', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, review, act } = browser.client;
+  S.pipelineId = 'study'; S.tab = 'studies'; S.plan = runReviewPlan();
+  act(null, { dataset: { act: 'section-view', sectionKey: 'run-review', sectionId: 'settings' } });
+  const form = { dataset: { form: 'run-options' } };
+  for (const [name, value] of Object.entries({ seed: 'saved-seed', concurrency: '3', maxRequests: '17' })) {
+    browser.listeners.get('input')!({ target: { name, value, closest: () => form } });
+  }
+  act(null, { dataset: { act: 'section-view', sectionKey: 'run-review', sectionId: 'plan' } });
+  act(null, { dataset: { act: 'section-view', sectionKey: 'run-review', sectionId: 'settings' } });
+  const html = review();
+  assert.match(html, /name="seed"[^>]*value="saved-seed"/);
+  assert.match(html, /name="concurrency"[^>]*value="3"/);
+  assert.match(html, /name="maxRequests"[^>]*value="17"/);
+  assert.match(html, /1–4 of 7/); assert.doesNotMatch(html, />Step 5 /);
+  (browser.window as any).innerWidth = 390;
+  const narrow = review();
+  assert.match(narrow, /1–2 of 7/); assert.doesNotMatch(narrow, />Step 3 /);
+  assert.equal(S.plan.planToken, 'reviewed-plan'); assert.equal(S.dirty, false);
+  assert.equal(browser.requests.filter(path => path === '/api/run').length, 0);
+});
+
+test('run starts only with ready provider and valid current form settings', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, beginRun } = browser.client;
+  S.pipelineId = 'study'; S.tab = 'studies'; S.plan = runReviewPlan();
+  const form = { values: { seed: 'chosen-seed', concurrency: '3', maxRequests: '17' } };
+  browser.element('app').querySelector = (selector: string) => selector === '[data-form=run-options]' ? form : null;
+  for (const name of ['concurrency', 'maxRequests'] as const) {
+    for (const invalid of ['', '0', '-1', '1.5', 'not-a-number']) {
+      S.concurrency = 3; S.maxRequests = 17; S.sections['run-review'] = 'plan';
+      form.values.concurrency = '3'; form.values.maxRequests = '17'; form.values[name] = invalid;
+      await assert.rejects(beginRun(), /positive whole numbers/);
+      assert.equal(S.sections['run-review'], 'settings');
+      assert.equal(S.loading, false);
+      assert.equal(browser.requests.filter(path => path === '/api/run').length, 0);
+    }
+  }
+  form.values.concurrency = '3'; form.values.maxRequests = '17';
+  for (const provider of ['typesafe', 'gliner']) {
+    S.plan.provider = provider; S.snap.auth.configured = false; S.snap.gliner = { ready: false };
+    await assert.rejects(beginRun(), /Set up the evaluation provider/);
+    assert.equal(browser.requests.filter(path => path === '/api/run').length, 0);
+  }
+  S.plan.provider = 'typesafe'; S.snap.auth.configured = true;
+  browser.respond('/api/run', { id: 'new-run' }, 'POST');
+  await beginRun();
+  const submissions = browser.bodies.filter(entry => entry.path === '/api/run');
+  assert.equal(submissions.length, 1);
+  assert.deepEqual(submissions[0]!.body, { projectId: S.projectId, pipelineId: 'study', provider: 'typesafe', revision: 1, planToken: 'reviewed-plan', seed: 'chosen-seed', concurrency: 3, maxRequests: 17 });
+  assert.equal(S.tab, 'runs'); assert.equal(S.plan, null); assert.equal(S.liveRunId, 'new-run');
+});
+
+test('run review escapes imported pipeline names', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, review } = browser.client;
+  S.pipelineId = 'study'; S.plan = runReviewPlan();
+  S.doc.pipelines[0].name = '<img src=x onerror=alert(1)>';
+  assert.doesNotMatch(review(), /<img src=x/);
+  assert.match(review(), /&lt;img src=x onerror=alert\(1\)&gt;/);
 });
 
 test('evaluation readiness refresh updates run controls without replacing the form', async () => {
