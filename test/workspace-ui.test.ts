@@ -57,7 +57,7 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={commandApplyProposal,commandJobVisible,S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,studies,review,say,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,studyQuestionList,validateSetupAnswers,questionParts,upsertQuestion,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={runCaveats,commandApplyProposal,commandJobVisible,S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,studies,review,say,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,studyQuestionList,validateSetupAnswers,questionParts,upsertQuestion,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
   if (openExistingProject) (context as any).clientTest.S.projectId = 'existing-research';
@@ -2361,4 +2361,20 @@ test('run polling preserves draft panel prompt focus and text selection',async()
   applySnapshot({...S.snap,runs:[{id:'poll-focus',projectId:S.projectId,pipelineName:'Another run',status:'completed',message:'Done',createdAt:'2026-10-08T12:00:00Z'}]});
   assert.equal(focused,true);assert.deepEqual(selection,[8,19]);assert.equal(input.scrollTop,17);
   assert.equal(S.localPrompt,'Compare these names across cohorts');assert.match(browser.element('app').innerHTML,/Compare these names across cohorts/);
+});
+
+test('run caveats retain semantics and escaped details without repeated alerts', async () => {
+  const browser = browserHarness(); await settle();
+  const { runCaveats } = browser.client;
+  const warnings = Array.from({ length: 14 }, (_, i) => 'Cohort <unsafe> assumption ' + i);
+  const html = runCaveats({ provider: 'gliner', warnings });
+  assert.match(html, /Model estimates, not human responses/);
+  assert.match(html, /GLiNER scores are not calibrated response probabilities/);
+  assert.match(html, /Assumptions and limitations \(14\)/);
+  assert.equal((html.match(/<li>/g) || []).length, 14);
+  assert.doesNotMatch(html, /<details[^>]*\bopen\b|class="warning"|<unsafe>|<button|<input/);
+  assert.match(html, /&lt;unsafe&gt;/);
+  const empty = runCaveats({ provider: 'typesafe', warnings: [] });
+  assert.match(empty, /Model estimates, not human responses/);
+  assert.doesNotMatch(empty, /<details|GLiNER/);
 });
