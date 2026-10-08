@@ -33,11 +33,11 @@ function navigationAction(a,el){
 
 export const NAVIGATION_CSS = `
 /* Short task pages; natural overflow remains available for zoom and long content. */
-.study-workspace-header{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"location actions" "title actions";gap:4px 16px;margin-bottom:8px}
+.study-workspace-header{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"location title actions";align-items:center;gap:12px;margin-bottom:8px}
 .study-location{grid-area:location;display:flex;align-items:center;flex-wrap:wrap;gap:6px;min-width:0;color:var(--muted);font-size:12px}.study-location>span{overflow-wrap:anywhere}.study-location .button{flex:none}.study-location>span:last-child{color:var(--ink)}
-.study-workspace-header h1{grid-area:title;margin:0;font:600 20px/1.3 var(--display);letter-spacing:-.025em;overflow-wrap:anywhere}
+.study-location{max-width:240px}.study-workspace-header h1{grid-area:title;margin:0;font:600 18px/1.3 var(--display);letter-spacing:-.025em;overflow-wrap:anywhere}
 .study-header-actions{grid-area:actions;display:flex;align-items:center;justify-content:flex-end;gap:6px;align-self:center}.study-header-actions .button{white-space:nowrap}
-@media(max-width:600px){.study-workspace-header{grid-template-columns:minmax(0,1fr);grid-template-areas:"location" "title" "actions";gap:8px}.study-location{gap:4px 6px}.study-header-actions{justify-content:flex-end}.study-workspace-header h1{font-size:20px}}
+@media(max-width:700px){.study-workspace-header{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"location actions" "title title";gap:8px 12px}.study-location{max-width:none;gap:4px 6px}.study-header-actions{justify-content:flex-end}.study-workspace-header h1{font-size:18px}}
 
 .phase-edit-cue{display:block;margin-top:10px;font-size:11px;font-weight:700;color:var(--blue)}.phase-basics{padding-bottom:8px;border-bottom:1px solid var(--line)}.phase-cohort-hint{display:flex;justify-content:space-between;align-items:center;gap:10px;color:var(--muted);font-size:11px}.phase-cohort-hint .button{white-space:nowrap}.phase-form-tabs>.question-card{margin-top:8px}.phase-form-tabs .phase-basics .field,.phase-form-tabs .question-card .field{margin-bottom:6px}.phase-form-tabs .sticky-actions{display:flex;justify-content:space-between}
 [hidden]{display:none!important}
