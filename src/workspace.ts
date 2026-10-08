@@ -89,6 +89,10 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
       if (activeRun && !validated.projects?.some(project => project.id === activeRun!.projectId)) {
         throw new HttpError(409, 'PROJECT_RUN_IN_PROGRESS', 'Wait for the active study to finish before deleting its project.');
       }
+      const activeDraft = activeDraftId ? localAgents.get(activeDraftId) : undefined;
+      if (activeDraft?.status === 'running' && activeDraft.projectId && !validated.projects?.some(project => project.id === activeDraft.projectId)) {
+        throw new HttpError(409, 'PROJECT_DRAFT_IN_PROGRESS', 'Cancel the active draft before deleting its project.');
+      }
       const saved = await store.save(validated, revision);
       plans.clear();
       return saved;
@@ -263,7 +267,15 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
       const saved = await store.read();
       if (saved.revision !== input.revision) throw new WorkspaceConflictError(input.revision, saved.revision);
       if (input.engine === 'chatgpt' && (changingChatGpt || (await chatgpt.snapshot()).signingIn || changingChatGpt)) throw new HttpError(409, 'CHATGPT_BUSY', 'Finish or cancel ChatGPT sign-in before drafting.');
-      const job = localAgents.start({ ...input, document: saved.document }); activeDraftId = job.id;
+      const job = await withWorkspaceMutation(async () => {
+        const current = await store.read();
+        if (current.revision !== input.revision) throw new WorkspaceConflictError(input.revision, current.revision);
+        if (input.engine === 'chatgpt' && changingChatGpt) throw new HttpError(409, 'CHATGPT_BUSY', 'Finish or cancel ChatGPT sign-in before drafting.');
+        // Project validation, launch and ownership registration must precede any later save.
+        const started = localAgents.start({ ...input, document: current.document });
+        activeDraftId = started.id;
+        return started;
+      });
       send(response, 202, job); return;
     }
     const agentRoute = /^\/api\/agent\/jobs\/([0-9a-f-]{36})(?:\/(cancel|apply))?$/.exec(pathname);

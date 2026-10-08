@@ -309,6 +309,111 @@ test('direct saves and assistant proposals cannot remove the project of an activ
   assert.equal((await post('/api/workspace', { document: emptyWorkspaceDocument(), revision: 2 })).status, 200, 'Deletion is allowed after the active study finishes');
 });
 
+for (const settledStatus of ['cancelled', 'completed'] as const) {
+  test(`project deletion protects its active draft and becomes available after ${settledStatus}`, async t => {
+    const directory = await mkdtemp(join(tmpdir(), 'jev-workspace-draft-owner-'));
+    t.after(() => rm(directory, { recursive: true, force: true }));
+    const initial: WorkspaceDocument = { ...structuredClone(document), projects: [
+      { id: 'draft-project', name: 'Drafting project', description: '', cohortIds: ['adults'], pipelineIds: ['study'] },
+      { id: 'unrelated-project', name: 'Unrelated project', description: '', cohortIds: [], pipelineIds: [] },
+    ] };
+    const running: LocalAgentJob = { id: randomUUID(), engine: 'codex', projectId: 'draft-project', status: 'running', revision: 1, message: 'Drafting' };
+    const proposal: LocalAgentJob = { id: randomUUID(), engine: 'codex', projectId: 'draft-project', status: 'completed', revision: 1, message: 'Ready',
+      proposal: { explanation: 'Remove project', document: emptyWorkspaceDocument() } };
+    let starts = 0;
+    const server = await startWorkspaceServer({ directory, getAuthStatus: async () => ({ configured: false, source: 'none' }),
+      localAgents: {
+        availability: async () => ({ engines: [] }),
+        start: () => { starts++; return running; },
+        get: id => id === running.id ? running : id === proposal.id ? proposal : undefined,
+        cancel: id => { if (id !== running.id) return undefined; running.status = 'cancelled'; return running; },
+        close: async () => {},
+      },
+      providerFactory: () => { assert.fail('Project edits must not start inference'); },
+    });
+    t.after(() => server.close());
+    const csrf = (await (await fetch(server.url)).text()).match(/<meta name="jev-csrf" content="([a-f0-9]+)"/)![1]!;
+    const post = (path: string, value: unknown) => fetch(new URL(path, server.url), { method: 'POST',
+      headers: { origin: new URL(server.url).origin, 'content-type': 'application/json', 'x-jev-csrf': csrf }, body: JSON.stringify(value) });
+    assert.equal((await post('/api/workspace', { document: initial, revision: 0 })).status, 200);
+    assert.equal((await post('/api/agent/jobs', { projectId: running.projectId, engine: 'codex', prompt: 'Draft options', revision: 1 })).status, 202);
+    assert.equal(starts, 1);
+    for (const [path, body] of [
+      ['/api/workspace', { document: emptyWorkspaceDocument(), revision: 1 }],
+      [`/api/agent/jobs/${proposal.id}/apply`, { revision: 1 }],
+    ] as const) {
+      const denied = await post(path, body);
+      assert.equal(denied.status, 409);
+      assert.equal((await denied.json()).error.code, 'PROJECT_DRAFT_IN_PROGRESS');
+    }
+    const protectedSnapshot = await (await fetch(new URL('/api/workspace', server.url))).json();
+    assert.equal(protectedSnapshot.revision, 1);
+    assert.deepEqual(protectedSnapshot.document, initial);
+    const retainingOwner = structuredClone(initial);
+    retainingOwner.projects = retainingOwner.projects!.filter(project => project.id === running.projectId);
+    assert.equal((await post('/api/workspace', { document: retainingOwner, revision: 1 })).status, 200, 'Unrelated project deletion remains available');
+    retainingOwner.cohorts[0]!.description = 'An ordinary edit while drafting';
+    assert.equal((await post('/api/workspace', { document: retainingOwner, revision: 2 })).status, 200, 'Edits retaining draft owner remain available');
+    if (settledStatus === 'cancelled') assert.equal((await post(`/api/agent/jobs/${running.id}/cancel`, {})).status, 200);
+    else running.status = 'completed';
+    const deleted = await post('/api/workspace', { document: emptyWorkspaceDocument(), revision: 3 });
+    assert.equal(deleted.status, 200);
+    assert.equal((await deleted.json()).revision, 4);
+    assert.deepEqual((await (await fetch(new URL('/api/workspace', server.url))).json()).document, emptyWorkspaceDocument());
+  });
+}
+
+test('an in-flight project deletion commits before the final draft launch check', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'jev-workspace-save-draft-race-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  let releaseSave!: () => void; let notifySave!: () => void; let notifyDraftRead!: () => void;
+  let awaitingDraftRead = false;
+  const saveGate = new Promise<void>(resolve => { releaseSave = resolve; });
+  const saveStarted = new Promise<void>(resolve => { notifySave = resolve; });
+  const draftRead = new Promise<void>(resolve => { notifyDraftRead = resolve; });
+  const originalSave = WorkspaceStore.prototype.save;
+  const originalRead = WorkspaceStore.prototype.read;
+  t.mock.method(WorkspaceStore.prototype, 'save', async function(this: WorkspaceStore, draft: unknown, revision: number) {
+    if (revision === 1) { notifySave(); await saveGate; }
+    return originalSave.call(this, draft, revision);
+  });
+  t.mock.method(WorkspaceStore.prototype, 'read', async function(this: WorkspaceStore) {
+    const snapshot = await originalRead.call(this);
+    if (awaitingDraftRead) { awaitingDraftRead = false; notifyDraftRead(); }
+    return snapshot;
+  });
+  let starts = 0;
+  const server = await startWorkspaceServer({ directory, getAuthStatus: async () => ({ configured: false, source: 'none' }),
+    localAgents: {
+      availability: async () => ({ engines: [] }),
+      start: () => { starts++; throw Error('A draft for the deleted project must never launch'); },
+      get: () => undefined, cancel: () => undefined, close: async () => {},
+    },
+  });
+  t.after(async () => { releaseSave(); await server.close(); });
+  const csrf = (await (await fetch(server.url)).text()).match(/<meta name="jev-csrf" content="([a-f0-9]+)"/)![1]!;
+  const post = (path: string, value: unknown) => fetch(new URL(path, server.url), { method: 'POST',
+    headers: { origin: new URL(server.url).origin, 'content-type': 'application/json', 'x-jev-csrf': csrf }, body: JSON.stringify(value) });
+  const initial: WorkspaceDocument = { ...structuredClone(document), projects: [
+    { id: 'draft-project', name: 'Drafting project', description: '', cohortIds: ['adults'], pipelineIds: ['study'] },
+  ] };
+  assert.equal((await post('/api/workspace', { document: initial, revision: 0 })).status, 200);
+  const deletion = post('/api/workspace', { document: emptyWorkspaceDocument(), revision: 1 });
+  await saveStarted;
+  awaitingDraftRead = true;
+  const launch = post('/api/agent/jobs', { projectId: 'draft-project', engine: 'codex', prompt: 'Draft options', revision: 1 });
+  await draftRead;
+  releaseSave();
+  assert.equal((await deletion).status, 200);
+  const denied = await launch;
+  assert.equal(denied.status, 409);
+  assert.equal((await denied.json()).error.code, 'WORKSPACE_CONFLICT');
+  assert.equal(starts, 0);
+  const snapshot = await (await fetch(new URL('/api/workspace', server.url))).json();
+  assert.equal(snapshot.revision, 2);
+  assert.deepEqual(snapshot.document, emptyWorkspaceDocument());
+});
+
 test('an in-flight project deletion commits before the final run launch check', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'jev-workspace-save-launch-race-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
