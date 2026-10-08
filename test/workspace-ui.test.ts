@@ -210,6 +210,7 @@ test('phase editor keeps question and cohort together with advanced controls in 
   const browser = browserHarness(); await settle();
   const { S, advancedStageForm } = browser.client;
   S.pipelineId = 'study'; S.stageId = 'panel';
+  S.sections['step-settings-study-panel'] = 'advanced';
   const pipeline = S.doc.pipelines[0], html = advancedStageForm(pipeline, pipeline.stages[0]);
   assert.equal((html.match(/data-form="stage"/g) ?? []).length, 1);
   for (const name of ['label', 'size', 'questionId', 'questionInstructions', 'criteria', 'repeats', 'stageContext']) {
@@ -220,6 +221,64 @@ test('phase editor keeps question and cohort together with advanced controls in 
   assert.equal((html.match(/name="label"/g)??[]).length,1);
   assert.match(html, /data-section-id="inputs" hidden/);
   assert.match(html, /data-section-id="instructions" hidden/);
+});
+
+test('simple step settings preserve advanced execution contracts when switching modes', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, advancedStageForm, applyStage } = browser.client;
+  S.tab = 'studies'; S.pipelineId = 'study'; S.stageId = 'panel'; S.sections.pipeline = 'advanced';
+  const p = S.doc.pipelines[0], step = p.stages[0];
+  Object.assign(step, { repeats: 4, context: { product: 'Game' }, join: 'any', dependsOn: ['earlier'], inputs: { result: { stage: 'earlier', question: 'answer', select: 'summary' } }, when: { stage: 'earlier', question: 'answer', metric: 'winner', op: 'eq', value: 'a' } });
+  const original = JSON.parse(JSON.stringify(step));
+  let html = advancedStageForm(p, step);
+  assert.match(html, /data-settings-mode="simple"/);
+  assert.match(html, /Active advanced settings: 4 evaluations per persona/);
+  assert.match(html, /name="size"/);
+  assert.doesNotMatch(html, /name="(?:repeats|stageContext|join|questionInstructions|hasWhen)"/);
+  const form = { dataset: { form: 'stage', settingsMode: 'simple' }, values: { label: 'Edited step', size: '7' }, reportValidity: () => true, querySelectorAll: () => [], requestSubmit: () => applyStage(form) };
+  S.dirty = true;
+  let currentForm: any = form;
+  browser.element('app').querySelectorAll = (selector: string) => selector === '[data-form]' ? [currentForm] : [];
+  const clickMode = (mode: string) => browser.listeners.get('click')!({ preventDefault() {}, target: { closest: () => ({ dataset: { act: 'section-view', sectionKey: 'step-settings-study-panel', sectionId: mode } }) } });
+  clickMode('advanced');
+  assert.equal(S.sections['step-settings-study-panel'], 'advanced');
+  assert.deepEqual(JSON.parse(JSON.stringify(step)), { ...original, label: 'Edited step', size: 7 });
+  html = browser.element('app').innerHTML;
+  assert.match(html, /name="repeats"[^>]*value="4"|value="4"[^>]*name="repeats"/);
+  assert.match(html, /name="stageContext"/);
+  assert.match(html, /name="hasWhen"/);
+  const advancedValues: Record<string, string> = { label: 'Edited step', size: '7', repeats: '5', stageContext: JSON.stringify(original.context), join: original.join, hasWhen: 'on', bindingName0: 'result', bindingStage0: 'earlier', bindingQuestion0: 'answer', bindingSelect0: 'summary', questionId: 'answer', questionLabel: step.questions.answer.label, questionType: 'choice', questionInstructions: 'Updated guidance', criteria: JSON.stringify(step.questions.answer.criteria) };
+  const questionCard = { querySelector: (selector: string) => ({ value: advancedValues[selector.match(/name="(.+)"/)![1]!] }) };
+  const advancedForm = { dataset: { form: 'stage' }, values: advancedValues, reportValidity: () => true, querySelector: () => null, querySelectorAll: (selector: string) => selector === '.question-card' ? [questionCard] : selector === '[data-phase-input]' ? [{}] : selector === '[name=dependsOn]:checked' ? [{ value: 'earlier' }] : [], requestSubmit: () => applyStage(advancedForm) };
+  currentForm = advancedForm;
+  clickMode('simple');
+  assert.match(browser.element('app').innerHTML, /data-settings-mode="simple"/);
+  const expected = { ...original, label: 'Edited step', size: 7, repeats: 5, questions: { answer: { ...original.questions.answer, instructions: 'Updated guidance' } } };
+  assert.deepEqual(JSON.parse(JSON.stringify(step)), expected, 'Advanced fields flush before returning to Simple');
+  currentForm = form; clickMode('advanced');
+  assert.deepEqual(JSON.parse(JSON.stringify(step)), expected, 'Simple cannot reset the edited Advanced fields');
+  const another = { ...p, id: 'another-study' };
+  S.sections['step-settings-study-panel'] = 'advanced';
+  assert.match(advancedStageForm(another, step), /data-settings-mode="simple"/, 'mode preference belongs to its study and step');
+});
+
+test('simple aggregate and decision settings preserve inputs, outputs, weights and branching', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, advancedStageForm, applyStage } = browser.client;
+  S.pipelineId = 'study';
+  const p = S.doc.pipelines[0];
+  for (const step of [
+    { id: 'combine', label: 'Combine', kind: 'aggregate', inputs: [{ stage: 'panel', question: 'answer', weight: 0.75 }], outputQuestion: 'combined', join: 'any', dependsOn: ['panel'], when: { stage: 'panel', question: 'answer', metric: 'winner', op: 'eq', value: 'a' } },
+    { id: 'decide', label: 'Decide', kind: 'decision', from: { stage: 'combine', question: 'combined' }, outputQuestion: 'decision', dependsOn: ['combine'] },
+  ]) {
+    p.stages.push(step); S.stageId = step.id;
+    const before = JSON.parse(JSON.stringify(step));
+    assert.match(advancedStageForm(p, step), /data-settings-mode="simple"/);
+    applyStage({ dataset: { settingsMode: 'simple' }, values: { label: 'Renamed '+step.id }, querySelectorAll: () => [] });
+    assert.deepEqual(JSON.parse(JSON.stringify(step)), { ...before, label: 'Renamed '+step.id });
+    S.sections['step-settings-study-'+step.id] = 'advanced';
+    assert.match(advancedStageForm(p, step), /name="outputQuestion"/);
+  }
 });
 
 test('target fields survive cohort section switches and persona filters reset pagination', async () => {
@@ -1666,7 +1725,7 @@ test('simple study setup preserves hidden contracts, stable option keys, and oth
   assert.deepEqual(JSON.parse(JSON.stringify(s.questions.answer.criteria)), { a: {label:'Project Dawn',description:''}, b: {label:'Afterlight',description:''} });
   setupAction('setup-cohort', { dataset: { id: 'cohort' } });
   assert.equal(p.cohorts[s.cohort], 'cohort');
-  S.sections.pipeline = 'advanced'; html = stageForm(p, s);
+  S.sections.pipeline = 'advanced'; S.sections['step-settings-'+p.id+'-'+s.id]='advanced'; html = stageForm(p, s);
   assert.match(html, /name="questionInstructions"/);
   assert.doesNotMatch(html, /data-form="study-setup"/, 'only one editor can submit changes for a phase');
 });
@@ -1689,7 +1748,7 @@ test('earlier context stays beside follow-up questions without an empty setup ta
   assert.equal((next as any).inputs, undefined, 'legacy summary bindings remain implicit');
   (next as any).inputs = {};
   assert.equal(setupContextSummary(p, next), '', 'ordering alone does not imply receiving results');
-  S.sections.pipeline = 'advanced'; S.sections['phase-review'] = 'inputs';
+  S.sections.pipeline = 'advanced'; S.sections['step-settings-study-review']='advanced'; S.sections['phase-review'] = 'inputs';
   assert.match(stageForm(p, next), /Connect output/);
 });
 
@@ -1991,6 +2050,8 @@ test('study navigation has clear scope, a reachable single-study library and con
   assert.doesNotMatch(html,/role="tablist"|>Advanced<|Apply phase/);assert.match(html,/data-act="back-studies" aria-label="Back to studies"/);const location=html.match(/<nav class="study-location"[\s\S]*?<\/nav>/)![0];assert.equal((location.match(/<button/g)||[]).length,4);assert.equal((location.match(/class="button /g)||[]).length,1);assert.match(location,/class="breadcrumb-link" data-act="projects"/);assert.doesNotMatch(html,/← Studies|← Projects/);assert.match(html,/>Questions</);assert.match(html,/aria-label="Step settings" title="Step settings"/);
   act(null,{dataset:{act:'section-view',sectionKey:'pipeline',sectionId:'advanced'}});html=browser.element('app').innerHTML;
   assert.match(html,/Back to question/);assert.match(html,/Step settings · 1\./);assert.doesNotMatch(html,/aria-label="Study sections"|Apply phase/);
+  assert.match(html,/data-settings-mode="simple"/);
+  act(null,{dataset:{act:'section-view',sectionKey:'step-settings-study-panel',sectionId:'advanced'}});html=browser.element('app').innerHTML;
   for(const field of ['questionInstructions','criteria','stageContext','repeats'])assert.match(html,new RegExp('name="'+field+'"'));
   act(null,{dataset:{act:'section-view',sectionKey:'pipeline',sectionId:'phase'}});
   assert.match(browser.element('app').innerHTML,/Keep typed detail/);
