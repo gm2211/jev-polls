@@ -325,7 +325,7 @@ test('background sync pauses while hidden and agent configuration remains escape
   await settle();
   assert.equal(browser.requests.length, requests + 1);
   browser.client.S.agentConfig = { codexCommand: 'codex mcp add jev -- node </textarea><script>bad()</script>', claudeCommand: 'claude setup', mcpConfig: { mcpServers: {} }, guidePrompt: 'Prepare <personas> with sources.' };
-  assert.match(browser.client.agents(), /Your agent prepares\. Jev evaluates\./);
+  assert.match(browser.client.agents(), /Drafting does not search the web or run a study\./);
   browser.client.S.aiSection = 'external';
   const html = browser.client.aiSettingsContent();
   assert.match(html, /&lt;\/textarea&gt;&lt;script&gt;/);
@@ -1914,7 +1914,7 @@ test('every project tab selects its matching panel directly and keeps pending st
   assert.equal(q.label,'Which title should we choose?','leaving editor flushes pending fields before render');
   root.querySelectorAll=()=>[];
   const before=JSON.stringify(S.doc);
-  for(const [tab,label,content] of [['studies','Studies','Your research questions'],['cohorts','Cohorts','Your virtual cohorts'],['runs','Runs','Study runs'],['agents','Assistant','Local assistant']]){
+  for(const [tab,label,content] of [['studies','Studies','Your research questions'],['cohorts','Cohorts','Your virtual cohorts'],['runs','Runs','Study runs'],['agents','Assistant','Draft a cohort or study']]){
     click({act:'tab',tab});
     const buttons=[...html().matchAll(/<button[^>]*role="tab"[^>]*>/g)].map(match=>match[0]);
     assert.equal(buttons.length,4);
