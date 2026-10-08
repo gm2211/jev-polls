@@ -207,6 +207,32 @@ test('failed voters remain visible and descendants skip; malformed provider answ
   assert.equal(malformed.stages.bad?.votes.length, 0);
 });
 
+test('stage progress follows dependency execution and reports resolved failure and skip states', async () => {
+  const successfulEvents: NonNullable<RunOptions['onStageProgress']> extends (event: infer E) => void ? E[] : never = [];
+  const successful = await runPipeline(pipeline([
+    poll('entry'),
+    poll('inactive', ['entry'], { when: { stage: 'entry', question: 'pick', metric: 'winner', op: 'eq', value: 'b' } }),
+    poll('after-inactive', ['inactive']),
+  ]), { audience: cohort }, options(fixedProvider('a'), { onStageProgress: event => successfulEvents.push(event) }));
+  assert.deepEqual(successfulEvents.map(({ stage, status }) => [stage, status]), [
+    ['entry', 'running'], ['entry', 'completed'],
+    ['inactive', 'running'], ['inactive', 'skipped'],
+    ['after-inactive', 'running'], ['after-inactive', 'skipped'],
+  ]);
+  assert.equal(successfulEvents[3]?.reason, successful.stages.inactive?.reason);
+
+  let calls = 0;
+  const failedEvents: NonNullable<RunOptions['onStageProgress']> extends (event: infer E) => void ? E[] : never = [];
+  const partialProvider = fixedProvider('a', { onCall: () => { calls += 1; if (calls === 2) throw new Error('private detail'); } });
+  const failed = await runPipeline(pipeline([poll('failed-parent', [], { size: 4 }), poll('skipped-child', ['failed-parent'])]), { audience: cohort }, options(partialProvider, { concurrency: 1, onStageProgress: event => failedEvents.push(event) }));
+  assert.deepEqual(failedEvents.map(({ stage, status }) => [stage, status]), [
+    ['failed-parent', 'running'], ['failed-parent', 'failed'],
+    ['skipped-child', 'running'], ['skipped-child', 'skipped'],
+  ]);
+  assert.equal(failedEvents[1]?.reason, failed.stages['failed-parent']?.reason);
+  assert.equal(failedEvents[3]?.reason, failed.stages['skipped-child']?.reason);
+});
+
 test('live response failures report only fixed provider validation guidance', async () => {
   const secret = 'fake-upstream-body-must-not-appear';
   const provider: Provider = {
