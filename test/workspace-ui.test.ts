@@ -2786,6 +2786,8 @@ test('run review explains real questions, data flow, conditions and cohort termi
   S.plan.stages = [{ id: 'combined', label: 'Combine', kind: 'aggregate', dependsOn: ['panel'], requests: 0 }];
   assert.match(review(), /First question → Which option fits\?/);
   assert.match(review(), /weight 2/);
-  assert.match(review(), /Combined weighted result: combined_answer/);
+  assert.match(review(), /Combined weighted result: combined_answer \(requires all inputs\)/);
+  pipeline.stages[1].join = 'any';
+  assert.match(review(), /available inputs only/);
   assert.equal(browser.requests.filter(path => path === '/api/run').length, 0);
 });
