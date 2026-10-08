@@ -1876,7 +1876,7 @@ test('study navigation has clear scope, a reachable single-study library and con
   S.tab='studies';S.pipelineId='study';S.stageId='panel';S.dirty=true;
   S.doc.pipelines[0].stages[0].questions.answer.criteria.a={label:'Draft name',description:'Keep typed detail'};
   const before=JSON.stringify(S.doc);render();let html=browser.element('app').innerHTML;
-  assert.doesNotMatch(html,/role="tablist"|>Advanced<|Apply phase/);assert.match(html,/← Studies/);assert.match(html,/>Questions</);assert.match(html,/aria-label="Step settings" title="Step settings"/);
+  assert.doesNotMatch(html,/role="tablist"|>Advanced<|Apply phase/);assert.match(html,/data-act="back-studies">Studies/);assert.doesNotMatch(html,/← Studies|← Projects/);assert.match(html,/>Questions</);assert.match(html,/aria-label="Step settings" title="Step settings"/);
   act(null,{dataset:{act:'section-view',sectionKey:'pipeline',sectionId:'advanced'}});html=browser.element('app').innerHTML;
   assert.match(html,/Back to question/);assert.match(html,/Step settings · 1\./);assert.doesNotMatch(html,/aria-label="Study sections"|Apply phase/);
   for(const field of ['questionInstructions','criteria','stageContext','repeats'])assert.match(html,new RegExp('name="'+field+'"'));
@@ -1934,7 +1934,7 @@ test('option input tabs isolate sources and preserve drafts and reachable blank 
   let html=stageForm(p,s);assert.match(html,/data-source="file" aria-pressed="true"/);
   assert.doesNotMatch(html,/data-act="option-agent-open"|data-act="setup-add-option"/);
   setupAction('setup-input',{dataset:{source:'agent'}});html=stageForm(p,s);
-  assert.match(html,/Create with agent/);assert.doesNotMatch(html,/data-answer-drop|data-act="setup-add-option"/);
+  assert.match(html,/id="optionAgentPrompt"/);assert.doesNotMatch(html,/<dialog[^>]*optionAgent/);assert.doesNotMatch(html,/data-answer-drop|data-act="setup-add-option"/);
   setupAction('setup-input',{dataset:{source:'manual'}});html=stageForm(p,s);
   assert.match(html,/Edit option Unnamed option 1/);assert.match(html,/Edit option Unnamed option 2/);
   assert.equal(JSON.stringify(q),before);assert.equal(S.dirty,false,'view changes alone do not edit study');
