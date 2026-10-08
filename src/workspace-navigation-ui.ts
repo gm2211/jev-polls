@@ -33,7 +33,11 @@ function navigationAction(a,el){
 
 export const NAVIGATION_CSS = `
 /* Short task pages; natural overflow remains available for zoom and long content. */
-.study-list-row{width:100%;min-width:0;text-align:left;font:inherit;color:var(--ink);cursor:pointer}.study-list-row>span{display:grid;gap:3px;min-width:0;overflow-wrap:anywhere}.study-list-row strong{font-size:13px}.study-list-row small{font-size:12px;color:var(--muted)}.study-list-row:hover{background:var(--hover);border-color:var(--control-line)}.study-list-row>.ui-icon{color:var(--muted)}
+.study-list{display:grid;gap:0;border-top:1px solid var(--line)}
+.study-list .study-list-row{display:flex;align-items:center;justify-content:space-between;gap:24px;width:100%;min-width:0;padding:22px 18px;border:0;border-bottom:1px solid var(--line);border-radius:0;background:var(--surface);text-align:left;font:inherit;color:var(--ink);cursor:pointer}
+.study-list-row>span{display:grid;gap:4px;min-width:0;overflow-wrap:anywhere}.study-list .study-list-row strong{font:600 23px/1.2 var(--display)}.study-list-row small{font-size:12px;color:var(--muted)}.study-list .study-list-row:hover{background:var(--hover)}.study-list-row>.ui-icon{flex:none;color:var(--muted)}
+@media(max-width:600px){.study-list .study-list-row{padding:18px 12px}.study-list .study-list-row strong{font-size:20px}}
+
 .study-workspace-header{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"location title actions";align-items:center;gap:12px;margin-bottom:8px}
 .study-location{grid-area:location;display:flex;align-items:center;flex-wrap:wrap;gap:6px;min-width:0;color:var(--muted);font-size:12px}.study-location>span{overflow-wrap:anywhere}.study-location .button{flex:none}.study-location>span:last-child{color:var(--ink)}
 .study-location{max-width:320px}.study-workspace-header h1{grid-area:title;margin:0;font:600 18px/1.3 var(--display);letter-spacing:-.025em;overflow-wrap:anywhere}
