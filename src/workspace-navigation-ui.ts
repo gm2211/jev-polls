@@ -32,6 +32,7 @@ function navigationAction(a,el){
 `;
 
 export const NAVIGATION_CSS = `
+.run-review .warning{margin-bottom:8px}
 /* Short task pages; natural overflow remains available for zoom and long content. */
 .study-list{display:grid;gap:0;border-top:1px solid var(--line);background:var(--surface)}
 .study-list .study-list-row{display:flex;align-items:center;justify-content:space-between;gap:24px;width:100%;min-width:0;padding:18px 20px;border:0;border-bottom:1px solid var(--line);border-radius:0;background:transparent;text-align:left;font:inherit;color:var(--ink);cursor:pointer;transition:background 160ms ease-out}
