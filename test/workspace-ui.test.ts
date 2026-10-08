@@ -35,7 +35,7 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
     getAll(name: string) { const value = this.form.values?.[name]; return value === undefined ? [] : Array.isArray(value) ? value : [value]; }
   }
   function element(id: string) {
-    if (!elements.has(id)) elements.set(id, { innerHTML: '', textContent: '', value: '', hidden: false, inert: false, classList: { add() {}, remove() {}, toggle() {} }, querySelector: () => null, querySelectorAll: () => [], focus() {}, select() {}, open: false, showModal() { this.open = true; }, close() { this.open = false; } });
+    if (!elements.has(id)) elements.set(id, { innerHTML: '', textContent: '', value: '', hidden: false, inert: false, classList: { add() {}, remove() {}, toggle() {} }, querySelector: () => null, querySelectorAll: () => [], focus() {}, select() {}, addEventListener() {}, open: false, showModal() { this.open = true; }, close() { this.open = false; } });
     return elements.get(id);
   }
   const context = {
@@ -1836,8 +1836,14 @@ test('option comparisons preserve descriptions, stable keys and paginated answer
   S.pipelineId='study';S.stageId='panel';const p=S.doc.pipelines[0],s=p.stages[0],q=s.questions.answer;
   q.criteria={a:{label:'Afterlight',description:'A hopeful title about exploration.'},b:{label:'Project Dawn',description:'A bold title about a new beginning.'},c:'None of these',d:'Other',e:{label:'Hidden option',description:'Preserve this off-page description.'}};
   const html=stageForm(p,s);
-  assert.match(html,/Compare options/);assert.match(html,/Ordered scale/);assert.doesNotMatch(html,/>Rating</);
-  assert.match(html,/Option 1 name/);assert.match(html,/Option 1 description/);assert.match(html,/A hopeful title/);assert.doesNotMatch(html,/Hidden option/);
+  assert.match(html,/Import file/);assert.match(html,/Probability distribution/);assert.doesNotMatch(html,/name="setupOption"|name="setupDescription"|>Rating</);
+  assert.match(html,/A hopeful title/);assert.doesNotMatch(html,/Hidden option/);
+  const beforeEditing=JSON.stringify(q);setupAction('setup-edit-option',{dataset:{key:'a'}});
+  const editor=stageForm(p,s);assert.match(editor,/Option 1 name/);assert.match(editor,/Option 1 description/);assert.doesNotMatch(editor,/Option 2 name/);
+  assert.equal(JSON.stringify(q),beforeEditing,'opening an option does not mutate criteria');
+  setupAction('setup-option-back',{dataset:{}});setupAction('setup-format',{dataset:{}});
+  assert.match(stageForm(p,s),/Compare options/);assert.match(stageForm(p,s),/Ordered scale/);
+  setupAction('setup-format-back',{dataset:{}});
   assert.match(html,/0–1, totaling 1/);
   const row={dataset:{setupOption:'a'},querySelector:(selector:string)=>({value:selector==='[name=setupOption]'?'Afterglow':'Warm and reflective.'})};
   applyStudySetup({dataset:{questionId:'answer'},values:{setupPrompt:q.label},querySelectorAll:()=>[row]});
@@ -1895,4 +1901,26 @@ test('step settings preserve cohort assignment and structured option contracts w
   const before=JSON.stringify(p.cohorts);applyStage({values,querySelector:()=>null,querySelectorAll:(selector:string)=>selector==='.question-card'?[card]:[]});
   assert.equal(s.cohort,'audience');assert.equal(JSON.stringify(p.cohorts),before);assert.equal(JSON.stringify(s.questions.answer.criteria),JSON.stringify(criteria));
   assert.equal(s.questions.answer.instructions,'Updated instructions');assert.equal(s.repeats,3);assert.equal(s.context.note,'Existing fact');
+});
+
+
+test('empty option setup starts with CSV import and manual add opens only one option',async()=>{
+  const browser=browserHarness();await settle();const {S,stageForm,setupAction}=browser.client;
+  S.pipelineId='study';S.stageId='panel';const p=S.doc.pipelines[0],s=p.stages[0];s.questions.answer.criteria={a:'',b:''};
+  const before=JSON.stringify(s);let html=stageForm(p,s);
+  assert.match(html,/CSV: one option per row/);assert.match(html,/class="button primary" data-act="answer-list-import"/);
+  assert.doesNotMatch(html,/name="setupOption"|name="setupDescription"/);assert.equal(JSON.stringify(s),before);
+  setupAction('setup-add-option',{dataset:{}});html=stageForm(p,s);
+  assert.equal((html.match(/name="setupOption"/g)||[]).length,1);assert.equal((html.match(/name="setupDescription"/g)||[]).length,1);
+  assert.match(html,/Back to options/);assert.equal(S.dirty,true);
+});
+
+test('provider change redraws distribution semantics without requiring a reviewed plan', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, render } = browser.client;
+  S.tab='studies';S.pipelineId='study';S.stageId='panel';S.plan=null;render();
+  assert.match(browser.element('app').innerHTML,/Probability distribution/);
+  await browser.listeners.get('change')!({target:{name:'evaluationProvider',value:'gliner'}});
+  assert.match(browser.element('app').innerHTML,/Normalized option scores/);
+  assert.doesNotMatch(browser.element('app').innerHTML,/Jev returns a probability/);
 });

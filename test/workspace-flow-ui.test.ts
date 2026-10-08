@@ -11,7 +11,7 @@ async function flowHarness() {
     if (!elements.has(id)) elements.set(id, {
       innerHTML: '', textContent: '', value: '', hidden: false, inert: false,
       classList: { add() {}, remove() {}, toggle() {} },
-      querySelector: () => null, querySelectorAll: () => [], focus() {},
+      querySelector: () => null, querySelectorAll: () => [], focus() {}, addEventListener() {},
     });
     return elements.get(id);
   };
