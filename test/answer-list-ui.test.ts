@@ -54,6 +54,7 @@ test('CSV recognizes name and description headers, previews full records, and pr
   assert.match(element('answerListPreview').innerHTML, /Fresh, precise description/);
   assert.match(element('answerListPreview').innerHTML, /Line one\nLine two/);
   applyAnswerList(false);
+  assert.equal(S.sections['setup-wizard-study-stage-answer'],'options');
   assert.deepEqual(plain(question.criteria), {
     stable_a: { label: 'Alpha', description: 'Fresh, precise description', note: 'Keep custom property.' },
     stable_b: { label: 'Beta', description: 'Line one\nLine two' },

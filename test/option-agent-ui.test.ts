@@ -51,6 +51,7 @@ test('agent draft sends only user material and target, previews escaped names, a
   assert.doesNotMatch(h.el('Preview').innerHTML, /<script>|<img/);
   assert.equal(h.el('Filename').textContent, '<img>.md');
   h.optionAgentApply();
+  assert.equal(h.S.sections['setup-wizard-study-panel-preference'],'options');
   assert.deepEqual(plain(h.q.criteria), { stable_a: { label: 'Alpha', description: 'Replacement', custom: 'preserved' }, option_generated_1: { label: '<script>Gamma</script>', description: '<img src=x>' } });
   assert.equal(h.q.instructions, before.instructions);assert.equal(h.q.extra, before.extra);assert.equal(h.stage.cohort, 'audience');
   assert.equal(h.S.dirty, true);assert.equal(h.S.plan, null);assert.equal(h.el('Dialog').open, false);

@@ -1947,3 +1947,50 @@ test('option input tabs isolate sources and preserve drafts and reachable blank 
   const other={...s,id:'other',questions:{answer:{...q,criteria:{a:'',b:''}}}};
   assert.match(stageForm(p,other),/data-source="file" aria-pressed="true"/,'source selection belongs to one step');
 });
+
+
+test('progressive setup has one active task, preserves edits and isolates each study question',async()=>{
+  const browser=browserHarness();await settle();const {S,stageForm,setupAction,applyStudySetup}=browser.client;
+  S.pipelineId='study';S.stageId='panel';const p=S.doc.pipelines[0],s=p.stages[0],q=s.questions.answer;
+  const active=(html:string)=>[...html.matchAll(/data-setup-pane="([^"]+)" >/g)].map(match=>match[1]);
+  q.label='';S.dirty=false;assert.deepEqual(active(stageForm(p,s)),['question']);
+  setupAction('setup-wizard',{dataset:{step:'cohort',forward:'true'}});assert.match(stageForm(p,s),/Write the question before continuing/);assert.deepEqual(active(stageForm(p,s)),['question']);
+  const instructions=q.instructions,inputs=JSON.stringify(s.inputs);
+  applyStudySetup({dataset:{questionId:'answer'},values:{setupPrompt:'Which title fits?'},querySelectorAll:()=>[]});
+  setupAction('setup-wizard',{dataset:{step:'cohort',forward:'true'}});
+  assert.deepEqual(active(stageForm(p,s)),['cohort']);
+  setupAction('setup-wizard',{dataset:{step:'question'}});assert.equal(q.label,'Which title fits?');
+  setupAction('setup-wizard',{dataset:{step:'options'}});setupAction('setup-edit-option',{dataset:{key:'a'}});
+  const row={dataset:{setupOption:'a'},querySelector:(selector:string)=>({value:selector==='[name=setupOption]'?'Afterlight':'A hopeful title.'})};
+  applyStudySetup({dataset:{questionId:'answer'},values:{setupPrompt:q.label},querySelectorAll:()=>[row]});
+  setupAction('setup-option-back',{dataset:{}});setupAction('setup-wizard',{dataset:{step:'review',forward:'true'}});
+  assert.deepEqual(active(stageForm(p,s)),['review']);assert.equal(q.criteria.a.description,'A hopeful title.');
+  assert.equal(q.instructions,instructions);assert.equal(JSON.stringify(s.inputs),inputs);
+  const other={...s,id:'other'};assert.deepEqual(active(stageForm(p,other)),['question']);
+  assert.deepEqual(active(stageForm({...p,id:'different-study'},s)),['question']);
+  const focused=stageForm(p,s,true);assert.doesNotMatch(focused,/setup-progress|data-setup-pane/);assert.match(focused,/setupPrompt/);assert.match(focused,/setup-columns/);
+});
+
+test('review validation returns incomplete question to correct setup task',async()=>{
+  const browser=browserHarness();await settle();const {S,stageForm,setupAction,validateSetupAnswers}=browser.client;
+  S.pipelineId='study';S.stageId='panel';const p=S.doc.pipelines[0],s=p.stages[0],q=s.questions.answer;
+  q.criteria={a:'',b:''};setupAction('setup-wizard',{dataset:{step:'options'}});
+  setupAction('setup-wizard',{dataset:{step:'review',forward:'true'}});assert.match(stageForm(p,s),/Import a list or name every option before continuing/);assert.match(stageForm(p,s),/data-setup-pane="options" >/);
+  setupAction('setup-wizard',{dataset:{step:'review'}});
+  assert.throws(()=>validateSetupAnswers(p),/text for every answer/);
+  const html=stageForm(p,s);assert.match(html,/data-setup-pane="options" >/);assert.match(html,/data-source="manual" aria-pressed="true"/);
+  q.label='';assert.throws(()=>validateSetupAnswers(p),/Add the question/);assert.match(stageForm(p,s),/data-setup-pane="question" >/);
+});
+
+
+test('new and legacy placeholder follow-ups do not count as completed questions',async()=>{
+  const browser=browserHarness();await settle();const {S,addNextPhase,stageForm,setupAction}=browser.client;
+  S.pipelineId='study';S.stageId='panel';const p=S.doc.pipelines[0];addNextPhase();const s=p.stages.at(-1);
+  assert.equal(s.questions.answer.label,'');
+  for(const label of ['', 'What should this phase decide?']){
+    s.questions.answer.label=label;
+    assert.match(stageForm(p,s),/aria-label="Question" aria-current="step" data-complete="false"/);
+    setupAction('setup-wizard',{dataset:{step:'cohort',forward:'true'}});
+    assert.match(stageForm(p,s),/Write the question before continuing/);
+  }
+});
