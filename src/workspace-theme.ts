@@ -62,6 +62,9 @@ export const THEME_CSS = `
 :root[data-theme=dark]{color-scheme:dark;${paletteCSS(WORKSPACE_PALETTES.dark)}}
 /* IDE-style hierarchy: dark chassis, task surfaces, lighter editable controls. */
 body{font-family:var(--body);background:var(--paper)}
+/* Controls are interaction chrome; editable and result text remain copyable. */
+button,.button,select,label,summary,nav,[role=button],[role=tab],[role=switch],.topbar,h1,h2,h3,.field-label,.ui-icon,input[type=button],input[type=submit],input[type=reset]{-webkit-user-select:none;user-select:none}
+input,textarea,[contenteditable=true]{-webkit-user-select:text;user-select:text}
 .topbar{height:56px;padding:0 24px;background:var(--surface);border-bottom:1px solid var(--line)}
 .wordmark{font-family:var(--display);font-size:20px;letter-spacing:-.04em;gap:12px}.wordmark i{font-family:var(--body);font-size:12px;letter-spacing:.02em}
 .glyph{width:28px;height:28px;border-radius:var(--radius-control);background:var(--ink);color:var(--paper);font:600 21px var(--display)}
