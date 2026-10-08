@@ -36,7 +36,7 @@ export const NAVIGATION_CSS = `
 .study-list-row{width:100%;min-width:0;text-align:left;font:inherit;color:var(--ink);cursor:pointer}.study-list-row>span{display:grid;gap:3px;min-width:0;overflow-wrap:anywhere}.study-list-row strong{font-size:13px}.study-list-row small{font-size:12px;color:var(--muted)}.study-list-row:hover{background:var(--hover);border-color:var(--control-line)}.study-list-row>.ui-icon{color:var(--muted)}
 .study-workspace-header{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"location title actions";align-items:center;gap:12px;margin-bottom:8px}
 .study-location{grid-area:location;display:flex;align-items:center;flex-wrap:wrap;gap:6px;min-width:0;color:var(--muted);font-size:12px}.study-location>span{overflow-wrap:anywhere}.study-location .button{flex:none}.study-location>span:last-child{color:var(--ink)}
-.study-location{max-width:240px}.study-workspace-header h1{grid-area:title;margin:0;font:600 18px/1.3 var(--display);letter-spacing:-.025em;overflow-wrap:anywhere}
+.study-location{max-width:320px}.study-workspace-header h1{grid-area:title;margin:0;font:600 18px/1.3 var(--display);letter-spacing:-.025em;overflow-wrap:anywhere}
 .study-header-actions{grid-area:actions;display:flex;align-items:center;justify-content:flex-end;gap:6px;align-self:center}.study-header-actions .button{white-space:nowrap}
 @media(max-width:700px){.study-workspace-header{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"location actions" "title title";gap:8px 12px}.study-location{max-width:none;gap:4px 6px}.study-header-actions{justify-content:flex-end}.study-workspace-header h1{font-size:18px}}
 
@@ -44,6 +44,7 @@ export const NAVIGATION_CSS = `
 [hidden]{display:none!important}
 .shell{padding:14px 24px 16px;max-width:1440px}
 .project-navigation{margin-bottom:12px;padding-bottom:10px;gap:12px}
+.project-path{display:flex;align-items:center;flex-wrap:wrap;gap:6px;font-size:12px;color:var(--muted)}.project-path>span{overflow-wrap:anywhere}.project-path>[aria-current=page]{color:var(--ink)}
 .project-navigation strong{font-size:13px}.project-navigation p{display:none}
 .masthead{margin-bottom:14px;align-items:center}.masthead h1{font-size:27px;line-height:1.2;margin:3px 0 5px}.masthead p{font-size:12px;margin:0}.masthead .eyebrow{display:none}
 .breadcrumbs{margin-bottom:4px;font-size:11px}.detail-header{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 20px;margin-bottom:10px;padding:8px 0;background:var(--paper);position:sticky;top:0;z-index:4}

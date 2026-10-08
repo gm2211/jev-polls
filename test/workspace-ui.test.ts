@@ -849,6 +849,8 @@ test('projects start from a question and assign cohorts only after an explicit c
   const before = JSON.stringify(S.doc);
   selectProject('existing-research');
   assert.equal(S.tab, 'studies');
+  assert.equal(S.pipelineId,null);assert.match(html(),/Your studies/);
+  act(null,{dataset:{act:'open-pipeline',id:'study'}});
   assert.match(html(), /<h1[^>]*>Which direction should we choose\?<\/h1>/);
   assert.match(html(), /aria-label="Study editor"/);assert.doesNotMatch(html(), /id="tab-cohorts"/);
   assert.equal(JSON.stringify(S.doc), before);
@@ -1211,7 +1213,7 @@ test('cohort editor keeps management controls without study execution or inferen
   assert.doesNotMatch(html, /running this study|Review before inference/i);
 });
 
-test('workspace tabs clear cohort selections and open the project pipeline while preserving the draft', async () => {
+test('workspace tabs clear cohort selections and open the study library while preserving the draft', async () => {
   const browser = browserHarness(); await settle();
   const { S, act } = browser.client;
   const draft = structuredClone(S.doc);
@@ -1226,9 +1228,9 @@ test('workspace tabs clear cohort selections and open the project pipeline while
 
   S.pipelineId = 'study'; S.stageId = 'panel';
   act(null, { dataset: { act: 'tab', tab: 'studies' } });
-  assert.equal(S.pipelineId, 'study'); assert.equal(S.stageId, 'panel');
-  assert.doesNotMatch(browser.element('app').innerHTML, /role="tablist"/);
-  assert.match(browser.element('app').innerHTML, /aria-label="Study editor"/);
+  assert.equal(S.pipelineId, null);
+  assert.match(browser.element('app').innerHTML, /role="tablist"/);
+  assert.match(browser.element('app').innerHTML, /Your studies/);
   assert.deepEqual(JSON.parse(JSON.stringify(S.doc)), JSON.parse(JSON.stringify(draft)));
 });
 
@@ -1863,6 +1865,26 @@ test('answer setup distinguishes hosted probabilities from local classifier evid
   setupAction('setup-type',{dataset:{type:'noul'}});assert.match(stageForm(p,s),/relative yes score/);
 });
 
+
+test('project entry and back navigation keep every breadcrumb level and preserve study drafts',async()=>{
+  const browser=browserHarness(false);await settle();const {S,act}=browser.client;
+  const html=()=>browser.element('app').innerHTML;
+  act(null,{dataset:{act:'open-project',id:'existing-research'}});
+  assert.equal(S.pipelineId,null);assert.match(html(),/Your studies/);
+  assert.match(html(),/<span>Projects<\/span>.*<span>Existing research<\/span>.*<span aria-current="page">Studies<\/span>/);
+  act(null,{dataset:{act:'open-pipeline',id:'study'}});
+  assert.match(html(),/<span>Projects<\/span>.*<span>Existing research<\/span>.*<span>Studies<\/span>/);
+  assert.match(html(),/<h1[^>]*aria-current="page"/);
+  S.doc.pipelines[0].description='Unfinished study question';S.dirty=true;
+  S.sections['setup-wizard-study-panel-answer']='options';const before=JSON.stringify(S.doc);
+  act(null,{dataset:{act:'back-studies'}});assert.equal(S.projectId,'existing-research');assert.equal(S.pipelineId,null);
+  assert.match(html(),/Your studies/);
+  act(null,{dataset:{act:'open-pipeline',id:'study'}});
+  act(null,{dataset:{act:'projects'}});assert.equal(S.projectId,null);
+  act(null,{dataset:{act:'open-project',id:'existing-research'}});
+  assert.equal(S.pipelineId,null);assert.equal(S.tab,'studies');assert.match(html(),/Your studies/);
+  assert.equal(JSON.stringify(S.doc),before);assert.equal(S.dirty,true);assert.equal(S.sections['setup-wizard-study-panel-answer'],'options');
+});
 
 test('study navigation has clear scope, a reachable single-study library and contextual step settings', async()=>{
   const browser=browserHarness();await settle();const {S,act,render,say}=browser.client;
