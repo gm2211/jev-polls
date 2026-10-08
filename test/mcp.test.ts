@@ -54,7 +54,7 @@ test('MCP agent edits shared drafts and explicitly reviews/runs, without inferen
   const directory = await mkdtemp(join(tmpdir(), 'jev-mcp-')); t.after(() => rm(directory, { recursive: true, force: true }));
   let evaluations = 0;
   const mock = createProvider('mock');
-  const workspace = await startWorkspaceServer({ directory, getAuthStatus: async () => ({ configured: true, source: 'keychain' }), providerFactory: () => ({ name: 'mock', evaluate: async input => { evaluations++; return mock.evaluate(input); } }) });
+  const workspace = await startWorkspaceServer({ directory, getAuthStatus: async () => ({ configured: true, source: 'keychain' }), providerFactory: () => ({ name: 'typesafe', evaluate: async input => { evaluations++; return mock.evaluate(input); } }) });
   t.after(() => workspace.close());
   const client = await connect(t, workspace.url);
   const tools = (await client.listTools()).tools;
@@ -92,7 +92,7 @@ test('MCP agent edits shared drafts and explicitly reviews/runs, without inferen
   }
   assert.equal(job.status, 'completed'); assert.equal(evaluations, 1);
   const record = await call<RunRecord>(client, 'get_run_record', { runId: job.id });
-  assert.equal(record.pipeline.id, pipeline.id); assert.equal(record.provider, 'mock'); assert.deepEqual(record.cohorts.audience, cohort);
+  assert.equal(record.pipeline.id, pipeline.id); assert.equal(record.provider, 'typesafe'); assert.deepEqual(record.cohorts.audience, cohort);
   assert.equal(record.stages.panel.status, 'completed');
   const snapshot = await call<WorkspaceSnapshot>(client, 'get_workspace');
   assert.equal(snapshot.runs[0].id, job.id); assert.equal(snapshot.activeRun, null);
