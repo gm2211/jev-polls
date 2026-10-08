@@ -1201,12 +1201,12 @@ test('phase cohort entry returns to the same pipeline stage while direct cohort 
 
 test('cohort editor keeps management controls without study execution or inference review asides', async () => {
   const browser = browserHarness(); await settle();
-  const { S, cohorts } = browser.client;
+  const { S, cohorts, cohortCard } = browser.client;
   S.cohortId = 'cohort'; S.personId = 'person'; S.dirty = true;
   const html = cohorts();
   assert.match(html, /Unsaved changes/);
   assert.match(html, /data-act="save"/);
-  assert.match(html, /data-act="pool-study"/);
+  assert.doesNotMatch(html+cohortCard(S.doc.cohorts[0]), /Use in study|data-act="pool-study"/);
   assert.match(html, /data-act="delete-cohort"/);
   assert.match(html, /role="group" aria-label="Cohort actions"/);
   assert.doesNotMatch(html, /More cohort actions|cohort-management/);
@@ -1218,7 +1218,6 @@ test('workspace tabs clear cohort selections and open the study library while pr
   const { S, act } = browser.client;
   const draft = structuredClone(S.doc);
   S.tab = 'cohorts'; S.cohortId = 'cohort'; S.personId = 'person';
-  act(null, { dataset: { act: 'pool-study', id: 'cohort' } });
   act(null, { dataset: { act: 'tab', tab: 'cohorts' } });
   assert.match(browser.element('app').innerHTML, /role="tablist"/);
   assert.doesNotMatch(browser.element('app').innerHTML, /Back to cohorts|Back to cohort/);
