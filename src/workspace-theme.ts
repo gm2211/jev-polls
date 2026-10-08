@@ -67,7 +67,7 @@ body{font-family:var(--body);background:var(--paper)}
 .glyph{width:28px;height:28px;border-radius:var(--radius-control);background:var(--ink);color:var(--paper);font:600 21px var(--display)}
 .topbar-tools{display:flex;align-items:center;gap:8px;min-width:0}
 .theme-toggle{min-height:var(--button-height);flex-shrink:0;gap:6px;min-width:80px}
-.theme-track{display:flex;align-items:center;width:26px;height:16px;padding:2px;background:var(--muted);border-radius:var(--radius-control)}.theme-track>span{width:12px;height:12px;border-radius:1px;background:var(--surface)}
+.theme-track{display:flex;align-items:center;width:26px;height:16px;padding:2px;background:var(--muted);border-radius:999px}.theme-track>span{flex:none;width:12px;height:12px;border-radius:50%;background:var(--surface)}
 .theme-toggle[aria-checked=true] .theme-track{background:var(--blue)}.theme-toggle[aria-checked=true] .theme-track>span{transform:translateX(10px);background:var(--paper)}
 .shell{max-width:1500px;padding:16px 24px 24px}
 .project-navigation{padding:0 0 12px;margin-bottom:18px}.project-navigation strong{font:600 14px var(--display)}
