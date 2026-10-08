@@ -31,6 +31,7 @@ const savedJobSchema = z.object({
   status: z.enum(['running', 'completed', 'failed']), createdAt: z.string().max(100), message: z.string().max(100_000),
   provider: evaluationProvider.optional(),
   progress: z.object({ stage: safeId, completed: z.number().int().nonnegative(), total: z.number().int().nonnegative() }).strict().optional(),
+  liveMembers: z.array(z.object({ stage: safeId, personaId: safeId, label: z.string().max(100_000), segment: safeId, age: z.number().finite(), repeat: z.number().int().positive(), status: z.enum(['queued','running','completed','failed']), answers: z.record(z.string(), z.unknown()).optional(), model: z.string().optional(), cacheHit: z.boolean().optional(), reason: z.string().max(100_000).optional() }).strict()).optional(),
   usage: z.object({ inputTokens: z.number().finite().nonnegative(), outputTokens: z.number().finite().nonnegative(), requests: z.number().int().nonnegative(), cacheHits: z.number().int().nonnegative(), tokenUsage: z.literal('unreported').optional(), measuredInputTokens: z.number().int().nonnegative().optional() }).strict().optional(),
   reportUrl: z.string().regex(/^\/reports\/[0-9a-f-]{36}$/).optional(),
 }).strict();
@@ -112,11 +113,12 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
         const record = await loadRun(join(path, 'run.json'));
         const message = record.status === 'completed' ? 'Study complete.' : 'Study ended with failures. Inspect the report before interpreting results.';
         let persistedProgress: WorkspaceRun['progress'];
+        let persistedMembers: WorkspaceRun['liveMembers'];
         let persistedProjectId: string | undefined;
         try {
           const parsed = savedJobSchema.parse(JSON.parse(await readFile(join(path, 'job.json'), 'utf8')));
           if (parsed.id === id && parsed.pipelineId === record.pipeline.id && parsed.status === record.status) {
-            persistedProgress = parsed.progress; persistedProjectId = parsed.projectId;
+            persistedProgress = parsed.progress; persistedMembers = parsed.liveMembers; persistedProjectId = parsed.projectId;
           }
         } catch { /* A persisted launch record can recover missing completion metadata. */ }
         if (!persistedProjectId) {
@@ -126,7 +128,7 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
           } catch { /* Ownerless artifacts are not workspace runs. */ }
         }
         if (!persistedProjectId || !existingProjects.has(persistedProjectId)) continue;
-        const summary: WorkspaceRun = { ...(record.provider !== 'mock' ? { provider: record.provider } : {}), projectId: persistedProjectId, id, pipelineId: record.pipeline.id, pipelineName: record.pipeline.name, status: record.status, createdAt: record.createdAt, message, usage: record.usage, reportUrl: `/reports/${id}`, ...(persistedProgress ? { progress: persistedProgress } : {}) };
+        const summary: WorkspaceRun = { ...(record.provider !== 'mock' ? { provider: record.provider } : {}), projectId: persistedProjectId, id, pipelineId: record.pipeline.id, pipelineName: record.pipeline.name, status: record.status, createdAt: record.createdAt, message, usage: record.usage, reportUrl: `/reports/${id}`, ...(persistedProgress ? { progress: persistedProgress } : {}), ...(persistedMembers ? { liveMembers: persistedMembers } : {}) };
         jobs.set(summary.id, summary); runRecords.set(summary.id, join(path, 'run.json'));
       } catch {
         try {
@@ -187,6 +189,7 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
   async function execute(job: WorkspaceRun, project: ReturnType<typeof workspacePlan>, input: z.infer<typeof runInput>) {
     const runDirectory = join(directory, 'runs', job.id);
     let provider: Provider | undefined;
+    const liveMemberIndexes = new Map<string, number>();
     try {
       await writeJson(join(runDirectory, 'pending.json'), job);
       if (closing) throw new Error('Workspace is closing');
@@ -197,6 +200,13 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
         seed: input.seed, concurrency: input.concurrency, maxRequests: input.maxRequests,
         cacheDir: join(directory, 'cache'),
         onProgress: event => { job.progress = event; job.message = `${event.stage}: ${event.completed} of ${event.total} evaluations processed`; options.emit?.({ event: 'progress', runId: job.id, ...event }); },
+        onMemberProgress: event => {
+          const members = job.liveMembers ??= [];
+          const key = `${event.stage}:${event.personaId}:${event.repeat}`;
+          const index = liveMemberIndexes.get(key);
+          if (index === undefined) { liveMemberIndexes.set(key, members.length); members.push(event); }
+          else members[index] = event;
+        },
       });
       await writeJson(join(runDirectory, 'run.json'), record);
       // The validated record is authoritative; HTML is a rebuildable export.
@@ -211,7 +221,8 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
       try { await writeJson(join(runDirectory, 'job.json'), finished); } catch { /* pending.json retains explicit launch ownership. */ }
       Object.assign(job, finished);
       runRecords.set(job.id, join(runDirectory, 'run.json'));
-      options.emit?.({ event: 'workspace-run', ...job });
+      const { liveMembers: _liveMembers, ...publicJob } = job;
+      options.emit?.({ event: 'workspace-run', ...publicJob });
     } catch (error) {
       job.status = 'failed'; job.message = error instanceof ProviderError ? error.message : 'Run could not complete. Check study configuration and the selected evaluation provider, then review and retry.';
       options.emit?.({ event: 'workspace-run', runId: job.id, status: 'failed' });

@@ -135,7 +135,7 @@ function setupAction(a,el){
   if(!a.startsWith('setup-'))return false;
   const p=pipeline(),s=selectedStage();if(!p)return true;
   if(a==='setup-question-list'){S.sections['question-list-'+p.id]=true;render();root.querySelector('.setup-question-list h2')?.focus();return true}
-  if(a==='setup-edit-step'){const target=p.stages.find(x=>x.id===el.dataset.id);if(target){S.stageId=target.id;S.sections.pipeline='phase';S.sections['question-list-'+p.id]=false;render();root.querySelector('.setup-question-location strong')?.focus()}return true}
+  if(a==='setup-edit-step'){const target=p.stages.find(x=>x.id===el.dataset.id);if(target){S.stageId=target.id;S.sections.pipeline='flow';S.sections['flow-inspector']=target.kind==='poll'?'question':'connections';S.sections['question-list-'+p.id]=false;render();root.querySelector('.setup-question-location strong')?.focus()}return true}
   if(!s)return true;
   if(a==='setup-result'){
     const source=dataInputOptions(p,s).find(x=>x.id===el.dataset.source),qid=el.dataset.question,q=source&&resolvedQuestion(p,source.id,qid);
@@ -161,7 +161,7 @@ function setupAction(a,el){
   }
   if(a==='setup-input'){if(['file','agent','manual'].includes(el.dataset.source))S.sections['setup-input-'+p.id+'-'+s.id+'-'+entry[0]]=el.dataset.source;render();return true}
   if(a==='setup-question'){S.sections['setup-question-'+s.id]=el.dataset.id;render();return true}
-  if(a==='setup-cohort')assignSetupCohort(p,s,el.dataset.id);
+  if(a==='setup-cohort'){assignSetupCohort(p,s,el.dataset.id);S.flowCohortPick=false;}
   else if(a==='setup-edit-option'){S.sections['setup-input-'+p.id+'-'+s.id+'-'+entry[0]]='manual';S.sections['setup-option-'+s.id+'-'+entry[0]]=el.dataset.key;render();root.querySelector('[name=setupOption]')?.focus();return true}
   else if(a==='setup-option-back'){delete S.sections['setup-option-'+s.id+'-'+entry[0]];render();return true}
   else if(a==='setup-format'||a==='setup-format-back'){S.sections['setup-format-'+s.id+'-'+entry[0]]=a==='setup-format';render();return true}
@@ -186,8 +186,9 @@ const setupFormats={};
 function validateSetupAnswers(p){
   for(const s of p?.stages||[])if(s.kind==='poll')for(const [qid,q] of Object.entries(s.questions)){
     const missing=!setupHasQuestion(q)||(q.type==='choice'&&Object.entries(q.criteria).some(([key,value])=>!String(optionName(key,value)).trim()))||(q.type==='score'&&q.criteria.some(value=>!value.trim()));
-    if(missing){S.sections[setupWizardKey(p,s,qid)]=!setupHasQuestion(q)?'question':'options';if(q.type==='choice')S.sections['setup-input-'+p.id+'-'+s.id+'-'+qid]='manual';S.stageId=s.id;S.sections.pipeline='phase';S.sections['question-list-'+p.id]=false;S.sections['setup-question-'+s.id]=qid;render();throw Error('Add the question and text for every answer option before reviewing.');}
+    if(missing){S.sections[setupWizardKey(p,s,qid)]=!setupHasQuestion(q)?'question':'options';if(q.type==='choice')S.sections['setup-input-'+p.id+'-'+s.id+'-'+qid]='manual';S.stageId=s.id;S.sections.pipeline='flow';S.sections['flow-inspector']='question';S.sections['question-list-'+p.id]=false;S.sections['setup-question-'+s.id]=qid;render();throw Error('Add the question and text for every answer option before reviewing.');}
   }
+  for(const s of p?.stages||[])if(s.kind==='poll'&&!poolForPhase(p,s)?.personas.length){S.stageId=s.id;S.sections.pipeline='flow';S.sections['flow-inspector']='cohort';S.flowCohortPick=true;render();throw Error('Choose a cohort with synthetic members before reviewing.');}
 }
 `;
 

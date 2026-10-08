@@ -59,12 +59,13 @@ test('local GLiNER runs need no TypeSafe account and cannot replace the reviewed
 test('workspace never runs on connect/save/review and requires a fresh explicit run request', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'jev-workspace-http-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
-  let configured = false; let evaluations = 0; let connections = 0;
+  let configured = false; let evaluations = 0; let connections = 0; const emitted: Record<string, unknown>[] = [];
   const mock = createProvider('mock');
   let server = await startWorkspaceServer({ directory,
     getAuthStatus: async () => ({ configured, source: configured ? 'keychain' : 'none' }),
     connectAccount: async key => { assert.equal(key, 'fake-key-for-transport-test'); configured = true; connections++; },
-    providerFactory: () => ({ name: 'mock', evaluate: async request => { evaluations++; return mock.evaluate(request); } }),
+    emit: event => { emitted.push(event); },
+    providerFactory: () => ({ name: 'mock', evaluate: async request => { evaluations++; await new Promise(resolve => setTimeout(resolve, 35)); return mock.evaluate(request); } }),
   });
   t.after(() => server.close());
   const page = await fetch(server.url);
@@ -103,12 +104,20 @@ test('workspace never runs on connect/save/review and requires a fresh explicit 
   const accepted = await run(plan); assert.equal(accepted.status, 202);
   let job = await accepted.json() as WorkspaceRun;
   assert.equal((await run(plan)).status, 409);
+  await new Promise(resolve => setTimeout(resolve, 4));
+  const live = await (await fetch(new URL(`/api/run/${job.id}`, server.url))).json() as WorkspaceRun;
+  assert.equal(live.liveMembers?.[0]?.status, 'running');
+  assert.equal(live.liveMembers?.[0]?.stage, 'audience');
+  assert.equal(live.liveMembers?.[0]?.repeat, 1);
   for (let i = 0; i < 100 && job.status === 'running'; i++) {
     await new Promise(resolve => setTimeout(resolve, 10));
     job = await (await fetch(new URL(`/api/run/${job.id}`, server.url))).json() as WorkspaceRun;
   }
   assert.equal(job.projectId, 'existing-research');
   assert.equal(job.status, 'completed'); assert.equal(evaluations, 1);
+  assert.equal(job.liveMembers?.[0]?.status, 'completed');
+  assert.ok(job.liveMembers?.[0]?.answers?.choice);
+  assert.doesNotMatch(JSON.stringify(emitted), /Synthetic profile|answers|probabilities/);
   assert.ok(job.reportUrl);
   const report = await fetch(new URL(job.reportUrl, server.url));
   assert.equal(report.status, 200); assert.match(await report.text(), /My reviewed study/);
@@ -161,6 +170,8 @@ test('workspace never runs on connect/save/review and requires a fresh explicit 
   assert.equal(recoveredJob?.id, job.id);
   assert.equal(recoveredJob?.projectId, 'existing-research');
   assert.equal(recoveredJob?.reportUrl, job.reportUrl);
+  assert.equal(recoveredJob?.liveMembers?.[0]?.repeat, 1);
+  assert.ok(recoveredJob?.liveMembers?.[0]?.answers?.choice);
   assert.equal((await fetch(new URL(`/api/run/${job.id}`, server.url))).status, 200);
   assert.equal((await fetch(new URL(job.reportUrl, server.url))).status, 200);
 

@@ -67,6 +67,17 @@ test('branches select by upstream summary and any-join rejoins completed branche
   assert.equal(run.stages.rejoin?.dependsOn.length, 2);
 });
 
+test('live member progress emits queued, running, and completed states with actual answers', async () => {
+  const events: NonNullable<RunOptions['onMemberProgress']> extends (event: infer E) => void ? E[] : never = [];
+  const provider = fixedProvider('b', { async onCall() { await new Promise(resolve => setTimeout(resolve, 2)); } });
+  await runPipeline(pipeline([poll('live', [], { size: 2 })]), { audience: cohort }, options(provider, { concurrency: 1, onMemberProgress: event => events.push(event) }));
+  assert.equal(events.filter(event => event.status === 'queued').length, 2);
+  assert.equal(events.filter(event => event.status === 'running').length, 2);
+  const completed = events.filter(event => event.status === 'completed');
+  assert.equal(completed.length, 2);
+  assert.ok(completed.every(event => event.answers?.pick?.type === 'choice' && event.answers.pick.choice === 'b'));
+});
+
 test('explicit poll inputs project only selected named outputs and preserve legacy omission', async () => {
   const seen: EvaluationRequest[] = [];
   const provider = fixedProvider('a', { onCall(request) { seen.push(request); } });
