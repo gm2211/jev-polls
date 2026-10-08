@@ -93,7 +93,7 @@ function optionAgentApply(){
   flushForms();const d=optionAgentDraft,q=optionAgentTarget(d);if(!d.records||d.job?.status!=='completed')throw Error('Prepare and review options first.');
   const used=new Set(),criteria={},old=Object.entries(q.criteria);
   for(const record of d.records){let key=old.find(([key,value])=>!used.has(key)&&optionName(key,value)===record.label)?.[0];if(!key){do{key='option_'+id()}while(Object.hasOwn(q.criteria,key)||used.has(key))}used.add(key);const previous=q.criteria[key];criteria[key]={...(previous&&typeof previous==='object'&&!Array.isArray(previous)?previous:{}),label:record.label,description:record.description}}
-  q.criteria=criteria;S.sections['setup-input-'+d.pipelineId+'-'+d.stageId+'-'+d.questionId]='manual';S.dirty=true;S.plan=null;optionAgentClose();render();say('Options added to this question. Review your study before running.');
+  q.criteria=criteria;S.sections['setup-wizard-'+d.pipelineId+'-'+d.stageId+'-'+d.questionId]='options';S.sections['setup-input-'+d.pipelineId+'-'+d.stageId+'-'+d.questionId]='manual';S.dirty=true;S.plan=null;optionAgentClose();render();say('Options added to this question. Review your study before running.');
 }
 function optionAgentAction(a,el){
   if(!a.startsWith('option-agent-'))return false;
