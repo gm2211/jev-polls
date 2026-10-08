@@ -1420,6 +1420,41 @@ test('creating cohorts on other nodes never silently changes the selected node o
   assert.equal(S.cohortTarget, null); assert.equal(S.localJob, null);
 });
 
+test('discarded regeneration cannot replace a saved cohort when creating for a different node', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, act } = browser.client;
+  const p = S.doc.pipelines[0]; p.stages.push({ ...structuredClone(p.stages[0]), id: 'second' });
+  S.tab = 'studies'; S.pipelineId = 'study'; S.stageId = 'panel'; S.cohortId = 'cohort';
+  act(null, { dataset: { act: 'generate-personas' } }); await settle();
+  assert.equal(S.cohortTarget, 'cohort');
+  S.localJob = { id: 'replacement', status: 'completed', cohort: { id: 'cohort', prompt: 'Original population', size: 1 } };
+  act(null, { dataset: { act: 'assistant-discard' } });
+  S.stageId = 'second';
+  act(null, { dataset: { act: 'new-cohort' } });
+  assert.equal(S.cohortTarget, null, 'new node must allocate a fresh cohort instead of replacing saved data');
+  assert.equal(S.cohortPrompt, ''); assert.equal(S.cohortInlineTarget.stageId, 'second');
+  assert.equal(S.doc.cohorts[0].name, 'Original cohort');
+});
+
+test('library regeneration stays separate when a node requests a new cohort', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, act, setupCohortPicker } = browser.client;
+  S.tab = 'cohorts'; S.cohortId = 'cohort';
+  act(null, { dataset: { act: 'generate-personas' } }); await settle();
+  S.localJob = { id: 'library-replacement', status: 'completed', cohort: { id: 'cohort', prompt: 'Original population', size: 1 } };
+  S.tab = 'studies'; S.pipelineId = 'study'; S.stageId = 'panel';
+  act(null, { dataset: { act: 'new-cohort' } });
+  assert.equal(S.tab, 'studies'); assert.equal(S.cohortInlineTarget, null);
+  assert.equal(S.localJob.id, 'library-replacement');
+  assert.match(setupCohortPicker(S.doc.pipelines[0],S.doc.pipelines[0].stages[0]), /Review existing draft/);
+  act(null, { dataset: { act: 'cohort-resume' } });
+  assert.equal(S.tab, 'cohorts'); assert.equal(S.cohortInlineTarget, null);
+  S.localJob.status = 'cancelled';
+  S.tab = 'studies';
+  act(null, { dataset: { act: 'new-cohort' } });
+  assert.equal(S.cohortTarget, null); assert.equal(S.cohortInlineTarget.stageId, 'panel');
+});
+
 test('recovered cohort jobs retain their original node through library entry and adoption', async () => {
   const browser = browserHarness(); await settle();
   const { S, act, startCohortJob } = browser.client;
