@@ -33,6 +33,7 @@ function navigationAction(a,el){
 
 export const NAVIGATION_CSS = `
 /* Short task pages; natural overflow remains available for zoom and long content. */
+.study-list-row{width:100%;min-width:0;text-align:left;font:inherit;color:var(--ink);cursor:pointer}.study-list-row>span{display:grid;gap:3px;min-width:0;overflow-wrap:anywhere}.study-list-row strong{font-size:13px}.study-list-row small{font-size:12px;color:var(--muted)}.study-list-row:hover{background:var(--hover);border-color:var(--control-line)}.study-list-row>.ui-icon{color:var(--muted)}
 .study-workspace-header{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"location title actions";align-items:center;gap:12px;margin-bottom:8px}
 .study-location{grid-area:location;display:flex;align-items:center;flex-wrap:wrap;gap:6px;min-width:0;color:var(--muted);font-size:12px}.study-location>span{overflow-wrap:anywhere}.study-location .button{flex:none}.study-location>span:last-child{color:var(--ink)}
 .study-location{max-width:240px}.study-workspace-header h1{grid-area:title;margin:0;font:600 18px/1.3 var(--display);letter-spacing:-.025em;overflow-wrap:anywhere}
