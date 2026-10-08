@@ -1877,6 +1877,7 @@ test('study navigation has clear scope, a reachable single-study library and con
   assert.match(browser.element('app').innerHTML,/Keep typed detail/);
   act(null,{dataset:{act:'back-studies'}});assert.equal(S.pipelineId,null);render();html=browser.element('app').innerHTML;
   assert.match(html,/Your studies|Your research questions/);assert.match(html,/role="tablist"/);assert.match(html,/New study/);assert.doesNotMatch(html,/data-form="new-pipeline"/);
+  assert.match(html,/<button type="button" class="listrow study-list-row" data-act="open-pipeline" data-id="study" aria-label="Open study: /);assert.doesNotMatch(html,/>Open study<|<div class="listrow">/);
   act(null,{dataset:{act:'new-study'}});assert.match(browser.element('app').innerHTML,/data-form="new-pipeline"/);
   act(null,{dataset:{act:'cancel-study'}});assert.doesNotMatch(browser.element('app').innerHTML,/data-form="new-pipeline"/);
   act(null,{dataset:{act:'open-pipeline',id:'study'}});assert.equal(JSON.stringify(S.doc),before);
