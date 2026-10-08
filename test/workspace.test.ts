@@ -65,7 +65,7 @@ test('workspace never runs on connect/save/review and requires a fresh explicit 
     getAuthStatus: async () => ({ configured, source: configured ? 'keychain' : 'none' }),
     connectAccount: async key => { assert.equal(key, 'fake-key-for-transport-test'); configured = true; connections++; },
     emit: event => { emitted.push(event); },
-    providerFactory: () => ({ name: 'mock', evaluate: async request => { evaluations++; await new Promise(resolve => setTimeout(resolve, 35)); return mock.evaluate(request); } }),
+    providerFactory: () => ({ name: 'typesafe', evaluate: async request => { evaluations++; await new Promise(resolve => setTimeout(resolve, 35)); return mock.evaluate(request); } }),
   });
   t.after(() => server.close());
   const page = await fetch(server.url);
@@ -126,12 +126,12 @@ test('workspace never runs on connect/save/review and requires a fresh explicit 
   const savedRecord = JSON.parse(await readFile(join(runFolder, 'run.json'), 'utf8')) as { id: string };
   const apiRecord = await (await fetch(new URL(`/api/run/${job.id}/record`, server.url))).json();
   assert.equal(apiRecord.id, savedRecord.id);
-  assert.equal(apiRecord.provider, 'mock');
+  assert.equal(apiRecord.provider, 'typesafe');
   assert.equal((await fetch(new URL('/api/run/unknown/record', server.url))).status, 404);
   assert.notEqual(savedRecord.id, job.id, 'engine run IDs remain distinct from workspace folder IDs');
   assert.equal(JSON.parse(await readFile(join(runFolder, 'job.json'), 'utf8')).id, job.id);
   assert.equal(JSON.parse(await readFile(join(runFolder, 'job.json'), 'utf8')).projectId, 'existing-research');
-  const historicalIds = { ownerless: randomUUID(), unmatched: randomUUID(), explicit: randomUUID(), interrupted: randomUUID(), pendingOwner: randomUUID(), deletedOwner: randomUUID(), ownerlessPending: randomUUID(), invalidOwnership: randomUUID() };
+  const historicalIds = { ownerless: randomUUID(), unmatched: randomUUID(), explicit: randomUUID(), interrupted: randomUUID(), pendingOwner: randomUUID(), deletedOwner: randomUUID(), ownerlessPending: randomUUID(), invalidOwnership: randomUUID(), mock: randomUUID() };
   for (const [kind, id] of Object.entries(historicalIds)) {
     const target = join(directory, 'runs', id); await mkdir(target);
     const metadata: Omit<WorkspaceRun, 'projectId'> & { projectId?: string } = { ...job, id }; delete metadata.projectId;
@@ -141,6 +141,7 @@ test('workspace never runs on connect/save/review and requires a fresh explicit 
     }
     const record = JSON.parse(await readFile(join(runFolder, 'run.json'), 'utf8'));
     if (kind === 'unmatched') { record.pipeline.id = 'removed-study'; metadata.pipelineId = 'removed-study'; }
+    if (kind === 'mock') { record.provider = 'mock'; metadata.projectId = 'original-project'; }
     if (kind === 'explicit') metadata.projectId = 'original-project';
     if (kind === 'deletedOwner') metadata.projectId = 'deleted-project';
     if (kind === 'invalidOwnership') { metadata.projectId = 'original-project'; metadata.pipelineId = 'unrelated-study'; }
@@ -158,7 +159,7 @@ test('workspace never runs on connect/save/review and requires a fresh explicit 
   });
   const recovered = await (await fetch(new URL('/api/workspace', server.url))).json() as { runs: WorkspaceRun[] };
   const recoveredJob = recovered.runs.find(item => item.id === job.id);
-  for (const id of [historicalIds.ownerless, historicalIds.unmatched, historicalIds.deletedOwner, historicalIds.ownerlessPending, historicalIds.invalidOwnership]) {
+  for (const id of [historicalIds.ownerless, historicalIds.unmatched, historicalIds.deletedOwner, historicalIds.ownerlessPending, historicalIds.invalidOwnership, historicalIds.mock]) {
     assert.equal(recovered.runs.find(item => item.id === id), undefined, 'Ownerless or invalid ownership never becomes workspace history');
     for (const path of [`/api/run/${id}`, `/api/run/${id}/record`, `/reports/${id}`]) assert.equal((await fetch(new URL(path, server.url))).status, 404);
   }
@@ -174,6 +175,11 @@ test('workspace never runs on connect/save/review and requires a fresh explicit 
   assert.ok(recoveredJob?.liveMembers?.[0]?.answers?.choice);
   assert.equal((await fetch(new URL(`/api/run/${job.id}`, server.url))).status, 200);
   assert.equal((await fetch(new URL(job.reportUrl, server.url))).status, 200);
+
+  const originalRecord = await readFile(join(runFolder, 'run.json'), 'utf8');
+  await writeFile(join(runFolder, 'run.json'), JSON.stringify({ ...JSON.parse(originalRecord), provider: 'mock' }));
+  for (const path of [job.reportUrl!, `/api/run/${job.id}/record`]) assert.equal((await fetch(new URL(path, server.url))).status, 404, 'Mock replacement cannot become a workspace report');
+  await writeFile(join(runFolder, 'run.json'), originalRecord);
 
   // HTML is a derived export; missing and stale files must not break saved results.
   await rm(join(runFolder, 'report.html'));
@@ -202,7 +208,7 @@ test('report export failure does not discard completed project-owned results', a
   t.after(() => rm(directory, { recursive: true, force: true }));
   const mock = createProvider('mock');
   const server = await startWorkspaceServer({ directory, getAuthStatus: async () => ({ configured: true, source: 'keychain' }), providerFactory: () => ({
-    name: 'mock', evaluate: async request => {
+    name: 'typesafe', evaluate: async request => {
       const [id] = await readdir(join(directory, 'runs'));
       await mkdir(join(directory, 'runs', id!, 'report.html'));
       return mock.evaluate(request);

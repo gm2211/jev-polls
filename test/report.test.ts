@@ -129,3 +129,17 @@ test('structured criteria use editable names in findings and retain full descrip
   assert.equal(data.run.pipeline.stages[0].questions.title.criteria.north.description,'A reflective album about hope.');
   assert.doesNotMatch(html,/\[object Object\]/);
 });
+
+
+test('report provenance uses actual run provider and recorded model identifiers', () => {
+  const run = fixture();
+  assert.match(renderReport(run), /Demo data only/);
+  run.provider = 'typesafe';
+  run.stages.concept.votes[0].model = 'jev-returned-revision';
+  const html = renderReport(run);
+  assert.match(html, /Recorded TypeSafe model results for synthetic profiles/);
+  assert.match(html, /Returned models: jev-returned-revision/);
+  assert.doesNotMatch(html, /Demo data only/);
+  run.provider = 'gliner';
+  assert.match(renderReport(run), /Recorded GLiNER model results/);
+});

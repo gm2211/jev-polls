@@ -111,6 +111,7 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
       const path = join(parent, entry.name);
       try {
         const record = await loadRun(join(path, 'run.json'));
+        if (record.provider === 'mock') continue;
         const message = record.status === 'completed' ? 'Study complete.' : 'Study ended with failures. Inspect the report before interpreting results.';
         let persistedProgress: WorkspaceRun['progress'];
         let persistedMembers: WorkspaceRun['liveMembers'];
@@ -128,7 +129,7 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
           } catch { /* Ownerless artifacts are not workspace runs. */ }
         }
         if (!persistedProjectId || !existingProjects.has(persistedProjectId)) continue;
-        const summary: WorkspaceRun = { ...(record.provider !== 'mock' ? { provider: record.provider } : {}), projectId: persistedProjectId, id, pipelineId: record.pipeline.id, pipelineName: record.pipeline.name, status: record.status, createdAt: record.createdAt, message, usage: record.usage, reportUrl: `/reports/${id}`, ...(persistedProgress ? { progress: persistedProgress } : {}), ...(persistedMembers ? { liveMembers: persistedMembers } : {}) };
+        const summary: WorkspaceRun = { provider: record.provider, projectId: persistedProjectId, id, pipelineId: record.pipeline.id, pipelineName: record.pipeline.name, status: record.status, createdAt: record.createdAt, message, usage: record.usage, reportUrl: `/reports/${id}`, ...(persistedProgress ? { progress: persistedProgress } : {}), ...(persistedMembers ? { liveMembers: persistedMembers } : {}) };
         jobs.set(summary.id, summary); runRecords.set(summary.id, join(path, 'run.json'));
       } catch {
         try {
@@ -155,7 +156,7 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
     if (!path) throw new HttpError(409, 'RUN_NOT_READY', 'A saved run record is not available yet.');
     try {
       const record = await loadRun(path);
-      if (record.pipeline.id !== job.pipelineId) throw Error();
+      if (record.pipeline.id !== job.pipelineId || record.provider === 'mock' || (job.provider && record.provider !== job.provider)) throw Error();
       return record;
     } catch { throw new HttpError(404, 'RUN_RECORD_UNAVAILABLE', 'The saved run record is missing or invalid. Run the study again to create a report.'); }
   }
