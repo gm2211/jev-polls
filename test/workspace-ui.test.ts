@@ -147,10 +147,10 @@ test('review settings survive tab switches and request plans paginate for deskto
   assert.match(html, /name="seed"[^>]*value="saved-seed"/);
   assert.match(html, /name="concurrency"[^>]*value="3"/);
   assert.match(html, /name="maxRequests"[^>]*value="17"/);
-  assert.match(html, /1–4 of 7/); assert.doesNotMatch(html, />Step 5 /);
+  assert.match(html, /1–3 of 7/); assert.doesNotMatch(html, />Step 4 /);
   (browser.window as any).innerWidth = 390;
   const narrow = review();
-  assert.match(narrow, /1–2 of 7/); assert.doesNotMatch(narrow, />Step 3 /);
+  assert.match(narrow, /1–1 of 7/); assert.doesNotMatch(narrow, />Step 2 /);
   assert.equal(S.plan.planToken, 'reviewed-plan'); assert.equal(S.dirty, false);
   assert.equal(browser.requests.filter(path => path === '/api/run').length, 0);
 });
@@ -2463,18 +2463,37 @@ test('run polling preserves draft panel prompt focus and text selection',async()
   assert.equal(S.localPrompt,'Compare these names across cohorts');assert.match(browser.element('app').innerHTML,/Compare these names across cohorts/);
 });
 
-test('run caveats retain semantics and escaped details without repeated alerts', async () => {
+test('run caveats retain interpretation guidance without repeated alerts', async () => {
   const browser = browserHarness(); await settle();
   const { runCaveats } = browser.client;
   const warnings = Array.from({ length: 14 }, (_, i) => 'Cohort <unsafe> assumption ' + i);
   const html = runCaveats({ provider: 'gliner', warnings });
   assert.match(html, /Model estimates, not human responses/);
-  assert.match(html, /GLiNER scores are not calibrated response probabilities/);
-  assert.match(html, /Assumptions and limitations \(14\)/);
-  assert.equal((html.match(/<li>/g) || []).length, 14);
   assert.doesNotMatch(html, /<details[^>]*\bopen\b|class="warning"|<unsafe>|<button|<input/);
-  assert.match(html, /&lt;unsafe&gt;/);
   const empty = runCaveats({ provider: 'typesafe', warnings: [] });
   assert.match(empty, /Model estimates, not human responses/);
   assert.doesNotMatch(empty, /<details|GLiNER/);
+});
+
+test('run review paginates evidence separately and preserves settings across pages', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, review, act } = browser.client;
+  S.pipelineId = 'study'; S.tab = 'studies';
+  S.plan = { provider: 'typesafe', model: 'jev', stages: [], warnings: Array.from({ length: 14 }, (_, i) => 'Evidence note ' + (i + 1) + ' <unsafe>') };
+  const form = { dataset: { form: 'run-options' } };
+  browser.listeners.get('input')!({ target: { name: 'seed', value: 'retained-seed', closest: () => form } });
+  act(null, { dataset: { act: 'section-view', sectionKey: 'run-review', sectionId: 'warnings' } });
+  let html = review();
+  assert.match(html, /Evidence notes \(14\)/);
+  assert.match(html, /1–3 of 14/);
+  assert.match(html, /&lt;unsafe&gt;/); assert.doesNotMatch(html, /<unsafe>/);
+  assert.doesNotMatch(html, /Evidence note 4 /);
+  assert.doesNotMatch(html.match(/<form data-form="run-options">[\s\S]*?<\/form>/)![0], /Evidence note/);
+  act(null, { dataset: { act: 'page-action', pageKey: 'existing-research:run-warnings', page: '1' } });
+  html = review(); assert.match(html, /4–6 of 14/); assert.match(html, /Evidence note 4 /);
+  act(null, { dataset: { act: 'section-view', sectionKey: 'run-review', sectionId: 'settings' } });
+  assert.match(review(), /name="seed"[^>]*value="retained-seed"/);
+  (browser.window as any).innerWidth = 390; S.listPages = {};
+  html = review(); assert.match(html, /1–1 of 14/); assert.doesNotMatch(html, /Evidence note 2 /);
+  assert.equal(browser.requests.filter(path => path === '/api/run').length, 0);
 });
