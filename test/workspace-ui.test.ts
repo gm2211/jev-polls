@@ -819,6 +819,7 @@ test('workspace opens at projects and keeps another project out of cohort, pipel
   assert.equal(S.projectId, null);
   assert.match(browser.element('app').innerHTML, /Your projects/);
   assert.match(browser.element('app').innerHTML, /Existing research/);
+  assert.match(browser.element('app').innerHTML, /<button type="button" class="project-card" data-act="open-project"/);assert.doesNotMatch(browser.element('app').innerHTML,/>Open project<|<article class="project-card"/);
   assert.doesNotMatch(browser.element('app').innerHTML, /Who should be in this cohort/);
   S.doc.projects.push({ id: 'second', name: 'Second research', description: 'Other decision', cohortIds: ['second-cohort'], pipelineIds: ['second-pipeline'] });
   S.doc.cohorts.push({ ...structuredClone(S.doc.cohorts[0]), id: 'second-cohort', name: 'Other audience' });
