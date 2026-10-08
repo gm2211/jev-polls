@@ -1237,7 +1237,7 @@ test('workspace tabs clear cohort selections and open the study library while pr
 
 test('project detail submission saves metadata and pipeline creation assigns ownership', async () => {
   const browser = browserHarness(); await settle();
-  const { S } = browser.client;
+  const { S, render } = browser.client;
   const submit = (kind: string, values: Record<string, string>) => {
     const form = { dataset: { form: kind }, values };
     browser.listeners.get('submit')!({ target: { closest: () => form }, preventDefault() {} });
@@ -1247,15 +1247,20 @@ test('project detail submission saves metadata and pipeline creation assigns own
   S.flushing = false;
   assert.equal(S.doc.projects[0].name, 'Renamed project');
   assert.equal(S.doc.projects[0].description, 'Updated research brief');
-  S.doc.pipelines = []; S.doc.projects[0].pipelineIds = [];
+  S.doc.pipelines = []; S.doc.projects[0].pipelineIds = []; S.pipelineId = null; S.tab = 'studies'; render();
+  assert.match(browser.element('app').innerHTML, /data-form="new-pipeline"/);
   submit('new-pipeline', { question: 'Which service is preferred?' });
   assert.equal(S.doc.pipelines.length, 1);
   assert.equal(S.doc.projects[0].pipelineIds[0], S.doc.pipelines[0].id);
   assert.equal(S.doc.pipelines[0].name, 'Renamed project study');
   assert.equal(S.sections.pipeline, 'phase');
   assert.equal(S.sections['phase-' + S.stageId], 'question');
+  const beforeRejected = JSON.stringify(S.doc), selectedId = S.pipelineId;
   submit('new-pipeline', { question: 'Second pipeline?' });
   assert.equal(S.doc.pipelines.length, 1, 'new project keeps one pipeline');
+  assert.equal(JSON.stringify(S.doc), beforeRejected);
+  assert.equal(S.pipelineId, selectedId);
+  assert.equal(S.newQuestion, 'Second pipeline?', 'rejected creation preserves typed question');
 });
 
 
@@ -1948,9 +1953,10 @@ test('study navigation has clear scope, a reachable single-study library and con
   act(null,{dataset:{act:'section-view',sectionKey:'pipeline',sectionId:'phase'}});
   assert.match(browser.element('app').innerHTML,/Keep typed detail/);
   act(null,{dataset:{act:'back-studies'}});assert.equal(S.pipelineId,null);render();html=browser.element('app').innerHTML;
-  assert.match(html,/Your studies|Your research questions/);assert.match(html,/role="tablist"/);assert.match(html,/New study/);assert.doesNotMatch(html,/data-form="new-pipeline"/);
+  assert.match(html,/Your studies|Your research questions/);assert.match(html,/role="tablist"/);assert.doesNotMatch(html,/data-act="new-study"|data-form="new-pipeline"/);
   assert.match(html,/<button type="button" class="listrow study-list-row" data-act="open-pipeline" data-id="study" aria-label="Open study: /);assert.doesNotMatch(html,/>Open study<|<div class="listrow">/);
-  act(null,{dataset:{act:'new-study'}});assert.match(browser.element('app').innerHTML,/data-form="new-pipeline"/);
+  S.studyComposer=true;render();assert.doesNotMatch(browser.element('app').innerHTML,/data-form="new-pipeline"/);
+  act(null,{dataset:{act:'new-study'}});assert.equal(S.studyComposer,false);assert.doesNotMatch(browser.element('app').innerHTML,/data-form="new-pipeline"/);
   act(null,{dataset:{act:'cancel-study'}});assert.doesNotMatch(browser.element('app').innerHTML,/data-form="new-pipeline"/);
   act(null,{dataset:{act:'open-pipeline',id:'study'}});assert.equal(JSON.stringify(S.doc),before);
   S.flushing=true;browser.element('toast').textContent='';say('Stage applied to draft.');assert.equal(browser.element('toast').textContent,'');

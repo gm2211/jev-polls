@@ -35,17 +35,17 @@ export const WORKSPACE_PALETTES = {
     paper: '#edf1f5', surface: '#ffffff', raised: '#e6ecf3', field: '#ffffff', hover: '#dae3ed',
     ink: '#18212c', muted: '#445367', faint: '#4f6075', line: '#c6d0dc', 'control-line': '#63768e',
     blue: '#1757a5', 'blue-dark': '#124583', 'blue-soft': '#e1edfc',
-    action: '#185abc', 'action-hover': '#114685', selection: '#e1edfc',
+    action: '#e1edfc', 'action-hover': '#d3e5fc', selection: '#e1edfc',
     teal: '#245c8a', 'teal-soft': '#e6eff8', amber: '#765800', 'amber-soft': '#f4edce', red: '#a32b25',
-    'button-ink': '#ffffff', 'disabled-ink': '#58677b', focus: '#1757a5',
+    'button-ink': '#1757a5', 'disabled-ink': '#58677b', focus: '#1757a5',
   },
   dark: {
     paper: '#101318', surface: '#1b2028', raised: '#252d38', field: '#2d3643', hover: '#364252',
     ink: '#f1f5fa', muted: '#bac5d4', faint: '#adb9ca', line: '#3d4756', 'control-line': '#8d9caf',
     blue: '#9bc5ff', 'blue-dark': '#bad8ff', 'blue-soft': '#203b5c',
-    action: '#1f6feb', 'action-hover': '#165cc5', selection: '#203b5c',
+    action: '#203b5c', 'action-hover': '#2a4c73', selection: '#203b5c',
     teal: '#9ac8f7', 'teal-soft': '#1c344c', amber: '#efd090', 'amber-soft': '#40351b', red: '#ffa6a2',
-    'button-ink': '#ffffff', 'disabled-ink': '#adb9ca', focus: '#9bc5ff',
+    'button-ink': '#9bc5ff', 'disabled-ink': '#adb9ca', focus: '#9bc5ff',
   },
 } as const;
 
@@ -80,8 +80,8 @@ body{font-family:var(--body);background:var(--paper)}
 .panel :is(.panel,.mini-card,.question-card,.item-card,.advanced,.condition,.proposal-diff>div){border:0;border-top:1px solid var(--line);border-radius:0;background:transparent;box-shadow:none}.panel .panel{padding-inline:0}.question-flat{border:0!important}
 .button,.button.small,.tab{min-height:var(--button-height);border-radius:var(--radius-control);font-family:var(--body);font-size:13px;line-height:1.2;font-weight:600;padding:6px 10px}
 .ui-icon{display:block;width:16px;height:16px;flex:none;pointer-events:none}.button.icon-button,.button.small.icon-button{width:var(--button-height);height:var(--button-height);min-width:var(--button-height);padding:0;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}.button{background:var(--raised);color:var(--ink);border-color:var(--line);box-shadow:none}.button:hover{background:var(--hover)}
-.button.primary{background:var(--action);border-color:var(--action);color:var(--button-ink);box-shadow:none}.button.primary:hover{background:var(--action-hover);border-color:var(--action-hover)}
-.button.soft{color:var(--blue);background:var(--blue-soft);border-color:var(--blue)}.button.danger{color:var(--red)}
+.button.primary,.button.soft{background:var(--action);border-color:var(--blue);color:var(--button-ink);box-shadow:none}.button.primary:hover,.button.soft:hover{background:var(--action-hover);border-color:var(--blue)}
+.button.danger{color:var(--red)}
 .button:disabled,.button:disabled:hover{opacity:1;background:var(--surface);color:var(--disabled-ink);border-color:var(--line);box-shadow:none;cursor:not-allowed}
 :is(button,a,input,textarea,select,summary):focus-visible{outline:3px solid var(--focus);outline-offset:3px}
 :is(input,textarea,select){font-family:var(--body);font-size:14px;line-height:1.45;background:var(--field);color:var(--ink);border:1px solid var(--control-line);border-radius:var(--radius-control);padding:7px 10px}.field>input,.field>select{height:var(--control-height)}.phase-picker .field>select{height:var(--control-height);min-height:var(--button-height);white-space:nowrap;text-overflow:ellipsis}.field{gap:6px;margin-bottom:var(--space-field);min-width:0}.field label,.field-label{color:var(--muted);font-size:12px}.field small{color:var(--faint);font-size:11px}
