@@ -92,10 +92,10 @@ test('global command prepares a named project without a selected project or save
 
 test('large command catalog stays searchable with bounded provider context and no repeated search loop', async t => {
   const root=await setup(t);const prompts:string[]=[];
-  const client={status:async()=>({connected:true,planEnabled:true}),generate:async({input}:{input:string})=>{prompts.push(input);return {text:JSON.stringify({documentJson:JSON.stringify({kind:'search',query:'Needle'}),explanation:'Find candidates.'})}}} as ChatGptDraftClient;
+  const client={status:async()=>({connected:true,planEnabled:true}),generate:async({input}:{input:string})=>{prompts.push(input);return {text:JSON.stringify({documentJson:JSON.stringify({kind:'search',query:'Needle first'}),explanation:'Find candidates.'})}}} as ChatGptDraftClient;
   const service=new LocalAgentService({chatgpt:client,temporaryRoot:root});t.after(()=>service.close());
   const targets=Array.from({length:20_010},(_,i)=>({id:'persona:'+i,label:i===20_009?'Needle':'Person '+i,detail:'Synthetic person',search:'Profile details '.repeat(50)}));
   const result=await finished(service,service.start({engine:'chatgpt',model:'draft-model',prompt:'Find Needle',revision:1,document,command:true,commandTargets:targets}));
-  assert.equal(result.status,'completed');assert.deepEqual(result.commandResult,{kind:'search',query:'Needle',destinations:['persona:20009']});
+  assert.equal(result.status,'completed');assert.deepEqual(result.commandResult,{kind:'search',query:'Needle first',destinations:['persona:20009']});
   assert.equal(prompts.length,2);assert.ok(prompts.every(prompt=>Buffer.byteLength(prompt)<50_000));
 });

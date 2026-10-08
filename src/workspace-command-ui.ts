@@ -62,9 +62,10 @@ function commandExecute(id){
 function commandInput(e){if(e.target.id!=='commandSearch')return false;commandStop();commandState.resultIds=null;commandState.error='';commandState.answer='';commandState.query=e.target.value;commandState.page=0;commandState.index=0;commandRefreshResults();return true}
 async function commandAskAI(){
   if(commandState.busy||!commandState.query.trim())return;
-  commandStop();const request=commandState.request;commandState.error='';commandState.answer='';commandState.busy=true;commandRefreshResults();
+  commandStop();const request=commandState.request;commandState.error='';commandState.answer='';commandState.busy=true;commandRefreshResults();document.getElementById('commandSearch')?.focus();
   try{
     flushForms();
+    if(S.localLoading||S.chatgptLoading)throw Error('AI connection is still loading. Try again in a moment.');
     if(!draftReady())throw Error('Connect a drafting provider and choose a model in AI settings to use AI commands.');
     const projectId=S.projectId,revision=S.revision,documentVersion=JSON.stringify(S.doc),prompt=commandState.query.trim();
     let job=await api('/api/agent/commands','POST',{...(projectId?{projectId}:{}),engine:S.localEngine,...(S.localEngine==='chatgpt'?{model:S.chatgptModel}:{}),prompt,revision,document:S.doc});
@@ -85,7 +86,7 @@ async function commandAskAI(){
       if(!commandEntries().some(row=>row.id===result.destination))throw Error('That destination is no longer available. Search again.');
       commandExecute(result.destination);
     }else if(result.kind==='search'){
-      commandState.query=result.query;commandState.resultIds=result.destinations;commandState.page=0;commandState.index=0;commandState.answer=job.message||'Choose a matching destination.';
+      commandState.resultIds=result.destinations;commandState.page=0;commandState.index=0;commandState.answer=job.message||'Choose a matching destination.';
     }else if(result.kind==='draft'){
       commandState.open=false;
       if(result.destination){commandState.query='';commandState.resultIds=null;const destination=commandEntries().find(row=>row.id===result.destination);if(!destination?.project||!result.destination.startsWith('project:'))throw Error('That project is no longer available.');if(destination.project!==S.projectId)selectProject(destination.project)}
@@ -130,7 +131,7 @@ document.addEventListener('keydown',e=>{
     if(e.key==='Enter'){if(e.shiftKey&&commandState.query.trim()){void commandAskAI();return}if(page[commandState.index])try{commandExecute(page[commandState.index].id)}catch(error){fail(error)}return}
     const count=Math.max(1,rows.length),position=e.key==='Home'?0:e.key==='End'?count-1:(commandState.page*6+commandState.index+(e.key==='ArrowDown'?1:-1)+count)%count;commandState.page=Math.floor(position/6);commandState.index=position%6;commandRefreshResults();return;
   }
-  if(e.key==='Tab'){const nodes=[...root.querySelectorAll('.command-palette input,.command-palette button:not([disabled]):not([tabindex="-1"])')];const first=nodes[0],last=nodes[nodes.length-1];if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus()}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus()}}
+  if(e.key==='Tab'){const nodes=[...root.querySelectorAll('.command-palette input,.command-palette button:not([disabled]):not([tabindex="-1"])')];const first=nodes[0],last=nodes[nodes.length-1];if(!nodes.includes(document.activeElement)){e.preventDefault();first?.focus()}else if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus()}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus()}}
 });
 `;
 
