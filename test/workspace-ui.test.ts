@@ -2060,3 +2060,52 @@ test('advanced settings selector retains stage switching without adding a dropdo
   assert.equal(S.stageId,'second');assert.equal(S.sections.pipeline,'advanced');S.sections.pipeline='phase';
   assert.doesNotMatch(stageForm(p,next),/name="phasePicker"/);
 });
+
+
+test('project deletion confirms scope, preserves cancel, and removes only owned data from draft',async()=>{
+  const browser=browserHarness(false);await settle();const {S,act,render}=browser.client;
+  const keepCohort=structuredClone(S.doc.cohorts[0]);keepCohort.id='keep-cohort';keepCohort.name='Keep edits';
+  const keepPipeline=structuredClone(S.doc.pipelines[0]);keepPipeline.id='keep-study';keepPipeline.cohorts.audience=keepCohort.id;
+  const keepProject={id:'keep-project',name:'Keep project',description:'Unsaved brief',cohortIds:[keepCohort.id],pipelineIds:[keepPipeline.id]};
+  S.doc.cohorts.push(keepCohort);S.doc.pipelines.push(keepPipeline);S.doc.projects.push(keepProject);S.dirty=true;
+  S.projectViews['existing-research']={tab:'studies'};S.projectViews['keep-project']={tab:'cohorts'};
+  browser.storage.set('jev-local-job:http://127.0.0.1:4180:existing-research','completed-job');
+  browser.storage.set('jev-local-job:http://127.0.0.1:4180:keep-project','keep-job');
+  const before=JSON.stringify(S.doc);render();
+  assert.match(browser.element('app').innerHTML,/class="project-list-row"><button[^>]*data-act="open-project"/);
+  assert.match(browser.element('app').innerHTML,/<\/button><button[^>]*data-act="delete-project" data-id="existing-research"/);
+  act(null,{dataset:{act:'delete-project',id:'existing-research'}});
+  assert.equal(browser.element('deleteProjectDialog').open,true);assert.match(browser.element('deleteProjectDescription').textContent,/Existing research.*1 cohort.*1 study/);
+  assert.equal(JSON.stringify(S.doc),before);
+  act(null,{dataset:{act:'delete-project-close'}});assert.equal(JSON.stringify(S.doc),before);
+  act(null,{dataset:{act:'delete-project',id:'existing-research'}});act(null,{dataset:{act:'delete-project-confirm'}});
+  assert.equal(S.doc.projects.length,1);assert.equal(S.doc.projects[0].id,'keep-project');assert.equal(JSON.stringify(S.doc.projects[0]),JSON.stringify(keepProject));
+  assert.equal(JSON.stringify(S.doc.cohorts),JSON.stringify([keepCohort]));assert.equal(JSON.stringify(S.doc.pipelines),JSON.stringify([keepPipeline]));
+  assert.equal(S.dirty,true);assert.equal(browser.bodies.length,0);assert.match(browser.element('app').innerHTML,/data-act="save"/);
+  assert.equal(S.projectViews['existing-research'],undefined);assert.equal(S.projectViews['keep-project'].tab,'cohorts');
+  assert.equal(browser.storage.has('jev-local-job:http://127.0.0.1:4180:existing-research'),false);assert.equal(browser.storage.has('jev-local-job:http://127.0.0.1:4180:keep-project'),true);
+});
+
+test('project deletion handles last project and blocks stale or newly active confirmations',async()=>{
+  const browser=browserHarness();await settle();const {S,act}=browser.client;
+  act(null,{dataset:{act:'delete-project',id:'existing-research'}});
+  S.remoteRevision=S.revision+1;assert.throws(()=>act(null,{dataset:{act:'delete-project-confirm'}}),/Workspace changed/);S.remoteRevision=null;
+  S.doc.projects[0].name='Changed project';assert.throws(()=>act(null,{dataset:{act:'delete-project-confirm'}}),/Workspace changed/);
+  act(null,{dataset:{act:'delete-project',id:'existing-research'}});
+  S.snap.activeRun={projectId:'existing-research'};assert.throws(()=>act(null,{dataset:{act:'delete-project-confirm'}}),/active study/);S.snap.activeRun=null;
+  S.localJob={status:'running'};assert.throws(()=>act(null,{dataset:{act:'delete-project-confirm'}}),/drafting job/);S.localJob=null;
+  act(null,{dataset:{act:'delete-project-confirm'}});
+  assert.equal(S.projectId,null);assert.equal(S.doc.projects.length,0);assert.equal(S.doc.cohorts.length,0);assert.equal(S.doc.pipelines.length,0);
+  assert.match(browser.element('app').innerHTML,/Start your first project/);assert.match(browser.element('app').innerHTML,/data-act="save"/);
+  assert.equal(browser.bodies.length,0);
+});
+
+test('project deletion refuses active target runs and cached drafts before opening confirmation',async()=>{
+  const browser=browserHarness(false);await settle();const {S,act}=browser.client;
+  const before=JSON.stringify(S.doc);
+  S.snap.activeRun={projectId:'existing-research'};assert.throws(()=>act(null,{dataset:{act:'delete-project',id:'existing-research'}}),/active study/);
+  assert.equal(browser.element('deleteProjectDialog').open,false);S.snap.activeRun=null;
+  S.projectViews['existing-research']={localJob:{status:'running'}};
+  assert.throws(()=>act(null,{dataset:{act:'delete-project',id:'existing-research'}}),/drafting job/);
+  assert.equal(JSON.stringify(S.doc),before);
+});
