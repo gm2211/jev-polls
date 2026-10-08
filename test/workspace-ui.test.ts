@@ -1958,6 +1958,47 @@ test('study navigation has clear scope, a reachable single-study library and con
 });
 
 
+test('study rows describe the first poll answer format and count configured cohorts rather than aliases',async()=>{
+  const browser=browserHarness(false);await settle();const {S,act,render}=browser.client;
+  act(null,{dataset:{act:'open-project',id:'existing-research'}});
+  const p=S.doc.pipelines[0],first=p.stages[0];
+  p.cohorts={audience:'cohort',sameAudience:'cohort',unassigned:'',missing:'missing-cohort'};
+  const row=()=>browser.element('app').innerHTML.match(/<button[^>]*data-act="open-pipeline"[^>]*data-id="study"[^>]*>[\s\S]*?<\/button>/)![0];
+  for(const [type,format] of [['choice','Compare options'],['noul','Yes / no'],['score','Ordered scale']]){
+    first.questions.answer={type,label:'Which direction?',instructions:'Use the shared brief.',...(type==='choice'?{criteria:{a:'A',b:'B'}}:type==='score'?{criteria:['Low','High']}:{})};
+    const before=JSON.stringify(S.doc);render();
+    assert.ok(row().includes('>'+format+'</span>'));
+    assert.match(row(),/>1 step<\/small>/);assert.match(row(),/>1 cohort<\/small>/);
+    assert.doesNotMatch(row(),/>1 steps<|>1 cohorts</);
+    assert.equal(JSON.stringify(S.doc),before,'display metadata does not alter answer contracts or cohort aliases');
+  }
+  S.doc.cohorts.push({...structuredClone(S.doc.cohorts[0]),id:'second-cohort',name:'Second cohort'});
+  S.doc.projects[0].cohortIds.push('second-cohort');p.cohorts.second='second-cohort';
+  p.stages.unshift({id:'combine',kind:'aggregate',label:'Earlier result',inputs:[],dependsOn:[],outputQuestion:'result'});
+  p.stages.push({...structuredClone(first),id:'later',questions:{answer:{type:'choice',label:'Later comparison',criteria:{a:'A',b:'B'}}}});
+  render();assert.match(row(),/>3 steps<\/small>/);assert.match(row(),/>2 cohorts<\/small>/);
+  assert.match(row(),/>Ordered scale<\/span>/);assert.doesNotMatch(row(),/>Compare options<\/span>|>Result<\/span>/);
+});
+
+test('result-only study rows omit an invented answer format and safely expose their clickable title',async()=>{
+  const browser=browserHarness(false);await settle();const {S,act,render}=browser.client;
+  act(null,{dataset:{act:'open-project',id:'existing-research'}});
+  const p=S.doc.pipelines[0];
+  p.description='Choose "best" <img src=x onerror=alert(1)> & result';p.cohorts={};
+  p.stages=[{id:'combine',kind:'aggregate',label:'Combined result',inputs:[],dependsOn:[],outputQuestion:'result'}];
+  const before=JSON.stringify(S.doc);render();
+  const row=browser.element('app').innerHTML.match(/<button[^>]*data-act="open-pipeline"[^>]*data-id="study"[^>]*>[\s\S]*?<\/button>/)![0];
+  assert.match(row,/^<button type="button"/);
+  assert.match(row,/aria-label="Open study: Choose &quot;best&quot; &lt;img src=x onerror=alert\(1\)&gt; &amp; result"/);
+  assert.match(row,/<strong>Choose &quot;best&quot; &lt;img src=x onerror=alert\(1\)&gt; &amp; result<\/strong>/);
+  assert.match(row,/>1 step<\/small>/);assert.match(row,/>0 cohorts<\/small>/);
+  assert.doesNotMatch(row,/<img|class="study-format"|>Result<|>Open study</);
+  assert.equal((row.match(/<button/g)||[]).length,1,'the whole row remains one native action');
+  browser.listeners.get('click')!({preventDefault(){},target:{closest:()=>({dataset:{act:'open-pipeline',id:'study'}})}});
+  assert.equal(S.pipelineId,'study');assert.equal(S.stageId,'combine');
+  assert.equal(JSON.stringify(S.doc),before);
+});
+
 test('step settings preserve cohort assignment and structured option contracts when basic fields are absent',async()=>{
   const browser=browserHarness();await settle();const {S,applyStage}=browser.client;S.pipelineId='study';S.stageId='panel';
   const p=S.doc.pipelines[0],s=p.stages[0];const criteria={a:{label:'Named option',description:'Keep full meaning'},b:'Other'};
