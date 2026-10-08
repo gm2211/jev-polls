@@ -70,6 +70,7 @@ body{font-family:var(--body);background:var(--paper)}
 .theme-track{display:flex;align-items:center;width:26px;height:16px;padding:2px;background:var(--muted);border-radius:999px}.theme-track>span{flex:none;width:12px;height:12px;border-radius:50%;background:var(--surface)}
 .theme-toggle[aria-checked=true] .theme-track{background:var(--blue)}.theme-toggle[aria-checked=true] .theme-track>span{transform:translateX(10px);background:var(--paper)}
 .shell{max-width:1500px;padding:16px 24px 24px}
+#view-runs .maincol{align-self:stretch}#view-runs .maincol>.panel{height:100%}
 .project-navigation{padding:0 0 12px;margin-bottom:18px}.project-navigation strong{font:600 14px var(--display)}
 .masthead{align-items:center;gap:24px;margin-bottom:24px}.masthead>div:first-child{min-width:0}.masthead p:empty{display:none}.header-actions,.toolbar,.row{gap:8px;align-items:center}.header-actions{flex-shrink:0}.header-actions:empty{display:none}.masthead h1,.detail-header h1{font:600 clamp(22px,2.4vw,30px)/1.16 var(--display);letter-spacing:-.035em}.masthead p{font-size:13px}
 .detail-header{position:static;padding:0 0 12px;margin-bottom:0;border-bottom:1px solid var(--line)}.cohort-detail-page{max-width:none}
