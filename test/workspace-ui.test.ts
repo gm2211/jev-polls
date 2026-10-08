@@ -642,9 +642,9 @@ test('proposal review itemizes removed cohorts and pipelines plus removals insid
   assert.match(html, /Cohorts: 1 added · 1 changed · 1 removed/);
   assert.match(html, /Studies: 0 added · 1 changed · 1 removed/);
   assert.match(html, /Removed cohort: <strong>Archived &lt;audience&gt;<\/strong> <code>\(removed-pool\)<\/code> · 1 personas removed/);
-  assert.match(html, /Removed study: <strong>Retired study<\/strong> <code>\(removed-pipeline\)<\/code> · 1 phases removed/);
+  assert.match(html, /Removed study: <strong>Retired study<\/strong> <code>\(removed-pipeline\)<\/code> · 1 steps removed/);
   assert.match(html, /Changed cohort:.*1 personas removed/);
-  assert.match(html, /Changed study:.*1 phases removed/);
+  assert.match(html, /Changed study:.*1 steps removed/);
   assert.match(html, /including the removals listed below/);
   assert.match(html, /Apply proposal/);
   assert.equal(S.doc.cohorts.length, 2, 'review preserves original workspace until explicit apply');
