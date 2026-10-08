@@ -1866,23 +1866,31 @@ test('answer setup distinguishes hosted probabilities from local classifier evid
 });
 
 
-test('project entry and back navigation keep every breadcrumb level and preserve study drafts',async()=>{
+test('project entry and back navigation visit every breadcrumb level and preserve study drafts',async()=>{
   const browser=browserHarness(false);await settle();const {S,act}=browser.client;
   const html=()=>browser.element('app').innerHTML;
   act(null,{dataset:{act:'open-project',id:'existing-research'}});
-  assert.equal(S.pipelineId,null);assert.match(html(),/Your research questions/);
-  assert.match(html(),/data-act="projects">Projects<\/button>.*data-act="open-project" data-id="existing-research">Existing research<\/button>.*<span aria-current="page">Studies<\/span>/);
+  assert.equal(S.pipelineId,null);assert.equal(S.tab,'overview');
+  assert.match(html(),/aria-label="Project sections"/);
+  assert.match(html(),/data-act="projects">Projects<\/button>.*<span aria-current="page">Existing research<\/span>/);
+  assert.doesNotMatch(html(),/<span aria-current="page">Studies/);
+  act(null,{dataset:{act:'tab',tab:'studies'}});
+  assert.match(html(),/Your research questions/);
+  assert.match(html(),/data-act="project-overview" aria-label="Back to project"/);
   act(null,{dataset:{act:'open-pipeline',id:'study'}});
-  assert.match(html(),/data-act="projects">Projects<\/button>.*data-act="open-project" data-id="existing-research">Existing research<\/button>.*data-act="back-studies">Studies<\/button>/);
+  assert.match(html(),/data-act="projects">Projects<\/button>.*data-act="project-overview">Existing research<\/button>.*data-act="back-studies">Studies<\/button>/);
   assert.match(html(),/<h1[^>]*aria-current="page"/);
   S.doc.pipelines[0].description='Unfinished study question';S.dirty=true;
   S.sections['setup-wizard-study-panel-answer']='options';const before=JSON.stringify(S.doc);
   act(null,{dataset:{act:'back-studies'}});assert.equal(S.projectId,'existing-research');assert.equal(S.pipelineId,null);
   assert.match(html(),/Your research questions/);
-  act(null,{dataset:{act:'open-pipeline',id:'study'}});
+  act(null,{dataset:{act:'project-overview'}});assert.equal(S.projectId,'existing-research');assert.equal(S.tab,'overview');
+  assert.match(html(),/<span aria-current="page">Existing research<\/span>/);
   act(null,{dataset:{act:'projects'}});assert.equal(S.projectId,null);
   act(null,{dataset:{act:'open-project',id:'existing-research'}});
-  assert.equal(S.pipelineId,null);assert.equal(S.tab,'studies');assert.match(html(),/Your research questions/);
+  assert.equal(S.pipelineId,null);assert.equal(S.tab,'overview');
+  act(null,{dataset:{act:'tab',tab:'studies'}});
+  act(null,{dataset:{act:'open-pipeline',id:'study'}});
   assert.equal(JSON.stringify(S.doc),before);assert.equal(S.dirty,true);assert.equal(S.sections['setup-wizard-study-panel-answer'],'options');
 });
 
