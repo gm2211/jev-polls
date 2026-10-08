@@ -1,3 +1,4 @@
+import { buildCommandTargets } from '../src/local-agent.js';
 import { MAX_COHORT_PERSONAS } from '../src/limits.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -57,7 +58,7 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={inlineCohortJobVisible,inlineCohortTarget,setupCohortPicker,runCaveats,beginRun,commandApplyProposal,commandJobVisible,S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,studies,review,say,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,studyQuestionList,validateSetupAnswers,questionParts,upsertQuestion,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={commandEntries,commandExecute,inlineCohortJobVisible,inlineCohortTarget,setupCohortPicker,runCaveats,beginRun,commandApplyProposal,commandJobVisible,S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,studies,review,say,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,studyQuestionList,validateSetupAnswers,questionParts,upsertQuestion,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
   if (openExistingProject) (context as any).clientTest.S.projectId = 'existing-research';
@@ -2197,10 +2198,10 @@ test('project entry and back navigation visit every breadcrumb level and preserv
   assert.doesNotMatch(html(),/aria-label="Project sections"|class="project-overview"/);
   assert.match(html(),/data-act="projects">Projects<\/button>.*data-act="project-overview">Existing research<\/button>.*<span aria-current="page">Studies<\/span>/);
   assert.match(html(),/Your research questions/);
-  assert.match(html(),/data-act="projects" aria-label="Back to projects"/);
+  assert.match(html(),/class="breadcrumb-link" data-act="projects">Projects/);
   act(null,{dataset:{act:'open-pipeline',id:'study'}});
   assert.match(html(),/data-act="projects">Projects<\/button>.*data-act="project-overview">Existing research<\/button>.*data-act="back-studies">Studies<\/button>/);
-  assert.match(html(),/<h1[^>]*aria-current="page"/);
+  assert.match(html(),/<span aria-current="page">Original study<\/span>/);
   S.doc.pipelines[0].description='Unfinished study question';S.dirty=true;
   S.sections['setup-wizard-study-panel-answer']='options';const before=JSON.stringify(S.doc);
   act(null,{dataset:{act:'back-studies'}});assert.equal(S.projectId,'existing-research');assert.equal(S.pipelineId,null);
@@ -2246,7 +2247,7 @@ test('every project tab selects its matching panel directly and keeps pending st
     assert.equal(panels.length,1);
     assert.match(panels[0]!,new RegExp('id="view-'+tab+'".*aria-labelledby="tab-'+tab+'"'));
     assert.ok(html().includes(content),label+' displays its content');
-    assert.match(html(),/data-act="projects" aria-label="Back to projects"/);
+    assert.match(html(),/class="breadcrumb-link" data-act="projects">Projects/);
     assert.doesNotMatch(html(),/aria-label="Project sections"/);
   }
   click({act:'tab',tab:'agents'});assert.equal(S.tab,'runs');assert.match(html(),/aria-labelledby="draftPanelTitle"/);assert.match(html(),/Unfinished assistant brief/);click({act:'draft-panel-close'});
@@ -2265,7 +2266,7 @@ test('study navigation has clear scope, a reachable single-study library and con
   S.tab='studies';S.pipelineId='study';S.stageId='panel';S.dirty=true;
   S.doc.pipelines[0].stages[0].questions.answer.criteria.a={label:'Draft name',description:'Keep typed detail'};
   const before=JSON.stringify(S.doc);render();let html=browser.element('app').innerHTML;
-  assert.doesNotMatch(html,/role="tablist"|>Advanced<|Apply phase/);assert.match(html,/data-act="back-studies" aria-label="Back to studies"/);const location=html.match(/<nav class="study-location"[\s\S]*?<\/nav>/)![0];assert.equal((location.match(/<button/g)||[]).length,4);assert.equal((location.match(/class="button /g)||[]).length,1);assert.match(location,/class="breadcrumb-link" data-act="projects"/);assert.doesNotMatch(html,/← Studies|← Projects/);assert.match(html,/>Pipeline</);assert.match(html,/aria-label="Step settings" title="Step settings"/);
+  assert.doesNotMatch(html,/role="tablist"|>Advanced<|Apply phase/);const location=html.match(/<nav class="workspace-breadcrumbs"[\s\S]*?<\/nav>/)![0];assert.equal((location.match(/<button/g)||[]).length,3);assert.equal((location.match(/aria-current="page"/g)||[]).length,1);assert.match(location,/class="breadcrumb-link" data-act="projects"/);assert.match(location,/data-act="back-studies">Studies/);assert.doesNotMatch(html,/← Studies|← Projects/);assert.match(html,/>Pipeline</);assert.match(html,/aria-label="Step settings" title="Step settings"/);
   act(null,{dataset:{act:'section-view',sectionKey:'pipeline',sectionId:'advanced'}});html=browser.element('app').innerHTML;
   assert.match(html,/Back to question/);assert.match(html,/Step settings · 1\./);assert.doesNotMatch(html,/aria-label="Study sections"|Apply phase/);
   assert.match(html,/data-settings-mode="simple"/);
@@ -2597,7 +2598,7 @@ test('run review retains clickable breadcrumbs and returns to the same study',as
   act(null,{dataset:{act:'open-pipeline',id:'study'}});
   S.plan=runReviewPlan();render();
   const html=browser.element('app').innerHTML;
-  assert.match(html,/aria-label="Study location".*data-act="projects">Projects.*data-act="project-overview">Existing research.*data-act="back-studies">Studies.*data-act="edit-review">Study.*aria-current="page">Review run/);
+  assert.match(html,/aria-label="Breadcrumb".*data-act="projects">Projects.*data-act="project-overview">Existing research.*data-act="back-studies">Studies.*data-act="edit-review">Original study.*aria-current="page">Review run/);
   const before=JSON.stringify(S.doc);
   act(null,{dataset:{act:'edit-review'}});
   assert.equal(S.plan,null);assert.equal(S.pipelineId,'study');assert.equal(JSON.stringify(S.doc),before);
@@ -2692,4 +2693,67 @@ test('an automatically opened active arena stays visible when the run completes'
   applySnapshot({...S.snap,runs:[{...S.snap.runs[0],status:'completed',message:'Done'}]});
   assert.match(browser.element('app').innerHTML,/aria-label="Live cohort behavior"/);
   assert.equal(S.liveRunId,'finishing');
+});
+
+test('one breadcrumb trail covers creation, cohorts, personas, settings and live runs',async()=>{
+  const browser=browserHarness(false);await settle();const {S,act,render}=browser.client;
+  function trail(labels:string[]){
+    render();const html=browser.element('app').innerHTML;
+    assert.equal((html.match(/aria-label="Breadcrumb"/g)||[]).length,1);
+    const nav=html.match(/<nav class="workspace-breadcrumbs"[\s\S]*?<\/nav>/)![0];
+    assert.equal((nav.match(/aria-current="page"/g)||[]).length,1);
+    const actual=[...nav.matchAll(/(?:<button[^>]*>|<span aria-current="page">)([^<]*)<\/(?:button|span)>/g)].map(match=>match[1]);
+    assert.deepEqual(actual,labels);
+  }
+  trail(['Projects']);act(null,{dataset:{act:'new-project'}});trail(['Projects','New project']);
+  act(null,{dataset:{act:'open-project',id:'existing-research'}});
+  act(null,{dataset:{act:'tab',tab:'cohorts'}});trail(['Projects','Existing research','Cohorts']);
+  act(null,{dataset:{act:'open-cohort',id:'cohort'}});trail(['Projects','Existing research','Cohorts','Original cohort']);
+  act(null,{dataset:{act:'open-persona',id:'person'}});trail(['Projects','Existing research','Cohorts','Original cohort','Adult participant']);
+  S.doc.cohorts[0].personas[0].background='Unsaved background';S.dirty=true;
+  act(null,{dataset:{act:'breadcrumb-cohort'}});assert.equal(S.personaOpen,false);
+  trail(['Projects','Existing research','Cohorts','Original cohort']);
+  S.cohortComposer=true;S.cohortTarget='new-id';trail(['Projects','Existing research','Cohorts','New cohort']);
+  S.cohortTarget='cohort';trail(['Projects','Existing research','Cohorts','Original cohort','Regenerate personas']);
+  act(null,{dataset:{act:'breadcrumb-cohort'}});assert.equal(S.cohortComposer,false);
+  act(null,{dataset:{act:'back-cohorts'}});S.cohortComposer=true;S.cohortTarget='new-id';trail(['Projects','Existing research','Cohorts','New cohort']);
+  act(null,{dataset:{act:'project-settings'}});trail(['Projects','Existing research','Project settings']);
+  S.snap.runs=[{id:'run-1',projectId:S.projectId,pipelineName:'Original study',status:'running',message:'Working',createdAt:new Date().toISOString(),liveMembers:[]}];
+  act(null,{dataset:{act:'tab',tab:'runs'}});trail(['Projects','Existing research','Runs','Original study · run-1']);
+  act(null,{dataset:{act:'live-close'}});trail(['Projects','Existing research','Runs']);
+  assert.equal(S.doc.cohorts[0].personas[0].background,'Unsaved background');assert.equal(S.dirty,true);
+  S.doc.projects.find((p:any)=>p.id===S.projectId).pipelineIds=[];
+  act(null,{dataset:{act:'project-overview'}});trail(['Projects','Existing research','Studies','New study']);
+});
+
+
+test('new project command opens composer from an existing project and preserves its draft',async()=>{
+  const browser=browserHarness();await settle();const {S,commandExecute,act}=browser.client;
+  S.tab='studies';S.pipelineId='study';S.stageId='panel';S.doc.pipelines[0].description='Unsaved question';S.dirty=true;
+  commandExecute('new-project');
+  assert.equal(S.projectId,null);assert.equal(S.projectComposer,true);
+  assert.match(browser.element('app').innerHTML,/data-form="new-project"/);
+  act(null,{dataset:{act:'cancel-project'}});act(null,{dataset:{act:'open-project',id:'existing-research'}});
+  assert.equal(S.doc.pipelines[0].description,'Unsaved question');assert.equal(S.dirty,true);
+  assert.equal(browser.bodies.length,0);
+});
+
+test('new study command exists only for empty projects and opens creation from another tab',async()=>{
+  const browser=browserHarness();await settle();const {S,commandEntries,commandExecute}=browser.client;
+  assert.equal(commandEntries().some((entry:any)=>entry.id==='new-study'),false);
+  S.doc.projects.find((p:any)=>p.id===S.projectId).pipelineIds=[];S.pipelineId=null;S.tab='cohorts';
+  assert.equal(commandEntries().some((entry:any)=>entry.id==='new-study'),true);
+  commandExecute('new-study');
+  assert.equal(S.tab,'studies');assert.equal(S.studyComposer,true);
+  assert.match(browser.element('app').innerHTML,/data-form="new-pipeline"/);
+  assert.equal(browser.bodies.length,0);
+});
+
+
+test('AI destination IDs match visible command destinations in project and global scope', async()=>{
+  const browser=browserHarness();await settle();const {S,commandEntries,act}=browser.client;
+  const compare=()=>assert.deepEqual(Array.from(commandEntries(),(row:any)=>row.id).sort(),buildCommandTargets(S.doc,S.projectId||undefined,S.snap.runs).map(row=>row.id).sort());
+  S.snap.runs=[{id:'run-one',projectId:S.projectId,pipelineId:'study',pipelineName:'Original study',status:'completed'}];compare();
+  act(null,{dataset:{act:'projects'}});compare();
+  act(null,{dataset:{act:'open-project',id:'existing-research'}});S.snap.runs=[];S.doc.projects[0].pipelineIds=[];compare();
 });
