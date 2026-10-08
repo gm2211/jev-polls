@@ -101,6 +101,8 @@ Set targets from a histogram or add a dimension that has not yet been generated.
 
 From an individual view, choose **Regenerate this persona**. Optional instructions describe the replacement, and the selected connected provider drafts it. The review shows current and proposed profiles, ages, source references and synthetic fields. **Use replacement persona** changes only that individual in the browser draft; save explicitly to keep it. ID, segment and weight remain stable. Other personas and historical runs remain unchanged.
 
+The command palette has a separate, bounded tool loop for workspace search, navigation, and creation or editing handoffs. It uses the selected drafting provider and a searchable index of project, study, step, cohort, persona, and run destinations, including the current unsaved draft. This command index can span projects; generated research drafts remain scoped to their selected project. Navigation IDs are checked against the index. Commands open prefilled editing or creation controls for review; they do not save or run research. Closing the palette, changing the query, or choosing another destination cancels a pending command and prevents late navigation.
+
 The drafting assistant has no research tools. Treat new personas, weights, and traits as synthetic assumptions unless supported by sources already supplied in the brief or workspace. Research sources through the existing agent/MCP flow when needed.
 
 ## Connecting an existing agent

@@ -1,4 +1,4 @@
-import { MAX_COHORT_PERSONAS } from './limits.js';
+import { MAX_COHORT_PERSONAS, MAX_WORKSPACE_BYTES } from './limits.js';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { readFile, readdir } from 'node:fs/promises';
@@ -15,7 +15,7 @@ import { writeJson, writeText } from './io.js';
 import { WorkspaceStore, workspacePlan, WorkspaceConflictError, validateWorkspaceDocument } from './workspace-store.js';
 import { renderWorkspace } from './workspace-ui.js';
 import { agentConnectionConfig } from './agent-config.js';
-import { optionDraftInputSchema, LocalAgentError, LocalAgentService } from './local-agent.js';
+import { buildCommandTargets, optionDraftInputSchema, LocalAgentError, LocalAgentService } from './local-agent.js';
 import { ChatGptConnection, chatGptMessage, createDraftClient, type ChatGptDraftClient } from './chatgpt.js';
 import type { Pipeline, Provider } from './types.js';
 import type { AuthStatus } from './auth.js';
@@ -306,6 +306,25 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
         if (input.engine === 'chatgpt' && changingChatGpt) throw new HttpError(409, 'CHATGPT_BUSY', 'Finish or cancel ChatGPT sign-in before drafting.');
         // Project validation, launch and ownership registration must precede any later save.
         const started = localAgents.start({ ...input, document: current.document });
+        activeDraftId = started.id;
+        return started;
+      });
+      send(response, 202, job); return;
+    }
+    if (method === 'POST' && pathname === '/api/agent/commands') {
+      const input = z.object({ projectId: safeId.optional(), engine: z.enum(['codex', 'claude', 'chatgpt']), model: z.string().trim().min(1).max(200).optional(), prompt: z.string().trim().min(1).max(10_000), revision: z.number().int().nonnegative().safe(), document: z.unknown().optional() }).strict().parse(await body(request, MAX_WORKSPACE_BYTES + 256 * 1024));
+      const saved = await store.read();
+      if (saved.revision !== input.revision) throw new WorkspaceConflictError(input.revision, saved.revision);
+      let commandDocument: WorkspaceDocument;
+      try { commandDocument = validateWorkspaceDocument(input.document ?? saved.document); }
+      catch (error) { throw new HttpError(400, 'INVALID_COMMAND_CONTEXT', validationMessage(error)); }
+      if (input.engine === 'chatgpt' && (changingChatGpt || (await chatgpt.snapshot()).signingIn || changingChatGpt)) throw new HttpError(409, 'CHATGPT_BUSY', 'Finish or cancel ChatGPT sign-in before using AI commands.');
+      const job = await withWorkspaceMutation(async () => {
+        const current = await store.read();
+        if (current.revision !== input.revision) throw new WorkspaceConflictError(input.revision, current.revision);
+        if (input.engine === 'chatgpt' && changingChatGpt) throw new HttpError(409, 'CHATGPT_BUSY', 'Finish or cancel ChatGPT sign-in before using AI commands.');
+        const targets = buildCommandTargets(commandDocument, input.projectId, ownedRuns(commandDocument));
+        const started = localAgents.start({ ...input, command: true, document: commandDocument, commandTargets: targets });
         activeDraftId = started.id;
         return started;
       });
