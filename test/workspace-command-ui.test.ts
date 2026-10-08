@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { Script } from 'node:vm';
 import { COMMAND_CLIENT } from '../src/workspace-command-ui.js';
 
-function harness() {
+function harness(overrides: Record<string, unknown> = {}) {
   const listeners = new Map<string, Function>();
   const S: any = { snap: {}, projectId: 'one', tab: 'studies', sections: {}, localPrompt: '', localJob: null, localStart: null, localLoading: false, remoteRevision: null,
     doc: { projects: [{ id: 'one', name: 'Games', pipelineIds: ['names'], cohortIds: ['gamers'] }, { id: 'two', name: 'Food', pipelineIds: ['food'], cohortIds: [] }],
@@ -22,7 +22,8 @@ function harness() {
     fail(e: Error) { calls.push('error:' + e.message); },
     applyLocalProposal: async () => { S.proposalApplied = true; const p = { id: 'new', name: 'New study', stages: [{ id: 'newstep', kind: 'poll' }] }; S.doc.pipelines.push(p); context.project().pipelineIds.push(p.id); },
   };
-  new Script(COMMAND_CLIENT + '\nglobalThis.command={commandEntries,commandExecute,commandInput,commandAction,commandOpen,commandApplyProposal,draftSidePanel,commandResults,commandJobVisible,state:commandState};').runInNewContext(context);
+  Object.assign(context, overrides);
+  new Script(COMMAND_CLIENT + '\nglobalThis.command={commandEntries,commandExecute,commandInput,commandAction,commandOpen,commandApplyProposal,draftSidePanel,commandResults,commandJobVisible,commandAskAI,commandClose,commandChoices,state:commandState};').runInNewContext(context);
   return { ...context.command, S, calls, key: listeners.get('keydown')! };
 }
 
@@ -45,7 +46,7 @@ test('keyboard shortcut preserves dirty forms and refuses navigation when valida
 test('command pagination keeps all matches reachable and escapes cohort labels', () => {
   const h = harness(); assert.match(h.commandResults(), /Next destinations/);
   h.commandInput({ target: { id: 'commandSearch', value: 'gamers' } }); assert.match(h.commandResults(), /&lt;Gamers&gt;/);
-  h.commandInput({ target: { id: 'commandSearch', value: 'missing' } }); assert.match(h.commandResults(), /No matching destinations/);
+  h.commandInput({ target: { id: 'commandSearch', value: 'missing' } }); assert.match(h.commandResults(), /Ask AI: missing/);
 });
 
 test('draft panel retains prompt and underlying view; applying opens resulting pipeline', async () => {
@@ -69,4 +70,68 @@ test('command destinations reset stale cohort inspectors and open result connect
   h.commandExecute('stage:one:names:result');assert.equal(h.S.sections['flow-inspector'],'connections');
   h.S.sections['flow-inspector']='cohort';h.S.flowCohortPick=true;
   await h.commandApplyProposal();assert.equal(h.S.sections['flow-inspector'],'question');assert.equal(h.S.flowCohortPick,false);
+});
+
+
+test('keyboard moves across pages, supports Home/End and ignores composition', () => {
+  const h=harness();h.commandOpen();
+  const press=(key:string,extra={})=>h.key({key,target:{id:'commandSearch'},preventDefault(){},...extra});
+  for(let i=0;i<6;i++)press('ArrowDown');
+  assert.equal(h.state.page,1);assert.equal(h.state.index,0);
+  press('ArrowUp');assert.equal(h.state.page,0);assert.equal(h.state.index,5);
+  press('End');assert.equal(h.state.page*6+h.state.index,h.commandChoices().length-1);
+  press('Home');assert.equal(h.state.index,0);assert.equal(h.state.page,0);
+  press('ArrowDown',{isComposing:true});assert.equal(h.state.index,0);
+});
+
+test('AI receives unsaved draft, navigates validated destination without saving', async () => {
+  const requests:any[]=[];
+  const h=harness({api:async(path:string,method:string,body:any)=>{requests.push({path,method,body});return {status:'completed',commandResult:{kind:'navigate',destination:'stage:two:food:taste'}}}});
+  h.commandOpen();h.commandInput({target:{id:'commandSearch',value:'open the food preference question'}});
+  await h.commandAskAI();
+  assert.equal(requests[0].path,'/api/agent/commands');assert.equal(requests[0].body.document,h.S.doc);
+  assert.equal(h.S.projectId,'two');assert.equal(h.S.stageId,'taste');assert.equal(h.state.open,false);
+});
+
+test('AI failure stays visible and keeps query for retry', async () => {
+  const h=harness({api:async()=>{throw Error('Provider unavailable')}});h.commandOpen();
+  h.commandInput({target:{id:'commandSearch',value:'create something'}});await h.commandAskAI();
+  assert.match(h.state.error,/Provider unavailable/);assert.equal(h.state.query,'create something');assert.equal(h.state.open,true);assert.equal(h.state.busy,false);
+});
+
+test('AI result cannot navigate after query changes or workspace draft changes', async () => {
+  let resolve!:Function;const h=harness({api:()=>new Promise(r=>{resolve=r})});h.commandOpen();
+  h.commandInput({target:{id:'commandSearch',value:'open food'}});const request=h.commandAskAI();
+  h.commandInput({target:{id:'commandSearch',value:'stay here'}});resolve({status:'completed',commandResult:{kind:'navigate',destination:'project:two'}});await request;
+  assert.equal(h.S.projectId,'one');assert.equal(h.state.query,'stay here');
+  const next=h.commandAskAI();h.S.doc.projects[0].name='Unsaved edit';resolve({status:'completed',commandResult:{kind:'navigate',destination:'project:two'}});await next;
+  assert.equal(h.S.projectId,'one');assert.match(h.state.error,/workspace changed/);
+});
+
+test('AI creation opens prefilled review flow; search only displays validated candidates', async () => {
+  let result:any={kind:'draft',target:'study',prompt:'Compare snack names'};
+  const h=harness({api:async()=>({status:'completed',commandResult:result})});h.commandOpen();
+  h.commandInput({target:{id:'commandSearch',value:'make a snack study'}});await h.commandAskAI();
+  assert.equal(h.S.localPrompt,'Compare snack names');assert.equal(h.commandJobVisible(),true);
+  result={kind:'search',query:'food preference',destinations:['stage:two:food:taste']};h.commandOpen();h.commandInput({target:{id:'commandSearch',value:'find food questions'}});await h.commandAskAI();
+  assert.equal(h.commandEntries().length,1);assert.equal(h.commandEntries()[0].stage,'taste');assert.equal(h.S.projectId,'one');
+});
+
+
+test('manual navigation cancels a pending AI command before reopening the palette',async()=>{
+  let resolve!:Function;const h=harness({api:()=>new Promise(r=>{resolve=r})});
+  h.commandOpen();h.commandInput({target:{id:'commandSearch',value:'Naming'}});
+  const pending=h.commandAskAI();assert.equal(h.state.busy,true);
+  h.commandExecute('pipeline:one:names');assert.equal(h.state.busy,false);assert.equal(h.state.open,false);
+  h.commandOpen();
+  resolve({status:'completed',commandResult:{kind:'navigate',destination:'project:two'}});await pending;
+  assert.equal(h.S.projectId,'one');assert.equal(h.S.pipelineId,'names');assert.equal(h.state.open,true);
+});
+
+test('AI settings removes palette before opening its native dialog',()=>{
+  const h=harness();h.commandOpen();h.calls.length=0;
+  h.commandExecute('settings');
+  assert.equal(h.state.open,false);assert.equal(h.state.busy,false);
+  assert.ok(h.calls.indexOf('render')>=0);
+  assert.ok(h.calls.indexOf('render')<h.calls.indexOf('act:ai-open'));
 });
