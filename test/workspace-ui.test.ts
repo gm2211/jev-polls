@@ -118,6 +118,8 @@ test('review exposes one run action outside tab panels and retains provider read
     act(null, { dataset: { act: 'section-view', sectionKey: 'run-review', sectionId: selected } });
     const html = review();
     assert.equal([...html.matchAll(/data-act="start-run"/g)].length, 1);
+    assert.ok(ancestorsOfRunAction(html).some(tag => /class="header-actions"/.test(tag)), 'Run is a top-level header command');
+    assert.ok(html.indexOf('data-act="start-run"') < html.indexOf('aria-label="Run review"'));
     assert.ok(ancestorsOfRunAction(html).every(tag => !/data-section-panel|\bhidden\b/.test(tag)), 'Run action must remain outside hidden or switchable panels');
     assert.doesNotMatch(html.match(/<button[^>]*data-act="start-run"[^>]*>/)![0], /\bdisabled\b/);
   }
