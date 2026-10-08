@@ -411,7 +411,13 @@ export async function runPipeline(pipeline: Pipeline, cohorts: Record<string, Co
   while (pending.size) {
     const ready = order.filter((stage) => pending.has(stage.id) && stage.dependsOn.every((dependency) => stages[dependency] !== undefined));
     if (!ready.length) throw new Error('pipeline dependencies could not be scheduled');
-    await Promise.all(ready.map(async (stage) => { stages[stage.id] = await runStage(stage); pending.delete(stage.id); }));
+    await Promise.all(ready.map(async (stage) => {
+      options.onStageProgress?.({ stage: stage.id, status: 'running' });
+      const result = await runStage(stage);
+      stages[stage.id] = result;
+      pending.delete(stage.id);
+      options.onStageProgress?.({ stage: stage.id, status: result.status, ...(result.reason ? { reason: result.reason } : {}) });
+    }));
   }
   const failed = Object.values(stages).some((stage) => stage.status === 'failed');
   const completedAt = new Date().toISOString();

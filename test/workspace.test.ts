@@ -103,18 +103,21 @@ test('workspace never runs on connect/save/review and requires a fresh explicit 
   assert.equal(evaluations, 0);
   const accepted = await run(plan); assert.equal(accepted.status, 202);
   let job = await accepted.json() as WorkspaceRun;
+  assert.deepEqual(job.stages?.map(stage => [stage.id, stage.kind, stage.status]), [['audience', 'poll', 'pending'], ['decision', 'decision', 'pending']]);
   assert.equal((await run(plan)).status, 409);
   await new Promise(resolve => setTimeout(resolve, 4));
   const live = await (await fetch(new URL(`/api/run/${job.id}`, server.url))).json() as WorkspaceRun;
   assert.equal(live.liveMembers?.[0]?.status, 'running');
   assert.equal(live.liveMembers?.[0]?.stage, 'audience');
   assert.equal(live.liveMembers?.[0]?.repeat, 1);
+  assert.deepEqual(live.stages?.map(stage => [stage.id, stage.status]), [['audience', 'running'], ['decision', 'pending']]);
   for (let i = 0; i < 100 && job.status === 'running'; i++) {
     await new Promise(resolve => setTimeout(resolve, 10));
     job = await (await fetch(new URL(`/api/run/${job.id}`, server.url))).json() as WorkspaceRun;
   }
   assert.equal(job.projectId, 'existing-research');
   assert.equal(job.status, 'completed'); assert.equal(evaluations, 1);
+  assert.deepEqual(job.stages?.map(stage => [stage.id, stage.status]), [['audience', 'completed'], ['decision', 'completed']]);
   assert.equal(job.liveMembers?.[0]?.status, 'completed');
   assert.ok(job.liveMembers?.[0]?.answers?.choice);
   assert.doesNotMatch(JSON.stringify(emitted), /Synthetic profile|answers|probabilities/);
@@ -172,6 +175,7 @@ test('workspace never runs on connect/save/review and requires a fresh explicit 
   assert.equal(recoveredJob?.projectId, 'existing-research');
   assert.equal(recoveredJob?.reportUrl, job.reportUrl);
   assert.equal(recoveredJob?.liveMembers?.[0]?.repeat, 1);
+  assert.deepEqual(recoveredJob?.stages?.map(stage => [stage.id, stage.status]), [['audience', 'completed'], ['decision', 'completed']]);
   assert.ok(recoveredJob?.liveMembers?.[0]?.answers?.choice);
   assert.equal((await fetch(new URL(`/api/run/${job.id}`, server.url))).status, 200);
   assert.equal((await fetch(new URL(job.reportUrl, server.url))).status, 200);

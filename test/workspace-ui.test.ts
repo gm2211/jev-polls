@@ -2517,3 +2517,66 @@ test('run review keeps nonblocking assumptions optional and preserves run settin
   assert.doesNotMatch(review(), /<details class="review-caveats"/);
   assert.equal(browser.requests.filter(path => path === '/api/run').length, 0);
 });
+
+test('voting replay reveals saved members without inference and stops at navigation boundaries', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, act, render } = browser.client;
+  const run = { id: 'arena', projectId: S.projectId, pipelineName: 'Replay study', status: 'completed', createdAt: '2026-10-08T12:00:00Z', message: 'Done', liveMembers: Array.from({length: 26}, (_, i) => ({stage:'poll', personaId:'p'+i, label:'Profile '+i, segment:'general', age:30, repeat:1, status:'completed', answers:{test:{type:'choice', choice:'saved-'+i, probabilities:{yes:1}}}})) };
+  S.snap.runs=[run]; S.tab='runs'; S.liveRunId=run.id; render();
+  const initialRequests=browser.requests.length;
+  act(null,{dataset:{act:'arena-replay'}});
+  assert.doesNotMatch(browser.element('app').innerHTML,/Selected: saved-0/);
+  act(null,{dataset:{act:'arena-step'}});
+  assert.match(browser.element('app').innerHTML,/Selected: saved-0/);
+  for(let i=0;i<24;i++)act(null,{dataset:{act:'arena-step'}});
+  assert.equal(S.liveMemberPage,1);
+  assert.match(browser.element('app').innerHTML,/Selected: saved-24/);
+  act(null,{dataset:{act:'arena-play'}});
+  const staleTick=browser.timeouts.at(-1)!;
+  act(null,{dataset:{act:'live-close'}});
+  staleTick();
+  assert.equal(S.liveRunId,'history');
+  assert.match(browser.element('app').innerHTML,/Study runs/);
+  assert.equal(browser.requests.length,initialRequests,'Playback must not dispatch any API request');
+  act(null,{dataset:{act:'live-open',id:run.id}});
+  assert.match(browser.element('app').innerHTML,/Selected: saved-0/);
+});
+
+test('replay pauses while hidden, ignores live runs, and escapes run names', async () => {
+  const browser=browserHarness();await settle();const {S,act,render}=browser.client;
+  S.tab='runs';S.liveRunId='arena';
+  const run={id:'arena',projectId:S.projectId,pipelineName:'<unsafe>',status:'running',createdAt:'2026-10-08T12:00:00Z',message:'Running',liveMembers:[{stage:'poll',personaId:'p',label:'Profile',segment:'general',age:30,repeat:1,status:'completed',answers:{test:{type:'noul',noul:.9}}}]};
+  S.snap.runs=[run];render();
+  assert.match(browser.element('app').innerHTML,/&lt;unsafe&gt;/);
+  act(null,{dataset:{act:'arena-replay'}});
+  assert.match(browser.element('app').innerHTML,/Yes · 90%/);
+  run.status='completed';render();act(null,{dataset:{act:'arena-replay'}});act(null,{dataset:{act:'arena-play'}});
+  const tick=browser.timeouts.at(-1)!;
+  browser.document.visibilityState='hidden';browser.listeners.get('visibilitychange')!();tick();
+  assert.doesNotMatch(browser.element('app').innerHTML,/Yes · 90%/);
+  browser.document.visibilityState='visible';act(null,{dataset:{act:'arena-step'}});
+  assert.match(browser.element('app').innerHTML,/Yes · 90%/);
+});
+
+test('replay scrub preserves bounds and selecting a member pauses playback', async () => {
+  const browser=browserHarness();await settle();const {S,act,render}=browser.client;
+  S.tab='runs';S.liveRunId='replay';S.snap.runs=[{id:'replay',projectId:S.projectId,pipelineName:'Replay',status:'completed',liveMembers:[{stage:'poll',personaId:'p',label:'Profile',age:30,segment:'general',repeat:1,status:'completed',answers:{a:{type:'noul',noul:.4}}}]}];render();
+  act(null,{dataset:{act:'arena-replay'}});act(null,{dataset:{act:'arena-scrub'},value:'999'});
+  assert.match(browser.element('app').innerHTML,/1 of 1 members revealed/);
+  act(null,{dataset:{act:'arena-scrub'},value:'-9'});
+  assert.match(browser.element('app').innerHTML,/0 of 1 members revealed/);
+  act(null,{dataset:{act:'arena-play'}});const tick=browser.timeouts.at(-1)!;
+  act(null,{dataset:{act:'live-member',stage:'poll',key:'poll:p:1',page:'0'}});tick();
+  assert.match(browser.element('app').innerHTML,/0 of 1 members revealed/);
+  assert.doesNotMatch(browser.element('app').innerHTML,/Yes · 40%/);
+});
+
+test('an automatically opened active arena stays visible when the run completes', async () => {
+  const browser=browserHarness();await settle();const {S,render,applySnapshot}=browser.client;
+  S.tab='runs';S.liveRunId=null;
+  S.snap.runs=[{id:'finishing',projectId:S.projectId,pipelineName:'Finishing',status:'running',liveMembers:[]}];
+  render();assert.equal(S.liveRunId,'finishing');
+  applySnapshot({...S.snap,runs:[{...S.snap.runs[0],status:'completed',message:'Done'}]});
+  assert.match(browser.element('app').innerHTML,/aria-label="Live cohort behavior"/);
+  assert.equal(S.liveRunId,'finishing');
+});

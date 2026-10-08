@@ -17,7 +17,7 @@ import { renderWorkspace } from './workspace-ui.js';
 import { agentConnectionConfig } from './agent-config.js';
 import { optionDraftInputSchema, LocalAgentError, LocalAgentService } from './local-agent.js';
 import { ChatGptConnection, chatGptMessage, createDraftClient, type ChatGptDraftClient } from './chatgpt.js';
-import type { Provider } from './types.js';
+import type { Pipeline, Provider } from './types.js';
 import type { AuthStatus } from './auth.js';
 import type { WorkspaceDocument, WorkspaceRun, WorkspacePlan } from './workspace-types.js';
 
@@ -30,11 +30,21 @@ const savedJobSchema = z.object({
   id: z.string().regex(WORKSPACE_RUN_ID), projectId: safeId, pipelineId: safeId, pipelineName: z.string().max(100_000),
   status: z.enum(['running', 'completed', 'failed']), createdAt: z.string().max(100), message: z.string().max(100_000),
   provider: evaluationProvider.optional(),
+  stages: z.array(z.object({ id: safeId, label: z.string().max(100_000), kind: z.enum(['poll', 'aggregate', 'decision']), dependsOn: z.array(safeId), status: z.enum(['pending', 'running', 'completed', 'skipped', 'failed']), reason: z.string().max(100_000).optional() }).strict()).optional(),
   progress: z.object({ stage: safeId, completed: z.number().int().nonnegative(), total: z.number().int().nonnegative() }).strict().optional(),
   liveMembers: z.array(z.object({ stage: safeId, personaId: safeId, label: z.string().max(100_000), segment: safeId, age: z.number().finite(), repeat: z.number().int().positive(), status: z.enum(['queued','running','completed','failed']), answers: z.record(z.string(), z.unknown()).optional(), model: z.string().optional(), cacheHit: z.boolean().optional(), reason: z.string().max(100_000).optional() }).strict()).optional(),
   usage: z.object({ inputTokens: z.number().finite().nonnegative(), outputTokens: z.number().finite().nonnegative(), requests: z.number().int().nonnegative(), cacheHits: z.number().int().nonnegative(), tokenUsage: z.literal('unreported').optional(), measuredInputTokens: z.number().int().nonnegative().optional() }).strict().optional(),
   reportUrl: z.string().regex(/^\/reports\/[0-9a-f-]{36}$/).optional(),
 }).strict();
+function initialRunStages(pipeline: Pipeline): NonNullable<WorkspaceRun['stages']> {
+  return pipeline.stages.map(stage => ({ id: stage.id, label: stage.label, kind: stage.kind, dependsOn: [...stage.dependsOn], status: 'pending' }));
+}
+function recordedRunStages(pipeline: Pipeline, record: Awaited<ReturnType<typeof loadRun>>): NonNullable<WorkspaceRun['stages']> {
+  return pipeline.stages.map(stage => {
+    const result = record.stages[stage.id];
+    return { id: stage.id, label: stage.label, kind: stage.kind, dependsOn: [...stage.dependsOn], status: result?.status ?? 'failed', ...(result?.reason ? { reason: result.reason } : {}) };
+  });
+}
 class HttpError extends Error { constructor(readonly status: number, readonly code: string, message: string) { super(message); } }
 function validationMessage(error: unknown): string {
   if (error instanceof z.ZodError) return error.issues.map(issue => `${issue.path.join('.') || 'Study'}: ${issue.message}`).join('\n').slice(0, 3000);
@@ -129,13 +139,14 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
           } catch { /* Ownerless artifacts are not workspace runs. */ }
         }
         if (!persistedProjectId || !existingProjects.has(persistedProjectId)) continue;
-        const summary: WorkspaceRun = { provider: record.provider, projectId: persistedProjectId, id, pipelineId: record.pipeline.id, pipelineName: record.pipeline.name, status: record.status, createdAt: record.createdAt, message, usage: record.usage, reportUrl: `/reports/${id}`, ...(persistedProgress ? { progress: persistedProgress } : {}), ...(persistedMembers ? { liveMembers: persistedMembers } : {}) };
+        const summary: WorkspaceRun = { provider: record.provider, projectId: persistedProjectId, id, pipelineId: record.pipeline.id, pipelineName: record.pipeline.name, status: record.status, createdAt: record.createdAt, message, usage: record.usage, reportUrl: `/reports/${id}`, stages: recordedRunStages(record.pipeline, record), ...(persistedProgress ? { progress: persistedProgress } : {}), ...(persistedMembers ? { liveMembers: persistedMembers } : {}) };
+
         jobs.set(summary.id, summary); runRecords.set(summary.id, join(path, 'run.json'));
       } catch {
         try {
           const pending = savedJobSchema.parse(JSON.parse(await readFile(join(path, 'pending.json'), 'utf8')));
           if (pending.id !== id || pending.status !== 'running' || !existingProjects.has(pending.projectId)) continue;
-          jobs.set(id, { ...pending, status: 'failed', message: 'Server stopped before this run finished. Review and run again to reuse completed cached responses.', reportUrl: undefined });
+          jobs.set(id, { ...pending, status: 'failed', message: 'Server stopped before this run finished. Review and run again to reuse completed cached responses.', reportUrl: undefined, stages: pending.stages?.map(stage => stage.status === 'running' ? { ...stage, status: 'failed', reason: 'server stopped before the stage completed' } : stage) });
         } catch { /* An incomplete/corrupt artifact is not presented as a completed run. */ }
       }
     }
@@ -201,6 +212,14 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
         seed: input.seed, concurrency: input.concurrency, maxRequests: input.maxRequests,
         cacheDir: join(directory, 'cache'),
         onProgress: event => { job.progress = event; job.message = `${event.stage}: ${event.completed} of ${event.total} evaluations processed`; options.emit?.({ event: 'progress', runId: job.id, ...event }); },
+        onStageProgress: event => {
+          const stage = job.stages?.find(item => item.id === event.stage);
+          if (stage) {
+            stage.status = event.status;
+            if (event.reason) stage.reason = event.reason;
+            else delete stage.reason;
+          }
+        },
         onMemberProgress: event => {
           const members = job.liveMembers ??= [];
           const key = `${event.stage}:${event.personaId}:${event.repeat}`;
@@ -215,6 +234,7 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
       const finished: WorkspaceRun = {
         ...job,
         status: record.status,
+        stages: recordedRunStages(record.pipeline, record),
         usage: record.usage,
         message: record.status === 'completed' ? 'Study complete.' : 'Study ended with failures. Inspect the report before interpreting results.',
         reportUrl: `/reports/${job.id}`,
@@ -226,6 +246,7 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
       options.emit?.({ event: 'workspace-run', ...publicJob });
     } catch (error) {
       job.status = 'failed'; job.message = error instanceof ProviderError ? error.message : 'Run could not complete. Check study configuration and the selected evaluation provider, then review and retry.';
+      job.stages = job.stages?.map(stage => stage.status === 'running' ? { ...stage, status: 'failed', reason: job.message } : stage);
       options.emit?.({ event: 'workspace-run', runId: job.id, status: 'failed' });
     } finally { try { await provider?.close?.(); } finally { activeProvider = undefined; activeRun = null; } }
   }
@@ -389,7 +410,7 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
         if (activeRun) throw new HttpError(409, 'RUN_IN_PROGRESS', 'A study is already running. Wait for it to finish.');
         // No await between consuming the review and taking the execution lock.
         if (!plans.delete(input.planToken)) throw new HttpError(409, 'REVIEW_REQUIRED', 'This review was already used. Review the study again.');
-        const job: WorkspaceRun = { projectId: project.projectId, provider: input.provider, id: randomUUID(), pipelineId: project.pipeline.id, pipelineName: project.pipeline.name, status: 'running', createdAt: new Date().toISOString(), message: input.provider === 'gliner' ? 'Loading local GLiNER model…' : 'Starting your reviewed study…' };
+        const job: WorkspaceRun = { projectId: project.projectId, provider: input.provider, id: randomUUID(), pipelineId: project.pipeline.id, pipelineName: project.pipeline.name, status: 'running', createdAt: new Date().toISOString(), message: input.provider === 'gliner' ? 'Loading local GLiNER model…' : 'Starting your reviewed study…', stages: initialRunStages(project.pipeline) };
         jobs.set(job.id, job); activeRun = job;
         return { job, project };
       });
