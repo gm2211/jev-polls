@@ -118,6 +118,8 @@ test('review exposes one run action outside tab panels and retains provider read
     act(null, { dataset: { act: 'section-view', sectionKey: 'run-review', sectionId: selected } });
     const html = review();
     assert.equal([...html.matchAll(/data-act="start-run"/g)].length, 1);
+    assert.ok(ancestorsOfRunAction(html).some(tag => /class="header-actions"/.test(tag)), 'Run is a top-level header command');
+    assert.ok(html.indexOf('data-act="start-run"') < html.indexOf('aria-label="Run review"'));
     assert.ok(ancestorsOfRunAction(html).every(tag => !/data-section-panel|\bhidden\b/.test(tag)), 'Run action must remain outside hidden or switchable panels');
     assert.doesNotMatch(html.match(/<button[^>]*data-act="start-run"[^>]*>/)![0], /\bdisabled\b/);
   }
@@ -2602,25 +2604,92 @@ test('run review retains clickable breadcrumbs and returns to the same study',as
   assert.equal(browser.requests.filter(path=>path==='/api/run').length,0);
 });
 
-test('run review paginates evidence separately and preserves settings across pages', async () => {
+test('run review keeps nonblocking assumptions optional and preserves run settings', async () => {
   const browser = browserHarness(); await settle();
   const { S, review, act } = browser.client;
   S.pipelineId = 'study'; S.tab = 'studies';
-  S.plan = { provider: 'typesafe', model: 'jev', stages: [], warnings: Array.from({ length: 14 }, (_, i) => 'Evidence note ' + (i + 1) + ' <unsafe>') };
+  S.plan = { provider: 'typesafe', model: 'jev', stages: [], warnings: Array.from({ length: 14 }, (_, i) => 'Assumption ' + (i + 1) + ' <unsafe>') };
   const form = { dataset: { form: 'run-options' } };
   browser.listeners.get('input')!({ target: { name: 'seed', value: 'retained-seed', closest: () => form } });
-  act(null, { dataset: { act: 'section-view', sectionKey: 'run-review', sectionId: 'warnings' } });
+  // A previously selected notes tab falls back to the request plan.
+  S.sections['run-review'] = 'warnings';
   let html = review();
-  assert.match(html, /Evidence notes \(14\)/);
-  assert.match(html, /1–3 of 14/);
-  assert.match(html, /&lt;unsafe&gt;/); assert.doesNotMatch(html, /<unsafe>/);
-  assert.doesNotMatch(html, /Evidence note 4 /);
-  assert.doesNotMatch(html.match(/<form data-form="run-options">[\s\S]*?<\/form>/)![0], /Evidence note/);
-  act(null, { dataset: { act: 'page-action', pageKey: 'existing-research:run-warnings', page: '1' } });
-  html = review(); assert.match(html, /4–6 of 14/); assert.match(html, /Evidence note 4 /);
+  assert.doesNotMatch(html, /Evidence notes|run-warnings|class="warning"/);
+  assert.match(html, /<summary>Assumptions and model limits<\/summary>/);
+  assert.match(html, /They do not block this run or require dismissal/);
+  const details = html.match(/<details class="review-caveats"[\s\S]*?<\/details>/)![0];
+  assert.doesNotMatch(details, /<details[^>]*\bopen\b|<button|<input|<select/);
+  assert.match(details, /Assumption 14 &lt;unsafe&gt;/);
+  assert.doesNotMatch(html, /<unsafe>/);
+  assert.match(html, /data-act="start-run" >Run study/);
   act(null, { dataset: { act: 'section-view', sectionKey: 'run-review', sectionId: 'settings' } });
   assert.match(review(), /name="seed"[^>]*value="retained-seed"/);
-  (browser.window as any).innerWidth = 390; S.listPages = {};
-  html = review(); assert.match(html, /1–1 of 14/); assert.doesNotMatch(html, /Evidence note 2 /);
+  (browser.window as any).innerWidth = 390;
+  assert.match(review(), /Assumptions and model limits/);
+  S.plan.warnings = [];
+  assert.doesNotMatch(review(), /<details class="review-caveats"/);
   assert.equal(browser.requests.filter(path => path === '/api/run').length, 0);
+});
+
+test('voting replay reveals saved members without inference and stops at navigation boundaries', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, act, render } = browser.client;
+  const run = { id: 'arena', projectId: S.projectId, pipelineName: 'Replay study', status: 'completed', createdAt: '2026-10-08T12:00:00Z', message: 'Done', liveMembers: Array.from({length: 26}, (_, i) => ({stage:'poll', personaId:'p'+i, label:'Profile '+i, segment:'general', age:30, repeat:1, status:'completed', answers:{test:{type:'choice', choice:'saved-'+i, probabilities:{yes:1}}}})) };
+  S.snap.runs=[run]; S.tab='runs'; S.liveRunId=run.id; render();
+  const initialRequests=browser.requests.length;
+  act(null,{dataset:{act:'arena-replay'}});
+  assert.doesNotMatch(browser.element('app').innerHTML,/Selected: saved-0/);
+  act(null,{dataset:{act:'arena-step'}});
+  assert.match(browser.element('app').innerHTML,/Selected: saved-0/);
+  for(let i=0;i<24;i++)act(null,{dataset:{act:'arena-step'}});
+  assert.equal(S.liveMemberPage,1);
+  assert.match(browser.element('app').innerHTML,/Selected: saved-24/);
+  act(null,{dataset:{act:'arena-play'}});
+  const staleTick=browser.timeouts.at(-1)!;
+  act(null,{dataset:{act:'live-close'}});
+  staleTick();
+  assert.equal(S.liveRunId,'history');
+  assert.match(browser.element('app').innerHTML,/Study runs/);
+  assert.equal(browser.requests.length,initialRequests,'Playback must not dispatch any API request');
+  act(null,{dataset:{act:'live-open',id:run.id}});
+  assert.match(browser.element('app').innerHTML,/Selected: saved-0/);
+});
+
+test('replay pauses while hidden, ignores live runs, and escapes run names', async () => {
+  const browser=browserHarness();await settle();const {S,act,render}=browser.client;
+  S.tab='runs';S.liveRunId='arena';
+  const run={id:'arena',projectId:S.projectId,pipelineName:'<unsafe>',status:'running',createdAt:'2026-10-08T12:00:00Z',message:'Running',liveMembers:[{stage:'poll',personaId:'p',label:'Profile',segment:'general',age:30,repeat:1,status:'completed',answers:{test:{type:'noul',noul:.9}}}]};
+  S.snap.runs=[run];render();
+  assert.match(browser.element('app').innerHTML,/&lt;unsafe&gt;/);
+  act(null,{dataset:{act:'arena-replay'}});
+  assert.match(browser.element('app').innerHTML,/Yes · 90%/);
+  run.status='completed';render();act(null,{dataset:{act:'arena-replay'}});act(null,{dataset:{act:'arena-play'}});
+  const tick=browser.timeouts.at(-1)!;
+  browser.document.visibilityState='hidden';browser.listeners.get('visibilitychange')!();tick();
+  assert.doesNotMatch(browser.element('app').innerHTML,/Yes · 90%/);
+  browser.document.visibilityState='visible';act(null,{dataset:{act:'arena-step'}});
+  assert.match(browser.element('app').innerHTML,/Yes · 90%/);
+});
+
+test('replay scrub preserves bounds and selecting a member pauses playback', async () => {
+  const browser=browserHarness();await settle();const {S,act,render}=browser.client;
+  S.tab='runs';S.liveRunId='replay';S.snap.runs=[{id:'replay',projectId:S.projectId,pipelineName:'Replay',status:'completed',liveMembers:[{stage:'poll',personaId:'p',label:'Profile',age:30,segment:'general',repeat:1,status:'completed',answers:{a:{type:'noul',noul:.4}}}]}];render();
+  act(null,{dataset:{act:'arena-replay'}});act(null,{dataset:{act:'arena-scrub'},value:'999'});
+  assert.match(browser.element('app').innerHTML,/1 of 1 members revealed/);
+  act(null,{dataset:{act:'arena-scrub'},value:'-9'});
+  assert.match(browser.element('app').innerHTML,/0 of 1 members revealed/);
+  act(null,{dataset:{act:'arena-play'}});const tick=browser.timeouts.at(-1)!;
+  act(null,{dataset:{act:'live-member',stage:'poll',key:'poll:p:1',page:'0'}});tick();
+  assert.match(browser.element('app').innerHTML,/0 of 1 members revealed/);
+  assert.doesNotMatch(browser.element('app').innerHTML,/Yes · 40%/);
+});
+
+test('an automatically opened active arena stays visible when the run completes', async () => {
+  const browser=browserHarness();await settle();const {S,render,applySnapshot}=browser.client;
+  S.tab='runs';S.liveRunId=null;
+  S.snap.runs=[{id:'finishing',projectId:S.projectId,pipelineName:'Finishing',status:'running',liveMembers:[]}];
+  render();assert.equal(S.liveRunId,'finishing');
+  applySnapshot({...S.snap,runs:[{...S.snap.runs[0],status:'completed',message:'Done'}]});
+  assert.match(browser.element('app').innerHTML,/aria-label="Live cohort behavior"/);
+  assert.equal(S.liveRunId,'finishing');
 });

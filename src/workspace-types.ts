@@ -8,6 +8,7 @@ export interface WorkspaceSaved { revision: number; document: WorkspaceDocument 
 export interface WorkspaceRun {
   id: string; projectId: string; pipelineId: string; pipelineName: string; status: 'running' | 'completed' | 'failed';
   provider?: 'typesafe' | 'gliner';
+  stages?: { id: string; label: string; kind: 'poll' | 'aggregate' | 'decision'; dependsOn: string[]; status: 'pending' | 'running' | 'completed' | 'skipped' | 'failed'; reason?: string }[];
   createdAt: string; message: string; progress?: { stage: string; completed: number; total: number };
   liveMembers?: { stage: string; personaId: string; label: string; segment: string; age: number; repeat: number; status: 'queued' | 'running' | 'completed' | 'failed'; answers?: Record<string, unknown>; model?: string; cacheHit?: boolean; reason?: string }[];
   usage?: Usage; reportUrl?: string;
