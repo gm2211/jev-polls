@@ -2478,3 +2478,17 @@ test('run caveats retain semantics and escaped details without repeated alerts',
   assert.match(empty, /Model estimates, not human responses/);
   assert.doesNotMatch(empty, /<details|GLiNER/);
 });
+
+
+test('run review retains clickable breadcrumbs and returns to the same study',async()=>{
+  const browser=browserHarness(false);await settle();const {S,act,render}=browser.client;
+  act(null,{dataset:{act:'open-project',id:'existing-research'}});
+  act(null,{dataset:{act:'open-pipeline',id:'study'}});
+  S.plan=runReviewPlan();render();
+  const html=browser.element('app').innerHTML;
+  assert.match(html,/aria-label="Study location".*data-act="projects">Projects.*data-act="project-overview">Existing research.*data-act="back-studies">Studies.*data-act="edit-review">Study.*aria-current="page">Review run/);
+  const before=JSON.stringify(S.doc);
+  act(null,{dataset:{act:'edit-review'}});
+  assert.equal(S.plan,null);assert.equal(S.pipelineId,'study');assert.equal(JSON.stringify(S.doc),before);
+  assert.equal(browser.requests.filter(path=>path==='/api/run').length,0);
+});
