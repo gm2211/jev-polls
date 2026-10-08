@@ -875,3 +875,65 @@ test('existing project cohort regeneration keeps saved targets and all project o
   assert.deepEqual(result.proposal!.document.cohorts[0]!.distributionTargets, before.cohorts[0]!.distributionTargets);
   assert.equal(result.proposal!.document.cohorts[0]!.personas.filter(persona => persona.age < 40).length, 1);
 });
+
+function optionsWorkspace(): WorkspaceDocument {
+  const document = projectWorkspace();
+  document.pipelines[0]!.stages = [{ id: 'first', label: 'Name question', kind: 'poll', cohort: 'audience', dependsOn: [], inputs: {}, questions: {
+    preference: { type: 'choice', label: 'Which game name?', instructions: 'Preserve instructions', criteria: { stable: { label: 'Deterrent', description: 'Previous description' }, old: 'Old candidate' } },
+    keep: { type: 'noul', label: 'Unrelated question sentinel', instructions: 'Keep this' },
+  } }];
+  return document;
+}
+const optionRequest = { projectId: 'selected', engine: 'chatgpt' as const, model: 'test-model', revision: 5, prompt: 'Extract supplied names', options: { pipelineId: 'selected-study', stageId: 'first', questionId: 'preference', material: 'Deterrent: What arsenal is for; Earthfront: Earth is front line' } };
+
+test('option drafting handles large cohorts with question-only context and preserves other workspace fields', async t => {
+  const document = optionsWorkspace();
+  document.cohorts[0]!.personas = Array.from({ length: 1000 }, (_, index) => ({ ...document.cohorts[0]!.personas[0]!, id: `person-${index}`, background: 'private-persona-sentinel'.repeat(30) }));
+  const before = structuredClone(document); let sent = '';
+  const service = new LocalAgentService({ chatgpt: nativeDraft(input => {
+    sent = input;
+    return JSON.stringify({ documentJson: JSON.stringify([{ label: 'Deterrent', description: 'What arsenal is for' }, { label: 'Earthfront', description: 'Earth is front line' }]), explanation: 'Extracted source candidates.' });
+  }) }); t.after(() => service.close());
+  const job = service.start({ ...optionRequest, document });
+  assert.deepEqual(job.options, { pipelineId: 'selected-study', stageId: 'first', questionId: 'preference' });
+  assert.doesNotMatch(JSON.stringify(job), /What arsenal/);
+  const done = await terminal(service, job); assert.equal(done.status, 'completed');
+  assert.doesNotMatch(sent, /private-persona-sentinel|Unrelated question sentinel|unrelated-private-research-sentinel/);
+  assert.match(sent, /Which game name/); assert.match(sent, /What arsenal/);
+  const proposal = done.proposal!.document;
+  assert.deepEqual(proposal.cohorts, before.cohorts); assert.deepEqual(proposal.projects, before.projects); assert.deepEqual(proposal.pipelines[1], before.pipelines[1]);
+  const stage = proposal.pipelines[0]!.stages[0]!; assert.equal(stage.kind, 'poll'); if(stage.kind !== 'poll') throw Error();
+  assert.deepEqual(stage.questions.keep, (before.pipelines[0]!.stages[0] as typeof stage).questions.keep);
+  const question = stage.questions.preference!; assert.equal(question.type, 'choice'); if(question.type !== 'choice') throw Error();
+  assert.deepEqual(question.criteria.stable, { label: 'Deterrent', description: 'What arsenal is for' });
+  assert.equal(Object.keys(question.criteria).length, 2);
+  question.criteria = (before.pipelines[0]!.stages[0] as typeof stage).questions.preference!.type === 'choice' ? ((before.pipelines[0]!.stages[0] as typeof stage).questions.preference as typeof question).criteria : {};
+  assert.deepEqual(proposal, before); assert.deepEqual(document, before);
+});
+
+test('option drafting rejects foreign or missing targets, excessive material and mixed operations', async t => {
+  const service = new LocalAgentService({ chatgpt: nativeDraft(() => { throw Error('Must not call provider'); }) }); t.after(() => service.close());
+  const document = optionsWorkspace();
+  for(const options of [{ ...optionRequest.options, pipelineId: 'private-study' }, { ...optionRequest.options, questionId: 'keep' }, { ...optionRequest.options, stageId: 'missing' }, { ...optionRequest.options, material: 'x'.repeat(256*1024+1) }]) {
+    assert.throws(() => service.start({ ...optionRequest, document, options }), LocalAgentError);
+  }
+  assert.throws(() => service.start({ ...optionRequest, document, cohort: { id: 'customers', size: 2 } }), LocalAgentError);
+});
+
+test('duplicate agent options fail atomically without changing saved question', async t => {
+  const document = optionsWorkspace(), before = structuredClone(document);
+  const service = new LocalAgentService({ chatgpt: nativeDraft(() => JSON.stringify({ documentJson: JSON.stringify([{ label: 'Duplicate' }, { label: 'Duplicate' }]), explanation: 'Options' })) }); t.after(() => service.close());
+  const done = await terminal(service, service.start({ ...optionRequest, document }));
+  assert.equal(done.status, 'failed'); assert.equal(done.proposal, undefined); assert.match(done.message, /Option names must be different/); assert.deepEqual(document, before);
+});
+
+test('option drafting retains existing string criterion IDs used by downstream references', async t => {
+  const document = optionsWorkspace();
+  const service = new LocalAgentService({ chatgpt: nativeDraft(() => JSON.stringify({ documentJson: JSON.stringify([{ label: 'Old candidate' }, { label: 'Deterrent' }]), explanation: 'Kept candidates' })) }); t.after(() => service.close());
+  const done = await terminal(service, service.start({ ...optionRequest, document }));
+  assert.equal(done.status, 'completed');
+  const stage = done.proposal!.document.pipelines[0]!.stages[0]!;
+  if(stage.kind !== 'poll' || stage.questions.preference?.type !== 'choice') throw Error();
+  assert.deepEqual(Object.keys(stage.questions.preference.criteria), ['old', 'stable']);
+  assert.deepEqual(stage.questions.preference.criteria.stable, { label: 'Deterrent', description: 'Previous description' });
+});
