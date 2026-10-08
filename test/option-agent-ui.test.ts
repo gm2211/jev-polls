@@ -10,7 +10,7 @@ function harness() {
   const stage: any = { id: 'panel', kind: 'poll', cohort: 'audience', questions: { preference: q }, inputs: {}, dependsOn: [] };
   const p = { id: 'study', cohorts: { audience: 'people' }, stages: [stage] };
   const S: any = { projectId: 'project', pipelineId: p.id, stageId: stage.id, doc: { pipelines: [p] }, revision: 3,
-    localEngine: 'chatgpt', chatgptModel: 'draft-model', localLoading: false, localStarting: false, localJob: null, remoteRevision: null, dirty: true, plan: { token: 'reviewed' } };
+    sections: {}, localEngine: 'chatgpt', chatgptModel: 'draft-model', localLoading: false, localStarting: false, localJob: null, remoteRevision: null, dirty: true, plan: { token: 'reviewed' } };
   const nodes = new Map<string, any>();
   function getElement(id: string): any {
     if (!nodes.has(id)) nodes.set(id, { value: '', textContent: '', innerHTML: '', open: false, hidden: false, disabled: false,

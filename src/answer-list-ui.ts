@@ -120,7 +120,7 @@ function applyAnswerList(append){
     for(const label of values){let key=old.find(([key,value])=>!used.has(key)&&optionName(key,value)===label)?.[0];if(!key){do{key='option_'+id()}while(Object.hasOwn(q.criteria,key)||used.has(key))}used.add(key);const existing=Object.hasOwn(q.criteria,key)?q.criteria[key]:label;criteria[key]=descriptions.has(label)?{...(existing&&typeof existing==='object'?existing:{}),label,description:descriptions.get(label)}:existing}
     q.criteria=criteria;
   }
-  S.listPages[S.projectId+':setup-options-'+d.stageId+'-'+d.questionId]=0;S.dirty=true;S.plan=null;
+  S.sections['setup-input-'+d.pipelineId+'-'+d.stageId+'-'+d.questionId]='manual';S.listPages[S.projectId+':setup-options-'+d.stageId+'-'+d.questionId]=0;S.dirty=true;S.plan=null;
   closeAnswerList();render();say(values.length+' '+(q.type==='score'?'ordered levels':'options')+' ready to edit.');
 }
 function answerListAction(a){

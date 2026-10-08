@@ -1836,7 +1836,7 @@ test('option comparisons preserve descriptions, stable keys and paginated answer
   S.pipelineId='study';S.stageId='panel';const p=S.doc.pipelines[0],s=p.stages[0],q=s.questions.answer;
   q.criteria={a:{label:'Afterlight',description:'A hopeful title about exploration.'},b:{label:'Project Dawn',description:'A bold title about a new beginning.'},c:'None of these',d:'Other',e:{label:'Hidden option',description:'Preserve this off-page description.'}};
   const html=stageForm(p,s);
-  assert.match(html,/Import file/);assert.match(html,/Probability distribution/);assert.doesNotMatch(html,/name="setupOption"|name="setupDescription"|>Rating</);
+  assert.match(html,/aria-label="Add options"/);assert.match(html,/Probability distribution/);assert.doesNotMatch(html,/name="setupOption"|name="setupDescription"|>Rating</);
   assert.match(html,/A hopeful title/);assert.doesNotMatch(html,/Hidden option/);
   const beforeEditing=JSON.stringify(q);setupAction('setup-edit-option',{dataset:{key:'a'}});
   const editor=stageForm(p,s);assert.match(editor,/Option 1 name/);assert.match(editor,/Option 1 description/);assert.doesNotMatch(editor,/Option 2 name/);
@@ -1844,7 +1844,7 @@ test('option comparisons preserve descriptions, stable keys and paginated answer
   setupAction('setup-option-back',{dataset:{}});setupAction('setup-format',{dataset:{}});
   assert.match(stageForm(p,s),/Compare options/);assert.match(stageForm(p,s),/Ordered scale/);
   setupAction('setup-format-back',{dataset:{}});
-  assert.match(html,/0–1, totaling 1/);
+  assert.match(html,/Probabilities 0–1, totaling 1/);
   const row={dataset:{setupOption:'a'},querySelector:(selector:string)=>({value:selector==='[name=setupOption]'?'Afterglow':'Warm and reflective.'})};
   applyStudySetup({dataset:{questionId:'answer'},values:{setupPrompt:q.label},querySelectorAll:()=>[row]});
   assert.equal(q.criteria.a.label,'Afterglow');assert.equal(q.criteria.a.description,'Warm and reflective.');assert.equal(q.criteria.e.description,'Preserve this off-page description.');
@@ -1864,8 +1864,8 @@ test('option comparisons preserve descriptions, stable keys and paginated answer
 test('answer setup distinguishes hosted probabilities from local classifier evidence for every format',async()=>{
   const browser=browserHarness();await settle();const {S,stageForm,setupAction}=browser.client;
   S.pipelineId='study';S.stageId='panel';const p=S.doc.pipelines[0],s=p.stages[0];S.evaluationProvider='typesafe';
-  assert.match(stageForm(p,s),/probability for every option: 0–1, totaling 1/);
-  S.evaluationProvider='gliner';assert.match(stageForm(p,s),/relative option scores/);assert.match(stageForm(p,s),/not calibrated probabilities/);
+  assert.match(stageForm(p,s),/Probabilities 0–1, totaling 1/);
+  S.evaluationProvider='gliner';assert.match(stageForm(p,s),/Relative scores/);assert.match(stageForm(p,s),/not calibrated probabilities/);
   setupAction('setup-type',{dataset:{type:'score'}});assert.match(stageForm(p,s),/relative level scores/);assert.doesNotMatch(stageForm(p,s),/plus probabilities across/);
   setupAction('setup-type',{dataset:{type:'noul'}});assert.match(stageForm(p,s),/relative yes score/);
 });
@@ -1908,7 +1908,7 @@ test('empty option setup starts with CSV import and manual add opens only one op
   const browser=browserHarness();await settle();const {S,stageForm,setupAction}=browser.client;
   S.pipelineId='study';S.stageId='panel';const p=S.doc.pipelines[0],s=p.stages[0];s.questions.answer.criteria={a:'',b:''};
   const before=JSON.stringify(s);let html=stageForm(p,s);
-  assert.match(html,/CSV: one option per row/);assert.match(html,/class="button primary" data-act="answer-list-import"/);
+  assert.match(html,/Drop CSV or JSON/);assert.match(html,/data-answer-drop="true" data-act="answer-list-import"/);
   assert.doesNotMatch(html,/name="setupOption"|name="setupDescription"/);assert.equal(JSON.stringify(s),before);
   setupAction('setup-add-option',{dataset:{}});html=stageForm(p,s);
   assert.equal((html.match(/name="setupOption"/g)||[]).length,1);assert.equal((html.match(/name="setupDescription"/g)||[]).length,1);
@@ -1923,4 +1923,27 @@ test('provider change redraws distribution semantics without requiring a reviewe
   await browser.listeners.get('change')!({target:{name:'evaluationProvider',value:'gliner'}});
   assert.match(browser.element('app').innerHTML,/Normalized option scores/);
   assert.doesNotMatch(browser.element('app').innerHTML,/Jev returns a probability/);
+});
+
+
+test('option input tabs isolate sources and preserve drafts and reachable blank criteria', async () => {
+  const browser=browserHarness();await settle();
+  const {S,stageForm,setupAction,applyStudySetup}=browser.client;
+  S.pipelineId='study';S.stageId='panel';const p=S.doc.pipelines[0],s=p.stages[0],q=s.questions.answer;
+  q.criteria={a:'',b:''};S.dirty=false;const before=JSON.stringify(q);
+  let html=stageForm(p,s);assert.match(html,/data-source="file" aria-pressed="true"/);
+  assert.doesNotMatch(html,/data-act="option-agent-open"|data-act="setup-add-option"/);
+  setupAction('setup-input',{dataset:{source:'agent'}});html=stageForm(p,s);
+  assert.match(html,/Create with agent/);assert.doesNotMatch(html,/data-answer-drop|data-act="setup-add-option"/);
+  setupAction('setup-input',{dataset:{source:'manual'}});html=stageForm(p,s);
+  assert.match(html,/Edit option Unnamed option 1/);assert.match(html,/Edit option Unnamed option 2/);
+  assert.equal(JSON.stringify(q),before);assert.equal(S.dirty,false,'view changes alone do not edit study');
+  setupAction('setup-edit-option',{dataset:{key:'a'}});
+  const row={dataset:{setupOption:'a'},querySelector:(selector:string)=>({value:selector==='[name=setupOption]'?'Afterlight':'A hopeful title.'})};
+  applyStudySetup({dataset:{questionId:'answer'},values:{setupPrompt:'Choose a title'},querySelectorAll:()=>[row]});
+  setupAction('setup-option-back',{dataset:{}});setupAction('setup-input',{dataset:{source:'file'}});setupAction('setup-input',{dataset:{source:'manual'}});
+  assert.equal(q.label,'Choose a title');assert.equal(q.criteria.a.description,'A hopeful title.');assert.equal(q.criteria.b,'');
+  html=stageForm(p,s);assert.match(html,/Afterlight/);assert.match(html,/Unnamed option 2/);
+  const other={...s,id:'other',questions:{answer:{...q,criteria:{a:'',b:''}}}};
+  assert.match(stageForm(p,other),/data-source="file" aria-pressed="true"/,'source selection belongs to one step');
 });
