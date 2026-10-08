@@ -850,7 +850,7 @@ test('projects start from a question and assign cohorts only after an explicit c
   const before = JSON.stringify(S.doc);
   selectProject('existing-research');
   assert.equal(S.tab, 'studies');
-  assert.equal(S.pipelineId,null);assert.match(html(),/Your studies/);
+  assert.equal(S.pipelineId,null);assert.match(html(),/Your research questions/);
   act(null,{dataset:{act:'open-pipeline',id:'study'}});
   assert.match(html(), /<h1[^>]*>Which direction should we choose\?<\/h1>/);
   assert.match(html(), /aria-label="Study editor"/);assert.doesNotMatch(html(), /id="tab-cohorts"/);
@@ -1230,7 +1230,7 @@ test('workspace tabs clear cohort selections and open the study library while pr
   act(null, { dataset: { act: 'tab', tab: 'studies' } });
   assert.equal(S.pipelineId, null);
   assert.match(browser.element('app').innerHTML, /role="tablist"/);
-  assert.match(browser.element('app').innerHTML, /Your studies/);
+  assert.match(browser.element('app').innerHTML, /Your research questions/);
   assert.deepEqual(JSON.parse(JSON.stringify(S.doc)), JSON.parse(JSON.stringify(draft)));
 });
 
@@ -1870,7 +1870,7 @@ test('project entry and back navigation keep every breadcrumb level and preserve
   const browser=browserHarness(false);await settle();const {S,act}=browser.client;
   const html=()=>browser.element('app').innerHTML;
   act(null,{dataset:{act:'open-project',id:'existing-research'}});
-  assert.equal(S.pipelineId,null);assert.match(html(),/Your studies/);
+  assert.equal(S.pipelineId,null);assert.match(html(),/Your research questions/);
   assert.match(html(),/<span>Projects<\/span>.*<span>Existing research<\/span>.*<span aria-current="page">Studies<\/span>/);
   act(null,{dataset:{act:'open-pipeline',id:'study'}});
   assert.match(html(),/<span>Projects<\/span>.*<span>Existing research<\/span>.*<span>Studies<\/span>/);
@@ -1878,11 +1878,11 @@ test('project entry and back navigation keep every breadcrumb level and preserve
   S.doc.pipelines[0].description='Unfinished study question';S.dirty=true;
   S.sections['setup-wizard-study-panel-answer']='options';const before=JSON.stringify(S.doc);
   act(null,{dataset:{act:'back-studies'}});assert.equal(S.projectId,'existing-research');assert.equal(S.pipelineId,null);
-  assert.match(html(),/Your studies/);
+  assert.match(html(),/Your research questions/);
   act(null,{dataset:{act:'open-pipeline',id:'study'}});
   act(null,{dataset:{act:'projects'}});assert.equal(S.projectId,null);
   act(null,{dataset:{act:'open-project',id:'existing-research'}});
-  assert.equal(S.pipelineId,null);assert.equal(S.tab,'studies');assert.match(html(),/Your studies/);
+  assert.equal(S.pipelineId,null);assert.equal(S.tab,'studies');assert.match(html(),/Your research questions/);
   assert.equal(JSON.stringify(S.doc),before);assert.equal(S.dirty,true);assert.equal(S.sections['setup-wizard-study-panel-answer'],'options');
 });
 
