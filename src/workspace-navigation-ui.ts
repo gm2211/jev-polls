@@ -38,9 +38,6 @@ export const NAVIGATION_CSS = `
 .study-list-row>span{display:grid;gap:4px;min-width:0;overflow-wrap:anywhere}.study-list .study-list-row strong{font:600 23px/1.2 var(--display)}.study-list-row small{font-size:12px;color:var(--muted)}.study-list .study-list-row:hover{background:var(--hover)}.study-list-row>.ui-icon{flex:none;color:var(--muted)}
 @media(max-width:600px){.study-list .study-list-row{padding:18px 12px}.study-list .study-list-row strong{font-size:20px}}
 
-.project-overview .masthead{margin-bottom:12px;gap:12px}.project-overview .masthead h1{font-size:22px;line-height:1.25;margin:0}.project-overview .masthead p{margin-top:4px}
-.project-section-list .study-list-row{min-height:40px;padding:9px 12px;gap:12px}.project-section-list .study-list-row>span{display:grid;grid-template-columns:88px minmax(0,1fr);align-items:center;gap:16px;flex:1}.project-section-list .study-list-row strong{font:600 14px/20px var(--body)}.project-section-list .study-list-row small{font-size:12px;line-height:20px;overflow-wrap:anywhere}.project-section-list .study-list-row>.ui-icon{width:14px;height:14px}
-@media(pointer:coarse){.project-section-list .study-list-row{min-height:44px}}
 .study-workspace-header{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"location title actions";align-items:center;gap:12px;margin-bottom:8px}
 .study-location{grid-area:location;display:flex;align-items:center;flex-wrap:wrap;gap:6px;min-width:0;color:var(--muted);font-size:12px}.study-location>span{overflow-wrap:anywhere}.study-location .button{flex:none}.study-location>span:last-child{color:var(--ink)}
 .study-location{max-width:320px}.study-workspace-header h1{grid-area:title;margin:0;font:600 18px/1.3 var(--display);letter-spacing:-.025em;overflow-wrap:anywhere}
