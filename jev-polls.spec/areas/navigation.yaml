@@ -1,9 +1,20 @@
 id: navigation
 name: Navigation and search
 prose: >-
-  Open proposal (not yet accepted): URL-addressable views so reload, Back, and links return to the
-  same view (today every view is in-memory state, docs/ux-review §1).
+  The open view is kept in the URL hash, so reloading the page returns to it. Open proposal (not
+  yet accepted): Back and Forward stepping through views (today navigation replaces the URL
+  instead of adding history entries, docs/ux-review §1).
 behaviors:
+  - id: reload-keeps-view
+    description: >-
+      Reloading the page reopens the same project and tab, plus the open study and step, cohort and
+      persona, or run; a link to a missing project or item falls back to the nearest view that exists.
+    details: >-
+      The view lives in the URL hash (project, tab, study, step, cohort, person, run). Unsaved edits
+      are not part of it; the browser still asks before a reload discards them.
+    source:
+      text: if I hit refresh it goes back
+      reference: jev-polls project thread "Edits lost on refresh", 2026-10-09
   - id: breadcrumbs
     description: A breadcrumb trail moves back through projects, studies, cohorts, personas, and run review.
   - id: page-anatomy
