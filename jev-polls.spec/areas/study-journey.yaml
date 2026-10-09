@@ -89,11 +89,12 @@ behaviors:
         follows "while I generally love tabbed uis, the way this is structured is confusing"
   - id: inline-edit-single-save
     description: >-
-      Inline edits of a study question or project name have no check or cancel buttons: Enter or
-      clicking away keeps the change, Esc cancels it, and a short hint says so.
+      Inline edits of a study question or project name have no check or cancel buttons: Enter
+      saves the change, Esc or clicking away discards it, and a short hint says so.
     details: >-
-      Keeps the page's Save as the only save button beside the field. Clicking away from an empty
-      field cancels instead of erroring. Esc in the field does not close the step panel.
+      Keeps the page's Save as the only save button beside the field. Esc in the field does not
+      close the step panel. Giulio corrected an earlier version that kept the edit on click-away:
+      "clicking outside is implied X discard" (2026-10-09).
     source:
       text: this looks super weird - double save
       reference: >-

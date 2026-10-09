@@ -1,7 +1,7 @@
-/** Inline project rename on the project list: a pencil opens the name field; Enter or blur keeps it, Esc cancels. */
+/** Inline project rename on the project list: a pencil opens the name field; Enter saves it, Esc or click-away discards. */
 export const PROJECT_RENAME_CLIENT = String.raw`
 function projectRenameRow(p){
-  return '<form class="project-list-row project-rename" data-form="project-rename" data-id="'+attr(p.id)+'" data-inline-edit="project-rename-cancel"><label class="project-rename-field"><input name="name" value="'+attr(p.name)+'" required maxlength="160" aria-label="Project name" aria-describedby="inlineEditHint" title="Enter or click away to keep · Esc to cancel" autocomplete="off"></label>'+inlineEditHint()+'</form>';
+  return '<form class="project-list-row project-rename" data-form="project-rename" data-id="'+attr(p.id)+'" data-inline-edit="project-rename-cancel"><label class="project-rename-field"><input name="name" value="'+attr(p.name)+'" required maxlength="160" aria-label="Project name" aria-describedby="inlineEditHint" title="Enter to save · Esc or click away to discard" autocomplete="off"></label>'+inlineEditHint()+'</form>';
 }
 function projectRenameButton(p){return '<button type="button" class="button small icon-button project-rename-open" data-act="project-rename" data-id="'+attr(p.id)+'" aria-label="Rename project: '+attr(p.name)+'" title="Rename project">'+icon('edit')+'</button>'}
 function projectRenameAction(a,el){
