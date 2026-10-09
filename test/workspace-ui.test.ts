@@ -1047,14 +1047,15 @@ test('confirming a project rename saves it so a reload keeps the new name', asyn
   assert.equal(S.dirty, false); assert.equal(S.revision, 2);
 });
 
-test('project list row renames inline and the check icon saves the new name', async () => {
+test('project list row renames inline and Enter keeps the new name without a second save button', async () => {
   const browser = browserHarness(false); await settle();
   const { S } = browser.client;
   const click = (dataset: Record<string, string>) => browser.listeners.get('click')!({ target: { closest: () => ({ dataset }) }, preventDefault() {} });
   assert.match(browser.element('app').innerHTML, /data-act="project-rename" data-id="existing-research" aria-label="Rename project: Existing research"/);
   click({ act: 'project-rename', id: 'existing-research' });
   assert.match(browser.element('app').innerHTML, /data-form="project-rename" data-id="existing-research"/);
-  assert.match(browser.element('app').innerHTML, /aria-label="Save project name"/);
+  assert.match(browser.element('app').innerHTML, /data-inline-edit="project-rename-cancel"[\s\S]*Enter to keep · Esc to cancel/);
+  assert.doesNotMatch(browser.element('app').innerHTML, /aria-label="Save project name"|aria-label="Cancel rename"/, 'the page Save is the only save button');
   click({ act: 'project-rename-cancel' });
   assert.doesNotMatch(browser.element('app').innerHTML, /data-form="project-rename"/);
   click({ act: 'project-rename', id: 'existing-research' });
