@@ -2291,8 +2291,8 @@ test('project entry and back navigation visit every breadcrumb level and preserv
   act(null,{dataset:{act:'open-project',id:'existing-research'}});
   assert.equal(S.pipelineId,null);assert.equal(S.stageId,null);assert.equal(S.tab,'studies');assert.equal(S.studyLibrary,true);
   assert.doesNotMatch(html(),/aria-label="Project sections"|class="project-overview"/);
-  // Section pages end the trail at the project; the selected tab right under it names the section.
-  assert.match(html(),/data-act="projects">Projects<\/button>.*<span aria-current="page">Existing research<\/span><\/li><\/ol><\/nav><\/div>/);assert.match(html(),/<nav class="app-sidebar"/);
+  // Section pages show every level: the section is the current, last crumb.
+  assert.match(html(),/data-act="projects">Projects<\/button>.*data-act="project-overview">Existing research<\/button>.*<span aria-current="page">Studies<\/span><\/li><\/ol><\/nav><\/div>/);assert.match(html(),/<nav class="app-sidebar"/);
   assert.match(html(),/<h1 tabindex="-1">Studies<\/h1>/);
   assert.match(html(),/class="breadcrumb-link" data-act="projects">Projects/);
   act(null,{dataset:{act:'open-pipeline',id:'study'}});
@@ -2310,6 +2310,21 @@ test('project entry and back navigation visit every breadcrumb level and preserv
   assert.equal(S.pipelineId,null);assert.equal(S.tab,'studies');assert.equal(S.studyLibrary,true);
   act(null,{dataset:{act:'open-pipeline',id:'study'}});
   assert.equal(JSON.stringify(S.doc),before);assert.equal(S.dirty,true);assert.equal(S.sections['setup-wizard-study-panel-answer'],'options');
+});
+
+test('breadcrumbs step down one level at a time and opening a study lands on its canvas',async()=>{
+  const browser=browserHarness(false);await settle();const {S,act}=browser.client;
+  const crumbs=()=>[...browser.element('app').innerHTML.match(/<nav class="workspace-breadcrumbs"[\s\S]*?<\/nav>/)![0].matchAll(/(?:<button[^>]*>|<span[^>]*aria-current="page">)([^<]*)<\/(?:button|span)>/g)].map(m=>m[1]).join(' / ');
+  act(null,{dataset:{act:'open-project',id:'existing-research'}});assert.equal(crumbs(),'Projects / Existing research / Studies');
+  S.sections.pipeline='advanced';S.flowSettingsReturn=true;
+  act(null,{dataset:{act:'open-pipeline',id:'study'}});
+  assert.equal(S.sections.pipeline,'flow','a study opens on its canvas, not on a step');assert.equal(S.flowPanel,false);
+  assert.equal(crumbs(),'Projects / Existing research / Studies / Original study');
+  act(null,{dataset:{act:'flow-settings'}});assert.equal(crumbs(),'Projects / Existing research / Studies / Original study / Step 1 / Settings');
+  act(null,{dataset:{act:'breadcrumb-step'}});assert.equal(S.sections.pipeline,'flow');assert.equal(S.flowPanel,true);
+  assert.equal(crumbs(),'Projects / Existing research / Studies / Original study / Step 1');
+  act(null,{dataset:{act:'breadcrumb-study'}});assert.equal(S.flowPanel,false);assert.equal(crumbs(),'Projects / Existing research / Studies / Original study');
+  act(null,{dataset:{act:'back-studies'}});assert.equal(crumbs(),'Projects / Existing research / Studies');
 });
 
 test('every project tab selects its matching panel directly and keeps pending study fields and wizard state',async()=>{
@@ -2357,10 +2372,10 @@ test('study navigation has clear scope, a reachable single-study library and con
   S.tab='studies';S.pipelineId='study';S.stageId='panel';S.dirty=true;
   S.doc.pipelines[0].stages[0].questions.answer.criteria.a={label:'Draft name',description:'Keep typed detail'};
   const before=JSON.stringify(S.doc);render();let html=browser.element('app').innerHTML;
-  assert.doesNotMatch(html,/aria-label="Workspace views"|>Advanced<|Apply phase/);const location=html.match(/<nav class="workspace-breadcrumbs"[\s\S]*?<\/nav>/)![0];assert.equal((location.match(/<button/g)||[]).length,3);assert.equal((location.match(/aria-current="page"/g)||[]).length,1);assert.match(location,/class="breadcrumb-link" data-act="projects"/);assert.match(location,/data-act="back-studies">Studies/);assert.doesNotMatch(html,/← Studies|← Projects/);assert.match(html,/>Pipeline</);assert.match(html,/aria-label="Step settings" title="Step settings"/);
+  assert.doesNotMatch(html,/aria-label="Workspace views"|>Advanced<|Apply phase/);const location=html.match(/<nav class="workspace-breadcrumbs"[\s\S]*?<\/nav>/)![0];assert.equal((location.match(/<button/g)||[]).length,4);assert.match(location,/data-act="breadcrumb-study">Original study<\/button>.*<span aria-current="page">Step 1<\/span>/);assert.equal((location.match(/aria-current="page"/g)||[]).length,1);assert.match(location,/class="breadcrumb-link" data-act="projects"/);assert.match(location,/data-act="back-studies">Studies/);assert.doesNotMatch(html,/← Studies|← Projects/);assert.match(html,/>Pipeline</);assert.match(html,/aria-label="Step settings" title="Step settings"/);
   act(null,{dataset:{act:'section-view',sectionKey:'pipeline',sectionId:'advanced'}});html=browser.element('app').innerHTML;
-  assert.match(html,/Back to question/);assert.match(html,/<strong>Step 1 settings · [^<]+<\/strong>/);
-  {const p=S.doc.pipelines[0],q=Object.values(p.stages[0].questions)[0] as any,old=[p.description,q.label];p.description=q.label='Which name sells best?';render();assert.match(browser.element('app').innerHTML,/<strong>Step 1 settings<\/strong>/,'a step asking the study question is not repeated');[p.description,q.label]=old;render();html=browser.element('app').innerHTML}
+  assert.doesNotMatch(html,/Back to question|Back to flow|study-step-settings/,'the trail replaces ad-hoc back buttons');
+  assert.match(html,/data-act="breadcrumb-study">Original study<\/button>.*data-act="breadcrumb-step">Step 1<\/button>.*<span aria-current="page">Settings<\/span>/);
   assert.doesNotMatch(html,/aria-label="Study sections"|Apply phase/);
   assert.match(html,/data-settings-mode="simple"/);
   act(null,{dataset:{act:'section-view',sectionKey:'step-settings-study-panel',sectionId:'advanced'}});html=browser.element('app').innerHTML;
@@ -2717,7 +2732,7 @@ test('run review retains clickable breadcrumbs and returns to the same study',as
   act(null,{dataset:{act:'open-pipeline',id:'study'}});
   S.plan=runReviewPlan();render();
   const html=browser.element('app').innerHTML;
-  assert.match(html,/aria-label="Breadcrumb".*data-act="projects">Projects.*data-act="project-overview">Existing research.*data-act="back-studies">Studies.*data-act="edit-review">Original study.*aria-current="page">Review run/);
+  assert.match(html,/aria-label="Breadcrumb".*data-act="projects">Projects.*data-act="project-overview">Existing research.*data-act="back-studies">Studies.*data-act="breadcrumb-study">Original study.*aria-current="page">Review run/);
   const before=JSON.stringify(S.doc);
   act(null,{dataset:{act:'edit-review'}});
   assert.equal(S.plan,null);assert.equal(S.pipelineId,'study');assert.equal(JSON.stringify(S.doc),before);
@@ -2838,7 +2853,7 @@ test('one breadcrumb trail covers creation, cohorts, personas, settings and live
   }
   trail(['Projects']);act(null,{dataset:{act:'new-project'}});trail(['Projects','New project']);
   act(null,{dataset:{act:'open-project',id:'existing-research'}});
-  act(null,{dataset:{act:'tab',tab:'cohorts'}});trail(['Projects','Existing research']);
+  act(null,{dataset:{act:'tab',tab:'cohorts'}});trail(['Projects','Existing research','Cohorts']);
   act(null,{dataset:{act:'open-cohort',id:'cohort'}});trail(['Projects','Existing research','Cohorts','Original cohort']);
   act(null,{dataset:{act:'open-persona',id:'person'}});trail(['Projects','Existing research','Cohorts','Original cohort','Adult participant']);
   S.doc.cohorts[0].personas[0].background='Unsaved background';S.dirty=true;
@@ -2851,10 +2866,10 @@ test('one breadcrumb trail covers creation, cohorts, personas, settings and live
   act(null,{dataset:{act:'project-settings'}});trail(['Projects','Existing research','Project settings']);
   S.snap.runs=[{id:'run-1',projectId:S.projectId,pipelineName:'Original study',status:'running',message:'Working',createdAt:new Date().toISOString(),liveMembers:[]}];
   act(null,{dataset:{act:'tab',tab:'runs'}});trail(['Projects','Existing research','Runs','Original study · run-1']);
-  act(null,{dataset:{act:'live-close'}});trail(['Projects','Existing research']);
+  act(null,{dataset:{act:'live-close'}});trail(['Projects','Existing research','Runs']);
   assert.equal(S.doc.cohorts[0].personas[0].background,'Unsaved background');assert.equal(S.dirty,true);
   S.doc.projects.find((p:any)=>p.id===S.projectId).pipelineIds=[];
-  act(null,{dataset:{act:'project-overview'}});trail(['Projects','Existing research']);
+  act(null,{dataset:{act:'project-overview'}});trail(['Projects','Existing research','Studies']);
 });
 
 
