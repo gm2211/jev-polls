@@ -1,0 +1,23 @@
+/** Keeps the open view in the URL hash so a browser reload returns to the same project, tab, study, cohort, or run. */
+export const LOCATION_CLIENT = String.raw`
+function locationParams(){try{return new URLSearchParams(String(location.hash||'').replace(/^#/,''))}catch{return new URLSearchParams()}}
+const initialLocation=locationParams();
+function locationHash(){
+  const p=project();if(!p||S.projectComposer)return '';
+  const q=new URLSearchParams({project:p.id,tab:['studies','cohorts','runs','project-settings'].includes(S.tab)?S.tab:'studies'});
+  if(q.get('tab')==='studies'&&pipeline()){q.set('study',S.pipelineId);if(S.stageId)q.set('step',S.stageId)}
+  if(q.get('tab')==='cohorts'&&cohort()&&!S.cohortComposer){q.set('cohort',S.cohortId);if(S.personaOpen&&S.personId)q.set('person',S.personId)}
+  if(q.get('tab')==='runs'&&S.liveRunId)q.set('run',S.liveRunId);
+  return '#'+q;
+}
+function syncLocation(){if(!S.doc)return;try{const hash=locationHash();if(hash!==(location.hash||''))history.replaceState(null,'',hash||location.pathname+location.search)}catch{}}
+function restoreLocation(q=initialLocation){
+  const id=q.get('project');if(!id||!S.doc?.projects?.some(p=>p.id===id))return false;
+  selectProject(id,true);
+  const tab=q.get('tab');if(['studies','cohorts','runs','project-settings'].includes(tab))S.tab=tab;
+  const study=q.get('study');if(S.tab==='studies'&&projectPipelines().some(p=>p.id===study)){S.pipelineId=study;S.studyLibrary=false;S.stageId=q.get('step')}
+  const c=projectCohorts().find(x=>x.id===q.get('cohort'));if(S.tab==='cohorts'&&c){S.cohortId=c.id;const person=c.personas.find(x=>x.id===q.get('person'));if(person){S.personId=person.id;S.personaOpen=true}}
+  const run=q.get('run');if(S.tab==='runs'&&(run==='history'||projectRuns().some(r=>r.id===run)))S.liveRunId=run;
+  retainSelections();render();return true;
+}
+`;

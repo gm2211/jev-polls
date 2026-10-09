@@ -53,12 +53,12 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
       return { ok: !failure, json: async () => JSON.parse(JSON.stringify(failure ? { error: { message: failure } } : data)) };
     },
     setTimeout: (fn: Function) => { timeouts.push(fn); return timeouts.length; }, clearTimeout() {}, setInterval: (fn: Function) => { intervals.push(fn); return 1; },
-    navigator: {}, URL, Blob, TextEncoder, confirm: () => { throw new Error('Unexpected native confirmation'); },
+    navigator: {}, URL, URLSearchParams, Blob, TextEncoder, confirm: () => { throw new Error('Unexpected native confirmation'); },
     FormData: TestFormData,
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={commandEntries,commandExecute,inlineCohortJobVisible,inlineCohortTarget,setupCohortPicker,runCaveats,beginRun,commandApplyProposal,commandJobVisible,S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,studies,review,say,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,studyQuestionList,validateSetupAnswers,questionParts,upsertQuestion,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={commandEntries,commandExecute,inlineCohortJobVisible,inlineCohortTarget,setupCohortPicker,runCaveats,beginRun,commandApplyProposal,commandJobVisible,S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,locationHash,restoreLocation,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,studies,review,say,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,studyQuestionList,validateSetupAnswers,questionParts,upsertQuestion,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
   if (openExistingProject) (context as any).clientTest.S.projectId = 'existing-research';
@@ -1005,6 +1005,46 @@ test('workspace opens at projects and keeps another project out of cohort, pipel
   assert.doesNotMatch(browser.element('app').innerHTML, /Original cohort|Original study/);
   selectProject('existing-research');
   assert.equal(S.cohortPrompt, 'Unsaved first project brief'); assert.equal(S.localPrompt, 'First assistant brief');
+});
+
+test('reload returns to the open project view through the URL hash and ignores stale links', async () => {
+  const open = browserHarness(); await settle();
+  const { S, render, locationHash } = open.client;
+  S.tab = 'studies'; S.pipelineId = 'study'; S.stageId = 'panel'; render();
+  assert.equal(locationHash(), '#project=existing-research&tab=studies&study=study&step=panel');
+  S.tab = 'cohorts'; S.cohortId = 'cohort'; S.personId = 'person'; S.personaOpen = true; render();
+  const cohortHash = locationHash();
+  assert.equal(cohortHash, '#project=existing-research&tab=cohorts&cohort=cohort&person=person');
+  S.tab = 'project-settings'; render();
+  assert.equal(locationHash(), '#project=existing-research&tab=project-settings');
+  const reloaded = browserHarness(false); await settle();
+  assert.equal(reloaded.client.S.projectId, null);
+  assert.equal(reloaded.client.restoreLocation(new URLSearchParams(cohortHash.slice(1))), true);
+  assert.equal(reloaded.client.S.projectId, 'existing-research'); assert.equal(reloaded.client.S.tab, 'cohorts');
+  assert.equal(reloaded.client.S.cohortId, 'cohort'); assert.equal(reloaded.client.S.personId, 'person'); assert.equal(reloaded.client.S.personaOpen, true);
+  assert.equal(reloaded.client.restoreLocation(new URLSearchParams('project=existing-research&tab=studies&study=study&step=panel')), true);
+  assert.equal(reloaded.client.S.tab, 'studies'); assert.equal(reloaded.client.S.pipelineId, 'study'); assert.equal(reloaded.client.S.stageId, 'panel');
+  const stale = browserHarness(false); await settle();
+  assert.equal(stale.client.restoreLocation(new URLSearchParams('project=deleted&tab=cohorts')), false);
+  assert.equal(stale.client.S.projectId, null); assert.match(stale.element('app').innerHTML, /Your projects/);
+  assert.equal(stale.client.restoreLocation(new URLSearchParams('project=existing-research&tab=studies&study=missing')), true);
+  assert.equal(stale.client.S.pipelineId, null); assert.equal(stale.client.S.studyLibrary, true);
+});
+
+test('confirming a project rename saves it so a reload keeps the new name', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, render } = browser.client;
+  S.tab = 'project-settings'; render();
+  assert.match(browser.element('app').innerHTML, /type="submit" title="Save project details" aria-label="Save project details"/);
+  const form: any = { dataset: { form: 'project-settings' }, reportValidity: () => true, values: { name: 'Naming', description: '' } };
+  form.requestSubmit = () => browser.listeners.get('submit')!({ target: { closest: () => form }, preventDefault() {} });
+  browser.element('app').querySelectorAll = (selector: string) => selector === '[data-form]' ? [form] : [];
+  browser.respond('/api/workspace', { revision: 2, document: { ...browser.snapshot().document, projects: [{ ...browser.snapshot().document.projects?.[0], id: 'existing-research', name: 'Naming', description: '', cohortIds: ['cohort'], pipelineIds: ['study'] }] } }, 'POST');
+  form.requestSubmit(); await settle(); await settle();
+  const saved = browser.bodies.filter(entry => entry.path === '/api/workspace');
+  assert.equal(saved.length, 1);
+  assert.equal((saved[0]!.body as any).document.projects[0].name, 'Naming');
+  assert.equal(S.dirty, false); assert.equal(S.revision, 2);
 });
 
 test('projects start from a question and assign cohorts only after an explicit choice', async () => {

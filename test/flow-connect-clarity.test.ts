@@ -12,7 +12,7 @@ async function harness() {
     localStorage: { getItem: () => null, setItem() {}, removeItem() {} },
     sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
     document: { getElementById: () => element, querySelectorAll: () => [], addEventListener() {}, visibilityState: 'visible' },
-    window: { addEventListener() {} }, navigator: {}, URL, Blob, TextEncoder, FormData,
+    window: { addEventListener() {} }, navigator: {}, URL, URLSearchParams, Blob, TextEncoder, FormData,
     fetch: async (path: string) => ({ ok: true, json: async () => structuredClone(path === '/api/local-agents' ? { engines: [] } : path === '/api/chatgpt/status' ? { connected: false, planEnabled: false } : snapshot) }),
     setTimeout: () => 1, clearTimeout() {}, setInterval: () => 1,
   };

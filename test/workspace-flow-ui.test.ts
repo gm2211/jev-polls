@@ -31,7 +31,7 @@ async function flowHarness() {
       path === '/api/chatgpt/status' ? { connected: false, planEnabled: false } : snapshot,
     ) }),
     setTimeout: () => 1, clearTimeout() {}, setInterval: () => 1,
-    navigator: {}, URL, Blob, TextEncoder, FormData,
+    navigator: {}, URL, URLSearchParams, Blob, TextEncoder, FormData,
   };
   const html = renderWorkspace('flow-test', 'token');
   const script = html.match(/<script nonce="flow-test">([\s\S]*?)<\/script>/)![1]!;
