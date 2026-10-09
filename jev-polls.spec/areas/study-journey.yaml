@@ -100,3 +100,12 @@ behaviors:
       reference: >-
         jev-polls project chat, Giulio, 2026-10-09, with screenshots of the study question field
         showing check and cancel icons beside Save
+  - id: step-settings-no-repeat
+    description: >-
+      The step settings bar reads "Step N settings", adding the step's own question only when it
+      differs from the study question shown in the title above.
+    source:
+      text: weird repetition
+      reference: >-
+        jev-polls project chat, Giulio, 2026-10-09, with a screenshot of the study title repeated
+        in "Step settings · 1. <same question>"
