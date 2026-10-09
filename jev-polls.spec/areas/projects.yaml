@@ -2,13 +2,28 @@ id: projects
 name: Projects and persistence
 prose: >-
   A project groups a research brief with its cohorts, study, and run history. Drafts save locally
-  with revision control. Open decisions (not yet accepted): whether a project holds one study or
-  many (today one is enforced while the README implies several, docs/ux-review M5), and whether
-  saving becomes autosave with undo instead of per-section Apply plus an icon-only Save
-  (docs/ux-review M3).
+  with revision control. Open decision (not yet accepted): whether a project holds one study or
+  many, and whether cohorts belong to one project or are shared across projects through tags or
+  groups instead of project ownership. On 2026-10-09 the user leaned toward one study per project
+  but saw cases for several, and questioned whether projects are needed at all versus tagging or
+  grouping cohorts. Until that is decided, today's rules (one study per project, project-owned
+  cohorts) stay in place. The general save model for other edits is still open.
 behaviors:
   - id: create-project
     description: New project asks for a name and research brief, saves it, and opens its Studies tab.
+  - id: rename-confirm
+    description: >-
+      Renaming a project uses an explicit confirm control, a check icon, that commits the new
+      name; it is not autosaved.
+    details: >-
+      Saving depends on context. Short identity edits such as a project name are committed
+      explicitly with a check icon. This behavior covers renames only; the save model for other
+      edits remains an open decision.
+    source:
+      text: >-
+        Depends on the context - if I'm renaming a project I would imagine I'd want a save button
+        (mostly like a check icon)
+      reference: 2026-10-09 jev-polls project thread, Giulio
   - id: project-ownership
     description: Every cohort and study belongs to exactly one project, and a study cannot use another project's cohort.
   - id: legacy-migration
