@@ -122,3 +122,11 @@ behaviors:
     source:
       text: "first step should be choosing question tipe: yes / no, ranking, noul (or whatever the jev types are)"
       reference: jev-polls project chat, Giulio, 2026-10-09, with a screenshot of Step settings
+  - id: study-settings-page
+    description: >-
+      A study page has no tab row: the canvas is the study, and a settings button beside the study
+      question opens Study settings as its own page (trail "… / study / Study settings").
+    details: Replaced the Pipeline / Study settings tabs so the study follows navigation.breadcrumbs.
+    source:
+      text: we're switching styles all of a sudden from 1st where Studies is big and not in breadcrumbs to a style where things are in breadcrumbs
+      reference: jev-polls project chat, Giulio, 2026-10-09, with a screenshot of the study page tabs

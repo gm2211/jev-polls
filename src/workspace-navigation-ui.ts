@@ -14,6 +14,7 @@ function workspaceBreadcrumbItems(){
       items.push({label:studyQuestion(study),action:'breadcrumb-study'});
       if(S.plan)items.push({label:'Review run'});
       else if(s&&S.sections.pipeline==='advanced')items.push({label:stepSettingsTitle(study,s)});
+      else if(S.sections.pipeline==='context')items.push({label:'Study settings'});
     }
   }else if(S.tab==='cohorts'){
     const c=S.cohortComposer?projectCohorts().find(c=>c.id===S.cohortTarget):cohort();

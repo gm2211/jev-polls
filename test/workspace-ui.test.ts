@@ -2327,6 +2327,8 @@ test('breadcrumbs step down one level at a time and opening a study lands on its
   act(null,{dataset:{act:'breadcrumb-study'}});assert.equal(S.sections.pipeline,'flow');assert.equal(S.flowPanel,true,'returning from step settings reopens that step');
   assert.equal(crumbs(),'Projects / Existing research / Studies / Original study');assert.equal(h1(),'Original study');
   act(null,{dataset:{act:'breadcrumb-study'}});assert.equal(S.flowPanel,false);
+  act(null,{dataset:{act:'section-view',sectionKey:'pipeline',sectionId:'context'}});assert.equal(crumbs(),'Projects / Existing research / Studies / Original study / Study settings');assert.equal(h1(),'Study settings');
+  act(null,{dataset:{act:'breadcrumb-study'}});assert.equal(S.sections.pipeline,'flow');assert.equal(h1(),'Original study');
   act(null,{dataset:{act:'back-studies'}});assert.equal(crumbs(),'Projects / Existing research / Studies');
 });
 
@@ -2375,7 +2377,7 @@ test('study navigation has clear scope, a reachable single-study library and con
   S.tab='studies';S.pipelineId='study';S.stageId='panel';S.dirty=true;
   S.doc.pipelines[0].stages[0].questions.answer.criteria.a={label:'Draft name',description:'Keep typed detail'};
   const before=JSON.stringify(S.doc);render();let html=browser.element('app').innerHTML;
-  assert.doesNotMatch(html,/aria-label="Workspace views"|>Advanced<|Apply phase/);const location=html.match(/<nav class="workspace-breadcrumbs"[\s\S]*?<\/nav>/)![0];assert.equal((location.match(/<button/g)||[]).length,3);assert.match(location,/<span aria-current="page">Original study<\/span>/);assert.equal((location.match(/aria-current="page"/g)||[]).length,1);assert.match(location,/class="breadcrumb-link" data-act="projects"/);assert.match(location,/data-act="back-studies">Studies/);assert.doesNotMatch(html,/← Studies|← Projects/);assert.match(html,/>Pipeline</);assert.match(html,/aria-label="Step settings" title="Step settings"/);
+  assert.doesNotMatch(html,/aria-label="Workspace views"|>Advanced<|Apply phase/);const location=html.match(/<nav class="workspace-breadcrumbs"[\s\S]*?<\/nav>/)![0];assert.equal((location.match(/<button/g)||[]).length,3);assert.match(location,/<span aria-current="page">Original study<\/span>/);assert.equal((location.match(/aria-current="page"/g)||[]).length,1);assert.match(location,/class="breadcrumb-link" data-act="projects"/);assert.match(location,/data-act="back-studies">Studies/);assert.doesNotMatch(html,/← Studies|← Projects/);assert.doesNotMatch(html,/>Pipeline<|aria-label="Study sections"/,'no tab row on the study page');assert.match(html,/data-section-id="context" aria-label="Study settings"/);assert.match(html,/aria-label="Step settings" title="Step settings"/);
   act(null,{dataset:{act:'section-view',sectionKey:'pipeline',sectionId:'advanced'}});html=browser.element('app').innerHTML;
   assert.doesNotMatch(html,/Back to question|Back to flow|study-step-settings/,'the trail replaces ad-hoc back buttons');
   assert.match(html,/data-act="breadcrumb-study">Original study<\/button>.*<span aria-current="page">Step 1 settings<\/span>/);assert.match(html,/<h1 tabindex="-1">Step 1 settings<\/h1>/);
