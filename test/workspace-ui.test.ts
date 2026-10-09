@@ -1425,7 +1425,7 @@ test('empty study cohort selection generates inline without losing question or c
   S.sections['setup-wizard-study-panel-answer'] = 'cohort'; S.sections['flow-inspector']='cohort'; S.dirty = true;
   const before = JSON.stringify(S.doc);
   render();
-  assert.match(browser.element('app').innerHTML, /Generate a cohort/);
+  assert.match(browser.element('app').innerHTML, /Who answers this step\?[\s\S]*?New cohort/);
   act(null, { dataset: { act: 'new-cohort' } }); await settle();
   assert.equal(S.tab, 'studies');
   assert.match(browser.element('app').innerHTML, /Who should be in this cohort\?/);
@@ -1455,13 +1455,16 @@ test('inline cohort proposal attaches only to its original step after selection 
   S.tab = 'studies'; S.pipelineId = 'study'; S.stageId = 'panel';
   const p = S.doc.pipelines[0], first = p.stages[0];
   p.stages.push({ ...structuredClone(first), id: 'second' });
-  assert.match(setupCohortPicker(p,first), /Create cohort/);
+  assert.match(setupCohortPicker(p,first), /data-act="new-cohort"[^>]*>[\s\S]*?New cohort/);
   act(null, { dataset: { act: 'new-cohort' } }); await settle();
   const candidate = { ...structuredClone(S.doc.cohorts[0]), id: 'new-audience', name: 'New audience' };
   S.localJob = { id: 'inline-job', status: 'completed', revision: S.revision, cohort: { id: candidate.id, prompt: 'New audience', size: 1 }, proposal: { document: { cohorts: [candidate] }, explanation: 'Synthetic assumptions' } };
-  S.stageId = 'second';
+  S.stageId = 'second'; S.flowPanel = false;
   assert.doesNotMatch(setupCohortPicker(p,p.stages[1]), /data-form="cohort-generator"/);
   adoptCohortProposal();
+  assert.equal(S.flowPanel, true, 'the step panel reopens on its Cohort tab');
+  assert.equal(S.sections['flow-inspector'], 'cohort');
+  assert.match(browser.element('app').innerHTML, /data-act="phase-pool" data-id="new-audience">Open full cohort/);
   assert.equal(p.cohorts[first.cohort], candidate.id);
   assert.equal(p.stages[1].cohort, 'audience');
   assert.equal(p.cohorts.audience, 'cohort', 'existing shared alias stays intact');
