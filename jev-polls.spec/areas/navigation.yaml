@@ -22,12 +22,20 @@ behaviors:
       Every workspace page reads top-down as brand, breadcrumb trail, project tabs where the page
       has them, then one page header.
     details: >-
-      The breadcrumb row holds only the trail. Project tabs (Studies, Cohorts, Runs) sit under the
-      section header with a Project settings link at the end of the same row, replacing the lone
-      edit pencil that used to float beside the breadcrumbs.
+      The breadcrumb row holds only the trail. Project tabs (Studies, Cohorts, Runs) sit directly
+      under the trail, above the page title, with a Project settings link at the end of the same
+      row. On a section page the trail ends at the project, because the selected tab already names
+      the section; deeper pages (a study, cohort, persona, or run) keep the section in the trail.
     source:
       text: navigations an breadcrumbs are still a little awkward - the positioning of some controls and title also is
       reference: project thread, Giulio, 2026-10-09
+  - id: tabs-follow-breadcrumbs
+    description: >-
+      Project tabs follow the breadcrumb trail directly, and the trail never repeats the selected
+      tab as its last level.
+    source:
+      text: the positioning of the tabs wrt breadcrumbs is confusing
+      reference: project chat, Giulio, 2026-10-09
   - id: brand-not-breadcrumb
     description: The app name lockup in the top bar never reads as a breadcrumb level.
     details: The wordmark stacks "jev" over a small "Research desk" caption with no slash separator.

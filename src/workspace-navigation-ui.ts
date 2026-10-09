@@ -21,8 +21,9 @@ function workspaceBreadcrumbItems(){
   }
   return items;
 }
-function workspaceBreadcrumbs(){
-  const items=workspaceBreadcrumbItems();
+function workspaceBreadcrumbs(sectionRoot=false){
+  // Project tabs sit right under the trail on section pages, so the trail stops at the project instead of repeating the selected tab.
+  const items=workspaceBreadcrumbItems();if(sectionRoot&&items.length===3)items.pop();
   return '<nav class="workspace-breadcrumbs" aria-label="Breadcrumb"><ol>'+items.map((item,index)=>'<li>'+(index?'<span class="breadcrumb-separator" aria-hidden="true">/</span>':'')+(index===items.length-1?'<span aria-current="page">'+esc(item.label)+'</span>':'<button type="button" class="breadcrumb-link" data-act="'+attr(item.action)+'">'+esc(item.label)+'</button>')+'</li>').join('')+'</ol></nav>';
 }
 function viewportPageSize(large,small){return (window.innerWidth||1024)<=600?small:large}
@@ -99,7 +100,7 @@ export const NAVIGATION_CSS = `
 export const PAGE_LAYOUT_CSS = `
 .wordmark-text{display:grid;gap:3px;line-height:1}.wordmark-text b{font-weight:inherit}.wordmark-text i{font:600 10px/1 var(--body);letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
 .project-navigation{display:flex;align-items:center;min-height:32px;margin-bottom:14px;padding-bottom:0;border-bottom:0}
-.project-tabs{display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:4px 16px;margin:12px 0 18px;border-bottom:1px solid var(--line)}.project-tabs>.tabs{margin:0;border-bottom:0}
+.project-navigation+.project-tabs{margin-top:-6px}.project-tabs{display:flex;align-items:flex-end;justify-content:space-between;flex-wrap:wrap;gap:4px 16px;margin:12px 0 22px;border-bottom:1px solid var(--line)}.project-tabs>.tabs{margin:0;border-bottom:0}
 .project-settings-link{appearance:none;display:inline-flex;align-items:center;gap:6px;min-height:var(--button-height);padding:0 4px;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--muted);font:inherit;font-size:13px;font-weight:600;cursor:pointer}.project-settings-link:hover{color:var(--blue)}.project-settings-link:focus-visible{outline:2px solid var(--blue);outline-offset:2px}.project-settings-link .ui-icon{width:15px;height:15px}
 .live-shell .project-tabs{margin-bottom:6px}
 .masthead{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:0 24px;align-items:center}.masthead>div:first-child{display:contents}.masthead h1{grid-column:1;grid-row:1;margin:0}.masthead p{grid-column:1;grid-row:2;margin-top:6px}.masthead .header-actions{grid-column:2;grid-row:1;align-self:center;justify-content:flex-end}
