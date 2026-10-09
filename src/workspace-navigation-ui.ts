@@ -9,12 +9,11 @@ function workspaceBreadcrumbItems(){
   if(S.tab==='studies'){
     const study=pipeline();
     if(study){
-      // One crumb per level of the hierarchy: study, then the open step, then that step's settings.
-      const mode=S.sections.pipeline||'flow',s=selectedStage(),step=s&&'Step '+(study.stages.findIndex(x=>x.id===s.id)+1);
+      // One crumb per page, and the last crumb always matches the page heading. The step panel is an overlay on the study page, not a page.
+      const s=selectedStage();
       items.push({label:studyQuestion(study),action:'breadcrumb-study'});
       if(S.plan)items.push({label:'Review run'});
-      else if(s&&mode==='advanced')items.push({label:step,action:'breadcrumb-step'},{label:'Settings'});
-      else if(s&&(mode==='phase'||mode==='flow'&&S.flowPanel!==false))items.push({label:step});
+      else if(s&&S.sections.pipeline==='advanced')items.push({label:stepSettingsTitle(study,s)});
     }
   }else if(S.tab==='cohorts'){
     const c=S.cohortComposer?projectCohorts().find(c=>c.id===S.cohortTarget):cohort();
@@ -23,7 +22,7 @@ function workspaceBreadcrumbItems(){
     else if(c&&S.personaOpen){const person=c.personas.find(person=>person.id===S.personId);if(person)items.push({label:person.label||'Persona'})}
   }else if(S.tab==='runs'){
     const runs=projectRuns(),run=runs.find(r=>r.id===S.liveRunId)||(S.liveRunId!=='history'&&runs.find(r=>r.status==='running'));
-    if(run)items.push({label:run.pipelineName+' · '+run.id});
+    if(run)items.push({label:run.pipelineName});
   }
   return items;
 }
@@ -58,7 +57,7 @@ function revealSectionField(field){
   }
 }
 function navigationAction(a,el){
-  if(a==='breadcrumb-study'||a==='breadcrumb-step'){S.plan=null;S.sections.pipeline='flow';S.flowSettingsReturn=false;S.flowPanel=a==='breadcrumb-step';render();(a==='breadcrumb-step'?root.querySelector('.flow-inspector h2'):root.querySelector('h1'))?.focus();return true}
+  if(a==='breadcrumb-study'){const fromStep=S.sections.pipeline==='advanced';S.plan=null;S.sections.pipeline='flow';S.flowSettingsReturn=false;S.flowPanel=fromStep;render();(fromStep?root.querySelector('.flow-inspector h2'):root.querySelector('h1'))?.focus();return true}
   if(a==='breadcrumb-cohort'){S.cohortComposer=false;S.personaOpen=false;render();root.querySelector('h1')?.focus();return true}
   if(a==='section-view'){if(S.targetDraft)readTargetForm();S.sections[el.dataset.sectionKey]=el.dataset.sectionId;render();root.querySelectorAll('[data-act=section-view]').forEach(b=>{if(b.dataset.sectionKey===el.dataset.sectionKey&&b.dataset.sectionId===el.dataset.sectionId)b.focus()});drawStageEdges();return true}
   if(a==='page-action'){if(S.targetDraft)readTargetForm();S.listPages[el.dataset.pageKey]=Math.max(0,Number(el.dataset.page));const shares=el.closest?.('[data-form=segment-shares]');if(shares){const page=pageItems(cohort().segments,'segments',viewportPageSize(4,3));shares.querySelectorAll('.segment-weight-row').forEach((row,i)=>row.hidden=i<page.start||i>=page.end);const pager=shares.querySelector('.pagination');if(pager)pager.outerHTML=page.controls;shares.querySelector('.page-select')?.focus();return true}render();root.querySelector('h1')?.focus();return true}

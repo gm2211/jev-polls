@@ -13,6 +13,7 @@ function stepTitle(p,s){
   const title=s.kind==='poll'?prefix+(question&&question!=='What should this phase decide?'?question:'Untitled question')+(questions.length>1?' + '+(questions.length-1)+' more':''):(s.label?.trim()||(s.kind==='aggregate'?'Combine answers':'Final result'));
   return (p.stages.findIndex(x=>x.id===s.id)+1)+'. '+title.replace(/\s+/g,' ');
 }
+function stepSettingsTitle(p,s){return 'Step '+(p.stages.findIndex(x=>x.id===s.id)+1)+' settings'}
 function inputTitle(p,input){
   const source=p.stages.find(x=>x.id===input.stage);if(!source)return input.stage;
   const question=source.questions?.[input.question];
