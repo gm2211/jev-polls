@@ -58,7 +58,9 @@ behaviors:
       A round's Cohort tab offers New cohort, built inside the panel; accepting it adds it to the
       shared library, links it to the project, assigns it to the round, and shows the Cohort tab
       again with it selected.
-    details: Cancelling returns to the same round with nothing changed.
+    details: >-
+      Back to cohorts returns to the cohort list without changes. With a cohort assigned, the tab
+      offers Open full cohort (the detailed editor, with a way back to the study) and Change cohort.
     source:
       text: needs a cohort assigned that I can create right there and then and navigate back to pipeline
       reference: jev-polls project thread "Rethink the main user flow", Giulio, 2026-10-09
