@@ -99,10 +99,17 @@ function flowCohortMap(p,s){
   if(person)return '<section class="flow-member-focus"><div class="flow-member-navigation"><button class="button small" data-act="host-member-close" data-map="'+attr(key)+'">'+icon('left')+' Cohort map</button><div class="row"><button class="button small icon-button" data-act="host-member" data-map="'+attr(key)+'" data-id="'+attr(c.personas[index-1]?.id||'')+'" '+(index===0?'disabled':'')+' aria-label="Previous member">'+icon('left')+'</button><span>'+(index+1)+' / '+c.personas.length+'</span><button class="button small icon-button" data-act="host-member" data-map="'+attr(key)+'" data-id="'+attr(c.personas[index+1]?.id||'')+'" '+(index===c.personas.length-1?'disabled':'')+' aria-label="Next member">'+icon('right')+'</button></div></div>'+hostMapDetails(c,person)+'</section>';
   return '<div class="flow-cohort-summary"><strong>'+esc(c.name)+'</strong><button class="button small" data-act="flow-cohort-change">Change cohort</button></div><section class="flow-cohort-map"><h3>Cohort host map</h3>'+hostMap(c,{key,limit:24})+'<p class="subtle">Hover for a quick look. Select a member to inspect their synthetic profile.</p></section>';
 }
+function flowRoundTabs(p,s){
+  if(s.kind!=='poll')return [['question','Result',false],['connections','Inputs',false]];
+  const q=Object.values(s.questions||{})[0],ready=q?setupWizardReady(q,poolForPhase(p,s)):[false,!!poolForPhase(p,s)?.personas.length,false];
+  return [['question','Question',!ready[0]],['answers','Answers',!ready[2]],['connections','Inputs',false],['cohort','Cohort',!ready[1]]];
+}
 function flowInspector(p,s){
-  if(!s)return '<aside class="flow-inspector"><p>Select a question to edit it.</p></aside>';
-  const requested=S.sections['flow-inspector']==='answer'?'question':S.sections['flow-inspector']||'question',tab=s.kind==='poll'||['question','connections'].includes(requested)?requested:'question';
-  return '<aside class="flow-inspector" aria-label="Selected step editor" data-inspector-tab="'+attr(tab)+'"><div class="flow-inspector-head"><h2 tabindex="-1">'+esc(stepTitle(p,s))+'</h2><button class="button small icon-button" data-act="flow-settings" aria-label="Step settings" title="Step settings">'+icon('settings')+'</button></div><nav class="section-tabs" aria-label="Selected step sections">'+(s.kind==='poll'?[['question','Question'],['cohort','Cohort'],['connections','Inputs']]:[['question','Result'],['connections','Inputs']]).map(([key,label])=>'<button class="button small" data-act="flow-inspector" data-section="'+key+'" aria-pressed="'+(tab===key)+'">'+label+'</button>').join('')+'</nav><div class="flow-inspector-body">'+(tab==='connections'?flowConnections(p,s):tab==='cohort'?flowCohortMap(p,s):stageForm(p,s,true))+'</div></aside>';
+  if(!s||S.flowPanel===false)return '';
+  const tabs=flowRoundTabs(p,s),requested=S.sections['flow-inspector']==='answer'?'answers':S.sections['flow-inspector']||'question',tab=tabs.some(([key])=>key===requested)?requested:'question';
+  const kind=s.kind==='poll'?'Ask cohort · '+answerName(Object.values(s.questions||{})[0]?.type):s.kind==='aggregate'?'Combine answers':'Final result';
+  const body=tab==='connections'?flowConnections(p,s):tab==='cohort'?flowCohortMap(p,s):s.kind==='poll'?stageForm(p,s,tab):stageForm(p,s,true);
+  return '<aside class="flow-inspector round-panel" aria-label="Selected step editor" data-inspector-tab="'+attr(tab)+'"><div class="flow-inspector-head"><div class="round-panel-title"><h2 tabindex="-1">'+esc(stepTitle(p,s))+'</h2><span class="round-panel-kind">'+esc(kind)+'</span></div><div class="row"><button class="button small icon-button" data-act="flow-settings" aria-label="Step settings" title="Step settings">'+icon('settings')+'</button><button class="button small icon-button" data-act="flow-panel-close" aria-label="Close step panel" title="Close (Esc)">'+icon('close')+'</button></div></div><nav class="round-tabs" role="tablist" aria-label="Selected step sections">'+tabs.map(([key,label,todo])=>'<button type="button" role="tab" class="round-tab" data-act="flow-inspector" data-section="'+key+'" aria-selected="'+(tab===key)+'"'+(todo?' data-todo="true"':'')+'>'+label+(todo?'<span class="round-tab-dot" aria-label="needs attention"></span>':'')+'</button>').join('')+'</nav><div class="flow-inspector-body" role="tabpanel">'+body+'</div></aside>';
 }
 function flowWorkspace(p,s){
   const pending=S.flowSource?.pipelineId===p.id?S.flowSource:null,add=p.stages.find(x=>x.id===S.flowAdd),first=add&&phaseOutput(p,add)[0];
@@ -114,9 +121,10 @@ function flowAction(a,el){
   if(!a.startsWith('flow-'))return false;
   const p=pipeline();if(!p)return true;
   if(a==='flow-cohort-change'){S.flowCohortPick=!S.flowCohortPick;render();return true}
-  if(a==='flow-cohort-map'){S.flowCohortPick=false;S.stageId=el.dataset.id;S.sections['flow-inspector']='cohort';render();root.querySelector('.flow-inspector h2')?.focus();return true}
+  if(a==='flow-cohort-map'){S.flowCohortPick=false;S.stageId=el.dataset.id;S.flowPanel=true;S.sections['flow-inspector']='cohort';render();root.querySelector('.flow-inspector h2')?.focus();return true}
   if(a==='flow-fit'||a==='flow-reset'){S.flowScale=a==='flow-reset'?1:'fit';drawFlowEdges();return true}
   if(a==='flow-inspector'){S.sections['flow-inspector']=el.dataset.section;render();root.querySelector('[data-act=flow-inspector][data-section="'+el.dataset.section+'"]')?.focus();return true}
+  if(a==='flow-panel-close'){S.flowPanel=false;render();root.querySelector('[data-flow-node="'+S.stageId+'"] [data-act=flow-select]')?.focus({preventScroll:true});return true}
   if(a==='flow-settings'){S.flowSettingsReturn=true;S.sections.pipeline='advanced';render();return true}
   if(a==='flow-settings-back'){S.flowSettingsReturn=false;S.sections.pipeline='flow';render();return true}
   if(a==='flow-cancel'){S.flowSource=null;render();return true}
@@ -125,25 +133,25 @@ function flowAction(a,el){
   if(a==='flow-create'){
     const m=S.flowCreate;if(m?.pipelineId!==p.id||!FLOW_KINDS.some(k=>k.kind===el.dataset.kind))return true;
     flowFreezeLayout(p);const stage=flowNewStage(p,el.dataset.kind,null);p.stages.push(stage);p.layout[stage.id]={x:Math.max(0,Math.round(m.x)),y:Math.max(0,Math.round(m.y))};
-    S.stageId=stage.id;S.flowAdd=null;S.flowSource=null;S.flowCreate=null;S.flowCohortPick=stage.kind==='poll';S.sections['flow-inspector']=stage.kind==='poll'?'cohort':'question';
+    S.stageId=stage.id;S.flowPanel=true;S.flowAdd=null;S.flowSource=null;S.flowCreate=null;S.flowCohortPick=stage.kind==='poll';S.sections['flow-inspector']=stage.kind==='poll'?'cohort':'question';
     S.dirty=true;S.plan=null;render();return true;
   }
   if(a==='flow-output'){if(!p.stages.some(s=>s.id===el.dataset.id))return true;S.flowSource={pipelineId:p.id,stage:el.dataset.id,question:el.dataset.question};render();root.querySelector('.flow-hint')?.scrollIntoView?.({block:'nearest'});return true}
   if(a==='flow-connect-input'){
-    flowConnect(p,el.dataset.source,el.dataset.question,el.dataset.id);S.flowSource=null;S.stageId=el.dataset.id;S.sections['flow-inspector']='connections';S.dirty=true;S.plan=null;render();return true;
+    flowConnect(p,el.dataset.source,el.dataset.question,el.dataset.id);S.flowSource=null;S.stageId=el.dataset.id;S.flowPanel=true;S.sections['flow-inspector']='connections';S.dirty=true;S.plan=null;render();return true;
   }
   if(a==='flow-select'||a==='flow-connect'){
     if(a==='flow-connect'&&S.flowSource?.pipelineId!==p.id)return true;
     S.sections['flow-inspector']='question';
     if(S.flowSource?.pipelineId===p.id){flowConnect(p,S.flowSource.stage,S.flowSource.question,el.dataset.id);S.flowSource=null;S.dirty=true;S.plan=null;S.sections['flow-inspector']='connections'}
-    S.stageId=el.dataset.id;render();root.querySelector('.flow-inspector h2')?.focus();return true;
+    S.stageId=el.dataset.id;S.flowPanel=true;render();root.querySelector('.flow-inspector h2')?.focus();return true;
   }
-  if(a==='flow-inputs'){S.stageId=el.dataset.id;S.sections['flow-inspector']='connections';render();return true}
+  if(a==='flow-inputs'){S.stageId=el.dataset.id;S.flowPanel=true;S.sections['flow-inspector']='connections';render();return true}
   if(a==='flow-disconnect'){const s=p.stages.find(s=>s.id===el.dataset.id);if(s)flowDisconnect(p,s,el.dataset.key)}
   else if(a==='flow-add'){
     const source=p.stages.find(s=>s.id===el.dataset.id),output=source&&phaseOutput(p,source)[0],stage=flowNewStage(p,el.dataset.kind,source);
     if(source&&output)flowConnect({...p,stages:[...p.stages,stage]},source.id,output.id,stage.id);
-    p.stages.push(stage);S.stageId=stage.id;S.flowAdd=null;S.flowSource=null;S.flowCreate=null;S.flowCohortPick=stage.kind==='poll';S.sections['flow-inspector']=stage.kind==='poll'?'cohort':'question';
+    p.stages.push(stage);S.stageId=stage.id;S.flowPanel=true;S.flowAdd=null;S.flowSource=null;S.flowCreate=null;S.flowCohortPick=stage.kind==='poll';S.sections['flow-inspector']=stage.kind==='poll'?'cohort':'question';
   }else return true;
   S.dirty=true;S.plan=null;render();return true;
 }
@@ -294,6 +302,12 @@ root.addEventListener('keydown',e=>{
   const scale=flowScaleApplied||1,left=v.scrollLeft+Math.max(0,v.clientWidth/2-160),top=v.scrollTop+24;
   flowOpenCreate(p,left/scale,top/scale,left,top);
 });
+root.addEventListener('keydown',e=>{
+  if(e.key!=='Escape'||e.defaultPrevented||S.flowCreate)return;
+  const panel=root.querySelector('.round-panel');if(!panel)return;
+  if(!panel.contains(e.target)&&!e.target?.classList?.contains('flow-viewport'))return;
+  e.preventDefault();flowAction('flow-panel-close',{dataset:{}});
+});
 }
 
 `;
@@ -333,4 +347,23 @@ export const WORKSPACE_FLOW_CSS = `
 .flow-create-kind{flex:none;display:grid;place-items:center;width:30px;height:30px;border-radius:8px;border:1px solid var(--line);background:var(--raised);color:var(--blue)}.flow-create-kind .ui-icon{width:16px;height:16px}
 .flow-create-text{display:grid;gap:2px;min-width:0}.flow-create-text strong{font-size:13px}.flow-create-text small{font-size:11px;color:var(--muted)}
 .flow-create-empty{margin:0;padding:10px;font-size:12px;color:var(--muted)}.flow-create-foot{margin:4px 0 0;padding:6px 10px 4px;border-top:1px solid var(--line);font-size:10px;color:var(--muted)}.flow-create-foot kbd{font:inherit;font-size:10px;padding:0 4px;border:1px solid var(--line);border-radius:4px;margin-right:2px}
+`;
+
+/* Railway-style step panel: slides over the right of the canvas with one row of tabs. Loaded last. */
+export const ROUND_PANEL_CSS = `
+.flow-workspace{position:relative;grid-template-columns:minmax(0,1fr)}
+.round-panel{position:absolute;top:0;right:0;bottom:0;z-index:6;width:min(640px,62%);display:flex;flex-direction:column;border-radius:var(--radius-panel);box-shadow:-18px 0 40px rgba(20,32,48,.16);animation:round-panel-in 160ms ease-out}
+@keyframes round-panel-in{from{transform:translateX(24px);opacity:0}to{transform:none;opacity:1}}
+@media(prefers-reduced-motion:reduce){.round-panel{animation:none}}
+.round-panel .flow-inspector-head{align-items:center;padding:16px 18px 10px}
+.round-panel-title{display:grid;gap:2px;min-width:0}.round-panel-title h2{margin:0;font:600 17px/1.3 var(--display);letter-spacing:-.01em;overflow-wrap:anywhere}
+.round-panel-kind{font-size:12px;color:var(--muted)}
+.round-tabs{display:flex;gap:2px;padding:0 12px;border-bottom:1px solid var(--line);overflow-x:auto}
+.round-tab{appearance:none;display:inline-flex;align-items:center;gap:6px;min-height:42px;padding:0 12px;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--muted);font:inherit;font-size:13px;font-weight:600;white-space:nowrap;cursor:pointer}
+.round-tab:hover{color:var(--ink)}.round-tab[aria-selected=true]{color:var(--ink);border-bottom-color:var(--blue)}
+.round-tab:focus-visible{outline:2px solid var(--focus,var(--blue));outline-offset:-2px}
+.round-tab-dot{width:7px;height:7px;border-radius:50%;background:var(--amber)}
+.round-panel .flow-inspector-body{flex:1;min-height:0;overflow:auto;padding:16px 18px}
+.round-outputs{margin-top:16px;padding-top:12px;border-top:1px solid var(--line)}.round-outputs h3{margin:0 0 4px;font-size:13px}
+@media(max-width:760px){.round-panel{position:static;width:auto;box-shadow:none;animation:none}}
 `;
