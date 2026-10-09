@@ -87,3 +87,15 @@ behaviors:
       reference: >-
         jev-polls project chat, Giulio, 2026-10-09, with screenshots of the TypeSafe AI console;
         follows "while I generally love tabbed uis, the way this is structured is confusing"
+  - id: inline-edit-single-save
+    description: >-
+      Inline edits of a study question or project name have no check or cancel buttons: Enter or
+      clicking away keeps the change, Esc cancels it, and a short hint says so.
+    details: >-
+      Keeps the page's Save as the only save button beside the field. Clicking away from an empty
+      field cancels instead of erroring. Esc in the field does not close the step panel.
+    source:
+      text: this looks super weird - double save
+      reference: >-
+        jev-polls project chat, Giulio, 2026-10-09, with screenshots of the study question field
+        showing check and cancel icons beside Save

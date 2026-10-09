@@ -1,4 +1,4 @@
-/** One-click creation: empty lists are the create control, and a new study is named on its own page. */
+/** One-click creation: empty lists are the create control, and a new study is named on its own page. Inline edits keep on Enter or blur and cancel on Esc, so the page's Save stays the only save button. */
 export const STUDY_START_CLIENT = String.raw`
 function emptyCreate(act,title,hint){
   return '<button type="button" class="empty-create" data-act="'+act+'"><span class="empty-create-plus" aria-hidden="true">'+icon('plus')+'</span><strong>'+esc(title)+'</strong><span class="empty-create-hint">'+esc(hint)+'</span></button>';
@@ -14,10 +14,20 @@ function createStudy(){
 function studyTitle(p){
   if(S.studyTitleEdit!==p.id)return '<div class="study-title"><h1 tabindex="-1">'+esc(studyQuestion(p))+'</h1><button type="button" class="button small icon-button study-title-edit" data-act="study-title-edit" aria-label="Edit study question" title="Edit study question">'+icon('edit')+'</button></div>';
   const question=p.description?.trim()||'';
-  return '<form class="study-title study-title-form" data-form="study-title" data-id="'+attr(p.id)+'"><h1 class="visually-hidden" tabindex="-1">'+esc(studyQuestion(p))+'</h1><input name="question" value="'+attr(question)+'" required maxlength="500" placeholder="What do you want to find out?" aria-label="Study question" autocomplete="off">'
-    +'<button class="button primary small icon-button" type="submit" title="Save study question" aria-label="Save study question">'+icon('check')+'</button>'
-    +'<button class="button small icon-button" type="button" data-act="study-title-cancel" title="Keep current question" aria-label="Keep current question">'+icon('close')+'</button></form>';
+  return '<form class="study-title study-title-form" data-form="study-title" data-id="'+attr(p.id)+'" data-inline-edit="study-title-cancel"><h1 class="visually-hidden" tabindex="-1">'+esc(studyQuestion(p))+'</h1><input name="question" value="'+attr(question)+'" required maxlength="500" placeholder="What do you want to find out?" aria-label="Study question" aria-describedby="inlineEditHint" title="Enter or click away to keep · Esc to cancel" autocomplete="off">'+inlineEditHint()+'</form>';
 }
+function inlineEditHint(){return '<span id="inlineEditHint" class="inline-edit-hint">Enter to keep · Esc to cancel</span>'}
+function inlineEditOpen(form){return form.dataset.form==='study-title'?S.studyTitleEdit===form.dataset.id:form.dataset.form==='project-rename'?S.projectRename===form.dataset.id:false}
+function inlineEditCancel(form){act(null,{dataset:{act:form.dataset.inlineEdit}})}
+root.addEventListener('keydown',e=>{
+  const form=e.target.closest?.('[data-inline-edit]');if(!form||e.key!=='Escape')return;
+  e.preventDefault();e.stopPropagation();inlineEditCancel(form);
+},true);
+root.addEventListener('focusout',e=>{
+  const form=e.target.closest?.('[data-inline-edit]');if(!form||form.contains(e.relatedTarget)||!form.isConnected||!inlineEditOpen(form))return;
+  const input=form.querySelector('input');
+  if(!String(input?.value||'').trim())inlineEditCancel(form);else form.requestSubmit();
+});
 function submitStudyTitle(form){
   const p=S.doc.pipelines.find(x=>x.id===form.dataset.id);if(!p){S.studyTitleEdit=null;render();return}
   const question=String(new FormData(form).get('question')||'').trim();if(!question)throw Error('Write the question this study should answer.');
@@ -51,5 +61,7 @@ export const STUDY_START_CSS = String.raw`
 .study-title h1{min-width:0}
 .study-title-edit{flex:none;background:transparent;border-color:transparent;color:var(--muted)}.study-title-edit:hover{color:var(--ink)}
 .study-title-form input{flex:1;min-width:0;font:600 18px/1.3 var(--display);letter-spacing:-.02em}
+.inline-edit-hint{flex:none;color:var(--faint);font-size:12px;white-space:nowrap}
+@media(max-width:600px){.inline-edit-hint{display:none}}
 .visually-hidden{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 `;
