@@ -12,7 +12,7 @@ function createStudy(){
   render();const input=root.querySelector('[data-form=study-title] [name=question]');input?.focus();
 }
 function studyTitle(p){
-  if(S.studyTitleEdit!==p.id)return '<div class="study-title"><h1 tabindex="-1">'+esc(studyQuestion(p))+'</h1><button type="button" class="button small icon-button study-title-edit" data-act="study-title-edit" aria-label="Edit study question" title="Edit study question">'+icon('edit')+'</button></div>';
+  if(S.studyTitleEdit!==p.id)return '<div class="study-title"><h1 tabindex="-1">'+esc(studyQuestion(p))+'</h1><button type="button" class="button small icon-button study-title-edit" data-act="study-title-edit" aria-label="Edit study question" title="Edit study question">'+icon('edit')+'</button><button type="button" class="button small icon-button study-title-edit" data-act="section-view" data-section-key="pipeline" data-section-id="context" aria-label="Study settings" title="Study settings">'+icon('settings')+'</button></div>';
   const question=p.description?.trim()||'';
   return '<form class="study-title study-title-form" data-form="study-title" data-id="'+attr(p.id)+'" data-inline-edit="study-title-cancel"><h1 class="visually-hidden" tabindex="-1">'+esc(studyQuestion(p))+'</h1><input name="question" value="'+attr(question)+'" required maxlength="500" placeholder="What do you want to find out?" aria-label="Study question" aria-describedby="inlineEditHint" title="Enter to save · Esc or click away to discard" autocomplete="off">'+inlineEditHint()+'</form>';
 }
