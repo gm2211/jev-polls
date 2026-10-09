@@ -178,7 +178,7 @@ than satisfied, because no live TypeSafe run was made.
 | `execution/exact-response-cache` | gap | E8 |
 | `cli/protect-artifacts`, `credentials-and-security/verify-then-save` | gap | E11 |
 | `review-and-run/stale-plan-explained` | gap | H1 |
-| `agent-collaboration/clean-draft-sync` | gap | H2 |
+| `agent-collaboration/clean-draft-sync`, `agent-collaboration/field-level-merge`, `agent-collaboration/refresh-keeps-draft`, `agent-collaboration/save-conflict-resolution` | gap | H2 |
 | `review-and-run/budget-minimum-visible` | gap | H4 |
 | `interface-quality/errors-in-context` | gap | H5 |
 | `drafting/ready-provider-default` | gap | H6 |
@@ -199,5 +199,5 @@ than satisfied, because no live TypeSafe run was made.
 | `drafting/unsupported-credential-store` | gap | L9 |
 
 The following are **open decisions** and are labeled as proposals in the area prose: one study or
-many per project (M5), the save model (M3), conflict resolution for agent edits (H2), run
+many per project (M5), the save model (M3), run
 cancellation (H3), and URL routing (§1).

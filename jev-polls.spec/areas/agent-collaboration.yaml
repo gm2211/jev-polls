@@ -1,9 +1,9 @@
 id: agent-collaboration
 name: Agent collaboration (MCP)
 prose: >-
-  Existing agents read and edit the same workspace through local MCP tools. Open decision (not yet
-  accepted): how the browser resolves an agent edit that arrives while the user has unsaved changes
-  (per-item choice or blocking the agent until the user saves) (docs/ux-review H2).
+  Existing agents read and edit the same workspace through local MCP tools. Browser drafts and
+  agent saves merge field by field, CRDT-style: only a field changed on both sides is a conflict,
+  and the user decides every conflict. Decided 2026-10-09 (docs/ux-review H2).
 behaviors:
   - id: loopback-only
     description: The MCP adapter accepts only a loopback workspace URL and refuses redirects.
@@ -19,5 +19,36 @@ behaviors:
     description: >-
       With unsaved edits, agent saves never overwrite them; the browser shows a conflict notice and
       lets the user resolve it without exporting files.
+  - id: field-level-merge
+    description: >-
+      Agent saves and unsaved browser edits merge field by field; edits to different fields both
+      survive without asking the user.
+    details: >-
+      Example: the user edits a step's question text while an agent adds personas to a cohort.
+      Both changes are kept, and saving succeeds without a reload.
+    source:
+      text: >-
+        for q3, we should do CRDT-style merges and if I have open edits on a specific field that the agent also has, on refresh my edits should not get lost, I should see the new "base" and then get to decide if I discard my draft or continue refininig  it. If I don't refresh but try to save, I should be notified of the conflict and have a way to resolve it
+      reference: 2026-10-09 jev-polls project thread, Giulio
+  - id: refresh-keeps-draft
+    description: >-
+      When the user refreshes and a field they are editing was also changed by an agent, their
+      draft is kept, the agent's value is shown as the new base, and the user chooses to discard
+      the draft or keep refining it.
+    source:
+      text: >-
+        for q3, we should do CRDT-style merges and if I have open edits on a specific field that the agent also has, on refresh my edits should not get lost, I should see the new "base" and then get to decide if I discard my draft or continue refininig  it. If I don't refresh but try to save, I should be notified of the conflict and have a way to resolve it
+      reference: 2026-10-09 jev-polls project thread, Giulio
+  - id: save-conflict-resolution
+    description: >-
+      Saving without refreshing, when a field in the draft was also changed by an agent, notifies
+      the user of the conflict and offers a way to resolve it; nothing is lost.
+    details: >-
+      Resolution shows the user's value and the new base for each conflicting field. The user keeps
+      theirs, takes the base, or edits a combined value, then saves.
+    source:
+      text: >-
+        for q3, we should do CRDT-style merges and if I have open edits on a specific field that the agent also has, on refresh my edits should not get lost, I should see the new "base" and then get to decide if I discard my draft or continue refininig  it. If I don't refresh but try to save, I should be notified of the conflict and have a way to resolve it
+      reference: 2026-10-09 jev-polls project thread, Giulio
   - id: guide-covers-projects
     description: The agent guide's MCP workflow includes creating or selecting a project before saving cohorts or studies.
