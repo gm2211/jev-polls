@@ -18,12 +18,16 @@ behaviors:
   - id: breadcrumbs
     description: >-
       The breadcrumb trail shows where the page sits in the hierarchy, not the click history: every
-      level from Projects down, each a link to that level, ending with the current page as plain text.
+      level from Projects down, each a link to that level, ending with the current page as plain text,
+      and every page's big heading names that same last crumb.
     details: >-
       Levels are Projects / project / section (Studies, Cohorts, Runs, Project settings) / item
-      (study, cohort, run) / study step / step Settings or Review run, and cohort persona or
-      regeneration. Moving down adds exactly one level; opening a study lands on its canvas with no
-      step open, and selecting a step adds it. Long labels are cut with an ellipsis and keep the
+      (study, cohort, run) / Step N settings or Review run, and cohort persona or New cohort /
+      Regenerate personas. Moving down adds exactly one level; opening a study lands on its canvas
+      with no step open. The step panel is an overlay on the study page, so it adds no level; Step N
+      settings is its own page and the study crumb returns to the canvas with that step open. Giulio
+      named the root cause on 2026-10-09: "we're switching styles all of a sudden from 1st where
+      Studies is big and not in breadcrumbs to a style where things are in breadcrumbs". Long labels are cut with an ellipsis and keep the
       full text as a tooltip. On phone widths only the parent and current levels show, on one row. Rules follow common guidance (NN/g "Breadcrumbs: 11 Design
       Guidelines", GOV.UK and Carbon breadcrumb patterns): hierarchy not history, start at the top
       level, current page last and not a link, one row, no repeated back buttons.
@@ -64,7 +68,7 @@ behaviors:
     description: >-
       Pages do not repeat a back button whose target is already the previous breadcrumb; a back
       button appears only for a return the trail does not show, such as Back to study.
-    details: Step settings use the trail (study / Step N / Settings) instead of a Back to flow button.
+    details: Step settings use the trail (study / Step N settings) instead of a Back to flow button.
   - id: header-actions-on-title-line
     description: >-
       Page header actions align with the title line, and Save is a labeled button that leads the

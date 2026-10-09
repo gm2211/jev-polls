@@ -102,8 +102,8 @@ behaviors:
         showing check and cancel icons beside Save
   - id: step-settings-no-repeat
     description: >-
-      Step settings never repeat the study question under the title; the trail names the step as
-      "Step N" followed by "Settings".
+      Step settings never repeat the study question: the page heading and last crumb both read
+      "Step N settings".
     details: >-
       First shipped as a "Step N settings" label beside a Back to flow button; replaced the same day
       by breadcrumb levels (navigation.breadcrumbs).

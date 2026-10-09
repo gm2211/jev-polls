@@ -984,7 +984,7 @@ test('workspace opens at projects and keeps another project out of cohort, pipel
   const browser = browserHarness(false); await settle();
   const { S, selectProject, projectCohorts, projectPipelines, projectRuns, render } = browser.client;
   assert.equal(S.projectId, null);
-  assert.match(browser.element('app').innerHTML, /Your projects/);
+  assert.match(browser.element('app').innerHTML, /<h1 tabindex="-1">Projects<\/h1>/);
   assert.match(browser.element('app').innerHTML, /Existing research/);
   assert.match(browser.element('app').innerHTML, /<button type="button" class="project-card" data-act="open-project"/);assert.doesNotMatch(browser.element('app').innerHTML,/>Open project<|<article class="project-card"/);
   assert.doesNotMatch(browser.element('app').innerHTML, /Who should be in this cohort/);
@@ -1026,7 +1026,7 @@ test('reload returns to the open project view through the URL hash and ignores s
   assert.equal(reloaded.client.S.tab, 'studies'); assert.equal(reloaded.client.S.pipelineId, 'study'); assert.equal(reloaded.client.S.stageId, 'panel');
   const stale = browserHarness(false); await settle();
   assert.equal(stale.client.restoreLocation(new URLSearchParams('project=deleted&tab=cohorts')), false);
-  assert.equal(stale.client.S.projectId, null); assert.match(stale.element('app').innerHTML, /Your projects/);
+  assert.equal(stale.client.S.projectId, null); assert.match(stale.element('app').innerHTML, /<h1 tabindex="-1">Projects<\/h1>/);
   assert.equal(stale.client.restoreLocation(new URLSearchParams('project=existing-research&tab=studies&study=missing')), true);
   assert.equal(stale.client.S.pipelineId, null); assert.equal(stale.client.S.studyLibrary, true);
 });
@@ -2320,10 +2320,13 @@ test('breadcrumbs step down one level at a time and opening a study lands on its
   act(null,{dataset:{act:'open-pipeline',id:'study'}});
   assert.equal(S.sections.pipeline,'flow','a study opens on its canvas, not on a step');assert.equal(S.flowPanel,false);
   assert.equal(crumbs(),'Projects / Existing research / Studies / Original study');
-  act(null,{dataset:{act:'flow-settings'}});assert.equal(crumbs(),'Projects / Existing research / Studies / Original study / Step 1 / Settings');
-  act(null,{dataset:{act:'breadcrumb-step'}});assert.equal(S.sections.pipeline,'flow');assert.equal(S.flowPanel,true);
-  assert.equal(crumbs(),'Projects / Existing research / Studies / Original study / Step 1');
-  act(null,{dataset:{act:'breadcrumb-study'}});assert.equal(S.flowPanel,false);assert.equal(crumbs(),'Projects / Existing research / Studies / Original study');
+  const h1=()=>browser.element('app').innerHTML.match(/<h1[^>]*>([^<]*)<\/h1>/)![1];
+  assert.equal(h1(),'Original study','the heading names the last crumb');
+  act(null,{dataset:{act:'stage',id:'panel'}});assert.equal(crumbs(),'Projects / Existing research / Studies / Original study','the step panel is an overlay, not a page');
+  act(null,{dataset:{act:'flow-settings'}});assert.equal(crumbs(),'Projects / Existing research / Studies / Original study / Step 1 settings');assert.equal(h1(),'Step 1 settings');
+  act(null,{dataset:{act:'breadcrumb-study'}});assert.equal(S.sections.pipeline,'flow');assert.equal(S.flowPanel,true,'returning from step settings reopens that step');
+  assert.equal(crumbs(),'Projects / Existing research / Studies / Original study');assert.equal(h1(),'Original study');
+  act(null,{dataset:{act:'breadcrumb-study'}});assert.equal(S.flowPanel,false);
   act(null,{dataset:{act:'back-studies'}});assert.equal(crumbs(),'Projects / Existing research / Studies');
 });
 
@@ -2372,10 +2375,10 @@ test('study navigation has clear scope, a reachable single-study library and con
   S.tab='studies';S.pipelineId='study';S.stageId='panel';S.dirty=true;
   S.doc.pipelines[0].stages[0].questions.answer.criteria.a={label:'Draft name',description:'Keep typed detail'};
   const before=JSON.stringify(S.doc);render();let html=browser.element('app').innerHTML;
-  assert.doesNotMatch(html,/aria-label="Workspace views"|>Advanced<|Apply phase/);const location=html.match(/<nav class="workspace-breadcrumbs"[\s\S]*?<\/nav>/)![0];assert.equal((location.match(/<button/g)||[]).length,4);assert.match(location,/data-act="breadcrumb-study">Original study<\/button>.*<span aria-current="page">Step 1<\/span>/);assert.equal((location.match(/aria-current="page"/g)||[]).length,1);assert.match(location,/class="breadcrumb-link" data-act="projects"/);assert.match(location,/data-act="back-studies">Studies/);assert.doesNotMatch(html,/← Studies|← Projects/);assert.match(html,/>Pipeline</);assert.match(html,/aria-label="Step settings" title="Step settings"/);
+  assert.doesNotMatch(html,/aria-label="Workspace views"|>Advanced<|Apply phase/);const location=html.match(/<nav class="workspace-breadcrumbs"[\s\S]*?<\/nav>/)![0];assert.equal((location.match(/<button/g)||[]).length,3);assert.match(location,/<span aria-current="page">Original study<\/span>/);assert.equal((location.match(/aria-current="page"/g)||[]).length,1);assert.match(location,/class="breadcrumb-link" data-act="projects"/);assert.match(location,/data-act="back-studies">Studies/);assert.doesNotMatch(html,/← Studies|← Projects/);assert.match(html,/>Pipeline</);assert.match(html,/aria-label="Step settings" title="Step settings"/);
   act(null,{dataset:{act:'section-view',sectionKey:'pipeline',sectionId:'advanced'}});html=browser.element('app').innerHTML;
   assert.doesNotMatch(html,/Back to question|Back to flow|study-step-settings/,'the trail replaces ad-hoc back buttons');
-  assert.match(html,/data-act="breadcrumb-study">Original study<\/button>.*data-act="breadcrumb-step">Step 1<\/button>.*<span aria-current="page">Settings<\/span>/);
+  assert.match(html,/data-act="breadcrumb-study">Original study<\/button>.*<span aria-current="page">Step 1 settings<\/span>/);assert.match(html,/<h1 tabindex="-1">Step 1 settings<\/h1>/);
   assert.doesNotMatch(html,/aria-label="Study sections"|Apply phase/);
   assert.match(html,/data-settings-mode="simple"/);
   act(null,{dataset:{act:'section-view',sectionKey:'step-settings-study-panel',sectionId:'advanced'}});html=browser.element('app').innerHTML;
@@ -2865,7 +2868,7 @@ test('one breadcrumb trail covers creation, cohorts, personas, settings and live
   act(null,{dataset:{act:'back-cohorts'}});S.cohortComposer=true;S.cohortTarget='new-id';trail(['Projects','Existing research','Cohorts','New cohort']);
   act(null,{dataset:{act:'project-settings'}});trail(['Projects','Existing research','Project settings']);
   S.snap.runs=[{id:'run-1',projectId:S.projectId,pipelineName:'Original study',status:'running',message:'Working',createdAt:new Date().toISOString(),liveMembers:[]}];
-  act(null,{dataset:{act:'tab',tab:'runs'}});trail(['Projects','Existing research','Runs','Original study · run-1']);
+  act(null,{dataset:{act:'tab',tab:'runs'}});trail(['Projects','Existing research','Runs','Original study']);
   act(null,{dataset:{act:'live-close'}});trail(['Projects','Existing research','Runs']);
   assert.equal(S.doc.cohorts[0].personas[0].background,'Unsaved background');assert.equal(S.dirty,true);
   S.doc.projects.find((p:any)=>p.id===S.projectId).pipelineIds=[];
