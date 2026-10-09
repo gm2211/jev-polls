@@ -62,7 +62,7 @@ function personaDetail(c){const p=c.personas.find(x=>x.id===S.personId);if(!p){S
     {id:'edit',label:'Edit',html:personaEditForm(c,p)},
     {id:'regenerate',label:'Regenerate',html:personaRegeneration(c,p)}
   ];
-  return '<div class="cohort-detail-page">'+focusedHeader(p.label,'Age '+p.age+' · '+(c.segments.find(s=>s.id===p.segment)?.label||p.segment),'Persona '+(index+1)+' of '+c.personas.length,'persona-back','Back to cohort',actions)+sectionPanels('persona-detail',options)+'</div>';
+  return '<div class="cohort-detail-page">'+focusedHeader(p.label,'Age '+p.age+' · '+(c.segments.find(s=>s.id===p.segment)?.label||p.segment),'Persona '+(index+1)+' of '+c.personas.length,'','',actions)+sectionPanels('persona-detail',options)+'</div>';
 }
 function personaReviewMetadata(c,p){return '<p class="subtle">Age '+p.age+' · Segment '+esc(c.segments.find(s=>s.id===p.segment)?.label||p.segment)+' · Relative weight '+p.weight+'</p><h4>Source references</h4>'+personaSourceDetails(c,p)+'<p class="subtle">Synthetic fields: '+esc(p.syntheticFields.join(', '))+'</p>'}
 function personaRegeneration(c,p){const active=S.localStart||S.localJob,job=active?.persona?.cohortId===c.id&&active?.persona?.personaId===p.id?active:null;

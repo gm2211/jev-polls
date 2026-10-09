@@ -6,6 +6,31 @@ prose: >-
 behaviors:
   - id: breadcrumbs
     description: A breadcrumb trail moves back through projects, studies, cohorts, personas, and run review.
+  - id: page-anatomy
+    description: >-
+      Every workspace page reads top-down as brand, breadcrumb trail, project tabs where the page
+      has them, then one page header.
+    details: >-
+      The breadcrumb row holds only the trail. Project tabs (Studies, Cohorts, Runs) sit under the
+      section header with a Project settings link at the end of the same row, replacing the lone
+      edit pencil that used to float beside the breadcrumbs.
+    source:
+      text: navigations an breadcrumbs are still a little awkward - the positioning of some controls and title also is
+      reference: project thread, Giulio, 2026-10-09
+  - id: brand-not-breadcrumb
+    description: The app name lockup in the top bar never reads as a breadcrumb level.
+    details: The wordmark stacks "jev" over a small "Research desk" caption with no slash separator.
+    source:
+      text: also this look like a breadcrumb too
+      reference: project thread, Giulio, 2026-10-09 (screenshot of the "jev / research desk" wordmark)
+  - id: no-duplicate-back
+    description: >-
+      Pages do not repeat a back button whose target is already the previous breadcrumb; a back
+      button appears only for a return the trail does not show, such as Back to study.
+  - id: header-actions-on-title-line
+    description: >-
+      Page header actions align with the title line, and Save is a labeled button that leads the
+      action group on every page.
   - id: command-palette
     description: >-
       Cmd+K (Ctrl+K elsewhere) searches every workspace destination, including unsaved edits;
