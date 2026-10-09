@@ -33,3 +33,10 @@ screens, and unusually long content rather than clipping controls.
 
 Keep buttons and editable controls outside collapsible disclosures. Use visible
 actions or focused tabs; reserve disclosures for explanatory text.
+
+## Specs
+
+Spec Kit (`specify`) manages specs. The constitution lives in
+`.specify/memory/constitution.md` and feature specs live in `specs/NNN-name/`. Start from
+`specs/001-workspace-baseline/spec.md` for current product behaviour and known gaps. Use the
+`speckit-*` skills in `.agents/skills` to clarify, plan, and break down work.
