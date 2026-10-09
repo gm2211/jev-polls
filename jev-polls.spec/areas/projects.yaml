@@ -22,6 +22,13 @@ behaviors:
         Depends on the context - if I'm renaming a project I would imagine I'd want a save button
         (mostly like a check icon)
       reference: 2026-10-09 jev-polls project thread, Giulio
+  - id: rename-from-list
+    description: >-
+      Each project row on the projects list has a rename control that edits the name in place; the
+      check icon saves it and a cancel control restores the row without changes.
+    source:
+      text: I should be able to rename project right here
+      reference: 2026-10-09 jev-polls project chat, Giulio, on the project list row
   - id: project-ownership
     description: >-
       Every study and run belongs to exactly one project; cohorts belong to the shared library
