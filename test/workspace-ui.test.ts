@@ -2261,6 +2261,20 @@ test('option comparisons preserve descriptions, stable keys and paginated answer
 });
 
 
+test('choosing the kind of answer comes first in the step editor and step settings',async()=>{
+  const browser=browserHarness();await settle();const {S,stageForm,setupAction,render}=browser.client;
+  S.tab='studies';S.pipelineId='study';S.stageId='panel';const p=S.doc.pipelines[0],s=p.stages[0];
+  for(const html of [stageForm(p,s,'question'),stageForm(p,s)]){
+    const chooser=html.indexOf('What kind of answer?'),prompt=html.indexOf('What do you want to ask?');
+    assert.ok(chooser>=0&&chooser<prompt,'the answer kind comes before the question text');
+    assert.match(html,/data-act="setup-type" data-type="noul" aria-pressed="false"><strong>Yes \/ no<\/strong>/);
+  }
+  setupAction('setup-type',{dataset:{type:'noul'}});
+  assert.match(stageForm(p,s,'question'),/data-type="noul" aria-pressed="true"/);
+  S.sections.pipeline='advanced';render();const settings=browser.element('app').innerHTML;
+  assert.ok(settings.indexOf('What kind of answer?')>=0&&settings.indexOf('What kind of answer?')<settings.indexOf('Step name'),'step settings lead with the answer kind');
+});
+
 test('answer setup distinguishes hosted probabilities from local classifier evidence for every format',async()=>{
   const browser=browserHarness();await settle();const {S,stageForm,setupAction}=browser.client;
   S.pipelineId='study';S.stageId='panel';const p=S.doc.pipelines[0],s=p.stages[0];S.evaluationProvider='typesafe';
