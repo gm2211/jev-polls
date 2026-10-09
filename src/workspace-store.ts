@@ -186,8 +186,9 @@ export function resolveWorkspaceProject(document: WorkspaceDocument, pipelineId:
       }
     }
     const size = stage.size ?? available;
-    if (size > available) throw new Error(`Stage '${stage.id}': sample size ${size} exceeds ${available} distinct positive-weight profiles`);
-    if (size < positive.length) throw new Error(`Stage '${stage.id}': sample size ${size} cannot cover all ${positive.length} positive-weight segments`);
+    const step = `Step ${pipeline.stages.indexOf(stage) + 1}${stage.label?.trim() ? ` (${stage.label.trim()})` : ''}`;
+    if (size > available) throw new Error(`${step} asks ${size} people but its cohort has ${available}. Lower the sample size to ${available} or add personas.`);
+    if (size < positive.length) throw new Error(`${step} asks ${size} people but its cohort has ${positive.length} groups that each need someone. Raise the sample size to at least ${positive.length}.`);
   }
   return { projectId: validated.projects!.find(project => project.pipelineIds.includes(pipelineId))!.id, pipeline, cohorts };
 }

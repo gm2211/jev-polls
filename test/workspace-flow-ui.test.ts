@@ -35,7 +35,7 @@ async function flowHarness() {
   };
   const html = renderWorkspace('flow-test', 'token');
   const script = html.match(/<script nonce="flow-test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.flowTest={S,flowAction,flowCreateMenu,flowKindMatches,flowConnect,flowDisconnect,flowInputs,flowNode,flowReadiness,flowConnections,flowCohortMap};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.flowTest={S,flowAction,flowCreateMenu,flowKindMatches,flowConnect,flowDisconnect,flowInputs,flowNode,flowReadiness,flowConnections,flowCohortMap,flowTodo,flowRoundTabs,flowNode,flowInspector};})();');
   new Script(exposed).runInNewContext(context);
   await new Promise<void>(resolve => setImmediate(resolve));
   const client = context.flowTest;
@@ -342,4 +342,31 @@ test('canvas create ignores unknown kinds and menus opened for another study', a
   flowAction('flow-create', { dataset: { kind: 'script' } });
   assert.equal(pipeline.stages.length, count);
   assert.equal(pipeline.layout, undefined);
+});
+
+test('a step asking more people than its cohort has needs more personas and opens the Cohort tab', async () => {
+  const { S, pipeline, source, flowReadiness, flowTodo, flowNode, flowInspector, flowAction } = await flowHarness();
+  const persona = (n: number, segment: string) => ({ id: `p${n}`, label: `P${n}`, segment, weight: 1 });
+  S.doc.cohorts = [{ id: 'c1', name: 'Gamers', segments: [{ id: 'live', label: 'Live', weight: 1 }, { id: 'zero', label: 'Zero', weight: 0 }],
+    personas: [...Array.from({ length: 8 }, (_, n) => persona(n, 'live')), persona(9, 'zero')] }];
+  pipeline.cohorts = { audience: 'c1' };
+  pipeline.stages = [source];
+  source.size = 100;
+  assert.equal(flowReadiness(pipeline, source), 'Needs more personas');
+  assert.deepEqual(plain(flowTodo(pipeline)), [{ stageId: 'source', tab: 'cohort', pick: false }]);
+  assert.match(flowNode(pipeline, source), /flow-sample-short">100 of 8 personas/);
+  S.sections['flow-inspector'] = 'cohort'; S.flowPanel = true; S.stageId = 'source';
+  assert.match(flowInspector(pipeline, source), /Asks 100 people but this cohort has 8\. Lower the sample size to 8 or add personas\./);
+  assert.match(flowInspector(pipeline, source), /Use all 8/);
+  // Repeats do not add people, and a size within the cohort stays ready.
+  source.size = 8; source.repeats = 5;
+  assert.equal(flowReadiness(pipeline, source), 'Ready');
+  assert.equal(flowTodo(pipeline).length, 0);
+  assert.match(flowNode(pipeline, source), /8 personas/);
+  source.size = 100;
+  flowAction('flow-sample-all', { dataset: { id: 'source' } });
+  assert.equal(source.size, 8);
+  assert.equal(flowReadiness(pipeline, source), 'Ready');
+  delete source.size;
+  assert.equal(flowReadiness(pipeline, source), 'Ready');
 });
