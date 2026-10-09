@@ -2945,3 +2945,22 @@ test('a selected step opens a closable panel with one row of tabs marking unfini
   act(null, { dataset: { act: 'flow-select', id: 'panel' } });
   assert.match(html(), /round-panel/, 'selecting a step reopens the panel');
 });
+
+test('Review run counts unfinished steps and opens the first one on the tab that fixes it', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, act, render } = browser.client;
+  const html = () => browser.element('app').innerHTML;
+  S.tab = 'studies'; S.pipelineId = 'study'; S.stageId = 'panel'; render();
+  const p = S.doc.pipelines[0], q: any = Object.values(p.stages[0].questions)[0];
+  const ready = /data-act="review">Review run</.test(html());
+  q.label = ''; S.flowPanel = false; render();
+  assert.match(html(), /data-act="flow-fix"[^>]*>Review run · \d+ to fix</);
+  if (ready) assert.match(html(), /Review run · 1 to fix/);
+  act(null, { dataset: { act: 'flow-fix' } });
+  assert.equal(S.flowPanel, true); assert.equal(S.stageId, 'panel'); assert.equal(S.sections['flow-inspector'], 'question');
+  assert.doesNotMatch(html(), /Drag steps to arrange them; click empty canvas to add one\./, 'no standing instructions banner');
+  assert.match(html(), /data-act="flow-create-open"[^>]*>[\s\S]*? Create<\/button>/);
+  const before = p.stages.length;
+  act(null, { dataset: { act: 'flow-create-open' } });
+  assert.equal(p.stages.length, before + 1, 'without a rendered canvas, Create adds a question step directly');
+});

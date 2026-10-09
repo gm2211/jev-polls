@@ -99,6 +99,17 @@ function flowCohortMap(p,s){
   if(person)return '<section class="flow-member-focus"><div class="flow-member-navigation"><button class="button small" data-act="host-member-close" data-map="'+attr(key)+'">'+icon('left')+' Cohort map</button><div class="row"><button class="button small icon-button" data-act="host-member" data-map="'+attr(key)+'" data-id="'+attr(c.personas[index-1]?.id||'')+'" '+(index===0?'disabled':'')+' aria-label="Previous member">'+icon('left')+'</button><span>'+(index+1)+' / '+c.personas.length+'</span><button class="button small icon-button" data-act="host-member" data-map="'+attr(key)+'" data-id="'+attr(c.personas[index+1]?.id||'')+'" '+(index===c.personas.length-1?'disabled':'')+' aria-label="Next member">'+icon('right')+'</button></div></div>'+hostMapDetails(c,person)+'</section>';
   return '<div class="flow-cohort-summary"><strong>'+esc(c.name)+'</strong><div class="row"><button class="button small" data-act="phase-pool" data-id="'+attr(c.id)+'">Open full cohort</button><button class="button small" data-act="flow-cohort-change">Change cohort</button></div></div><section class="flow-cohort-map"><h3>Cohort host map</h3>'+hostMap(c,{key,limit:24})+'<p class="subtle">Hover for a quick look. Select a member to inspect their synthetic profile.</p></section>';
 }
+/** Steps that still block a run review, in canvas order, with the panel tab that fixes each. */
+function flowTodo(p){
+  const todo=[];
+  for(const s of p.stages){
+    if(s.kind==='poll'){const pool=poolForPhase(p,s),questions=Object.values(s.questions||{});if(!questions.length){todo.push({stageId:s.id,tab:'question'});continue}
+      const ready=questions.map(q=>setupWizardReady(q,pool)),tab=ready.some(r=>!r[0])?'question':ready.some(r=>!r[2])?'answers':ready.some(r=>!r[1])?'cohort':null;if(tab)todo.push({stageId:s.id,tab})}
+    else if(s.kind==='aggregate'&&!s.inputs?.length)todo.push({stageId:s.id,tab:'connections'});
+    else if(s.kind==='decision'&&!p.stages.some(x=>x.id===s.from?.stage))todo.push({stageId:s.id,tab:'question'});
+  }
+  return todo;
+}
 function flowRoundTabs(p,s){
   if(s.kind!=='poll')return [['question','Result',false],['connections','Inputs',false]];
   const q=Object.values(s.questions||{})[0],ready=q?setupWizardReady(q,poolForPhase(p,s)):[false,!!poolForPhase(p,s)?.personas.length,false];
@@ -113,9 +124,9 @@ function flowInspector(p,s){
 }
 function flowWorkspace(p,s){
   const pending=S.flowSource?.pipelineId===p.id?S.flowSource:null,add=p.stages.find(x=>x.id===S.flowAdd),first=add&&phaseOutput(p,add)[0];
-  return '<div class="flow-workspace"><section class="flow-board" aria-label="Study flow"><div class="flow-toolbar"><h2>Study flow <span>'+p.stages.length+' steps</span></h2><div class="row"><button class="button small" data-act="flow-add" data-kind="independent">'+icon('plus')+' Question</button><button class="button small icon-button" data-act="flow-fit" aria-label="Fit flow to view" title="Fit flow to view">'+icon('fit')+'</button><button class="button small" data-act="flow-reset" aria-label="Actual size" title="Actual size">100%</button></div></div>'+
+  return '<div class="flow-workspace"><section class="flow-board" aria-label="Study flow"><div class="flow-toolbar"><h2>Study flow <span>'+p.stages.length+' steps</span></h2><div class="row"><button class="button small primary" data-act="flow-create-open" aria-haspopup="dialog">'+icon('plus')+' Create</button><button class="button small icon-button" data-act="flow-fit" aria-label="Fit flow to view" title="Fit flow to view">'+icon('fit')+'</button><button class="button small" data-act="flow-reset" aria-label="Actual size" title="Actual size">100%</button></div></div>'+
     (add?'<div class="flow-action-bar" aria-label="Add after selected step"><span>After '+esc(stepTitle(p,add))+'</span><div class="row"><button class="button small" data-act="flow-add" data-id="'+attr(add.id)+'" data-kind="poll">Follow-up / branch</button><button class="button small" data-act="flow-add" data-id="'+attr(add.id)+'" data-kind="aggregate">Combine answers</button><button class="button small" data-act="flow-add" data-id="'+attr(add.id)+'" data-kind="decision" '+(first?.type!=='choice'?'disabled':'')+'>Final result</button><button class="button small icon-button" data-act="flow-add-close" aria-label="Close add step actions">'+icon('close')+'</button></div></div>':'')+
-    '<div class="flow-hint" role="status">'+(pending?'<span><strong>2. Choose destination</strong><br>'+esc(inputTitle(p,{stage:pending.stage,question:pending.question}))+' → Click <strong>Connect here</strong> on a highlighted step.</span><button class="button small" data-act="flow-cancel">Cancel connection</button>':'<span><strong>1.</strong> Click <strong>Connect output</strong> → <strong>2.</strong> Click <strong>Connect here</strong>. Or select a step and choose an output in <strong>Inputs</strong>. Drag steps to arrange them; click empty canvas to add one.</span>')+'</div>'+flowCanvas(p)+'</section>'+flowInspector(p,s)+'</div>';
+    (pending?'<div class="flow-hint" role="status">'+'<span><strong>Choose where it goes</strong><br>'+esc(inputTitle(p,{stage:pending.stage,question:pending.question}))+' → Click <strong>Connect here</strong> on a highlighted step.</span><button class="button small" data-act="flow-cancel">Cancel connection</button>'+'</div>':'')+flowCanvas(p)+'</section>'+flowInspector(p,s)+'</div>';
 }
 function flowAction(a,el){
   if(!a.startsWith('flow-'))return false;
@@ -124,6 +135,8 @@ function flowAction(a,el){
   if(a==='flow-cohort-map'){S.flowCohortPick=false;S.stageId=el.dataset.id;S.flowPanel=true;S.sections['flow-inspector']='cohort';render();root.querySelector('.flow-inspector h2')?.focus();return true}
   if(a==='flow-fit'||a==='flow-reset'){S.flowScale=a==='flow-reset'?1:'fit';drawFlowEdges();return true}
   if(a==='flow-inspector'){S.sections['flow-inspector']=el.dataset.section;render();root.querySelector('[data-act=flow-inspector][data-section="'+el.dataset.section+'"]')?.focus();return true}
+  if(a==='flow-create-open'){const v=root.querySelector('.flow-viewport');if(!v)return flowAction('flow-add',{dataset:{kind:'independent'}});const scale=flowScaleApplied||1,left=v.scrollLeft+Math.max(0,v.clientWidth-340),top=v.scrollTop+16;flowOpenCreate(p,left/scale,top/scale,left,top);return true}
+  if(a==='flow-fix'){const todo=flowTodo(p)[0];if(!todo){S.flowPanel=true;render();return true}S.sections.pipeline='flow';S.stageId=todo.stageId;S.sections['flow-inspector']=todo.tab;S.flowPanel=true;S.flowCohortPick=todo.tab==='cohort';render();root.querySelector('.round-tab[aria-selected=true]')?.focus();say('Finish this step, then review the run.');return true}
   if(a==='flow-panel-close'){S.flowPanel=false;render();root.querySelector('[data-flow-node="'+S.stageId+'"] [data-act=flow-select]')?.focus({preventScroll:true});return true}
   if(a==='flow-settings'){S.flowSettingsReturn=true;S.sections.pipeline='advanced';render();return true}
   if(a==='flow-settings-back'){S.flowSettingsReturn=false;S.sections.pipeline='flow';render();return true}

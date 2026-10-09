@@ -34,8 +34,8 @@ behaviors:
       A study opens as a railway.com-style canvas: rounds are cards on a dotted canvas, wired by
       their outputs, each showing its type, question, a status dot and who answers.
     details: >-
-      Rounds are added from a Create control in the canvas corner or by clicking empty canvas;
-      free placement and drag remain (studies.canvas-drag-nodes, studies.canvas-click-create).
+      Rounds are added from a Create control in the canvas corner or by clicking empty canvas,
+      and no standing instructions banner sits above the canvas; free placement and drag remain (studies.canvas-drag-nodes, studies.canvas-click-create).
       The user clarified that "railway" means railway.com, so this is a canvas, not a literal
       track.
     source:
@@ -63,6 +63,15 @@ behaviors:
       offers Open full cohort (the detailed editor, with a way back to the study) and Change cohort.
     source:
       text: needs a cohort assigned that I can create right there and then and navigate back to pipeline
+      reference: jev-polls project thread "Rethink the main user flow", Giulio, 2026-10-09
+  - id: review-run-to-fix
+    description: >-
+      While steps are unfinished, the study header's primary action reads "Review run · N to fix"
+      and opens the first unfinished step's panel on the tab that fixes it; with nothing left it
+      opens the run review.
+    details: Proposal shown in the "Jev study flow" mockups (step 5); the run review itself is unchanged.
+    source:
+      text: the user flows aren't flowing at the moment
       reference: jev-polls project thread "Rethink the main user flow", Giulio, 2026-10-09
   - id: project-sidebar
     description: >-
