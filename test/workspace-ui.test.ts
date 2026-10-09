@@ -516,7 +516,7 @@ test('next phase wires a named output, keeps one question, and excludes downstre
   assert.equal(dataInputOptions(pipeline, next)[0].id, 'panel');
   assert.deepEqual(Array.from(projectionOptions(pipeline, next.inputs.previous_result), (x: any) => x.value), ['summary', 'responses', 'winner', 'probabilities']);
   assert.match(browser.element('app').innerHTML, /This cohort also sees results from:/);
-  assert.match(browser.element('app').innerHTML, /Who answers/);
+  assert.match(browser.element('app').innerHTML, /data-act="flow-inspector" data-section="cohort"/, 'the cohort lives in its own panel tab');
   assert.match(browser.element('app').innerHTML, /Which customer-support approach/);
   pipeline.stages[0].questions.preference = { type: 'noul', label: 'Would this work?', instructions: 'Answer yes or no.' };
   assert.deepEqual(Array.from(projectionOptions(pipeline, next.inputs.previous_result), (x: any) => x.value), ['summary', 'responses', 'mean']);
@@ -2339,7 +2339,7 @@ test('study navigation has clear scope, a reachable single-study library and con
   S.tab='studies';S.pipelineId='study';S.stageId='panel';S.dirty=true;
   S.doc.pipelines[0].stages[0].questions.answer.criteria.a={label:'Draft name',description:'Keep typed detail'};
   const before=JSON.stringify(S.doc);render();let html=browser.element('app').innerHTML;
-  assert.doesNotMatch(html,/role="tablist"|>Advanced<|Apply phase/);const location=html.match(/<nav class="workspace-breadcrumbs"[\s\S]*?<\/nav>/)![0];assert.equal((location.match(/<button/g)||[]).length,3);assert.equal((location.match(/aria-current="page"/g)||[]).length,1);assert.match(location,/class="breadcrumb-link" data-act="projects"/);assert.match(location,/data-act="back-studies">Studies/);assert.doesNotMatch(html,/← Studies|← Projects/);assert.match(html,/>Pipeline</);assert.match(html,/aria-label="Step settings" title="Step settings"/);
+  assert.doesNotMatch(html,/aria-label="Workspace views"|>Advanced<|Apply phase/);const location=html.match(/<nav class="workspace-breadcrumbs"[\s\S]*?<\/nav>/)![0];assert.equal((location.match(/<button/g)||[]).length,3);assert.equal((location.match(/aria-current="page"/g)||[]).length,1);assert.match(location,/class="breadcrumb-link" data-act="projects"/);assert.match(location,/data-act="back-studies">Studies/);assert.doesNotMatch(html,/← Studies|← Projects/);assert.match(html,/>Pipeline</);assert.match(html,/aria-label="Step settings" title="Step settings"/);
   act(null,{dataset:{act:'section-view',sectionKey:'pipeline',sectionId:'advanced'}});html=browser.element('app').innerHTML;
   assert.match(html,/Back to question/);assert.match(html,/Step settings · 1\./);assert.doesNotMatch(html,/aria-label="Study sections"|Apply phase/);
   assert.match(html,/data-settings-mode="simple"/);
@@ -2426,7 +2426,7 @@ test('empty option setup starts with CSV import and manual add opens only one op
 test('provider change redraws distribution semantics without requiring a reviewed plan', async () => {
   const browser = browserHarness(); await settle();
   const { S, render } = browser.client;
-  S.tab='studies';S.pipelineId='study';S.stageId='panel';S.plan=null;render();
+  S.tab='studies';S.pipelineId='study';S.stageId='panel';S.plan=null;S.sections['flow-inspector']='answers';render();
   assert.match(browser.element('app').innerHTML,/Probability distribution/);
   await browser.listeners.get('change')!({target:{name:'evaluationProvider',value:'gliner'}});
   assert.match(browser.element('app').innerHTML,/Normalized option scores/);
@@ -2918,4 +2918,27 @@ test('an empty cohort list is one click target and a full one ends with a create
   S.doc.projects.find((p: any) => p.id === S.projectId).cohortIds = []; render();
   assert.match(html(), /<button type="button" class="empty-create" data-act="new-cohort">[\s\S]*?<strong>New cohort<\/strong>/);
   assert.doesNotMatch(html(), /data-tab="agents"/);
+});
+
+test('a selected step opens a closable panel with one row of tabs marking unfinished parts', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, act, render } = browser.client;
+  const html = () => browser.element('app').innerHTML;
+  S.tab = 'studies'; S.pipelineId = 'study'; S.stageId = 'panel'; S.sections['flow-inspector'] = 'question'; render();
+  const tabs = () => [...html().matchAll(/<button type="button" role="tab" class="round-tab" data-act="flow-inspector" data-section="([a-z]+)"[^>]*>/g)].map(m => m[1]);
+  assert.match(html(), /<aside class="flow-inspector round-panel"/);
+  assert.deepEqual(tabs(), ['question', 'answers', 'connections', 'cohort']);
+  assert.match(html(), /data-act="flow-panel-close" aria-label="Close step panel"/);
+  act(null, { dataset: { act: 'flow-inspector', section: 'answers' } });
+  assert.match(html(), /data-inspector-tab="answers"/);
+  assert.match(html(), /Later steps can use/);
+  assert.doesNotMatch(html(), /name="setupPrompt"/, 'the question field stays on its own tab');
+  const stage = S.doc.pipelines[0].stages[0]; const q: any = Object.values(stage.questions)[0];
+  const label = q.label; q.label = ''; render();
+  assert.match(html(), /data-section="question" aria-selected="false" data-todo="true"/, 'an empty question is marked');
+  q.label = label;
+  act(null, { dataset: { act: 'flow-panel-close' } });
+  assert.doesNotMatch(html(), /round-panel/);
+  act(null, { dataset: { act: 'flow-select', id: 'panel' } });
+  assert.match(html(), /round-panel/, 'selecting a step reopens the panel');
 });

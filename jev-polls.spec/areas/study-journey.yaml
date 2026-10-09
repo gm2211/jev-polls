@@ -2,10 +2,10 @@ id: study-journey
 name: Main study journey
 prose: >-
   The path from a new project to a running study. Each screen leads into the next: create a
-  project, land on its studies, open a study's track, add rounds on the track, give each round a
+  project, land on its studies, open a study's canvas, add rounds on it, give each round a
   cohort (creating one on the spot if needed), then review and run. Requested 2026-10-09 by Giulio
   after "Draft pipeline" sat alone beside the first-study form. The detailed shape below (sidebar,
-  railway track, round panel sections, return bar) is the proposal shown in the "Jev study flow"
+  railway.com-style canvas, slide-over round panel) is the proposal shown in the "Jev study flow"
   mockups (https://claude.ai/artifact/EEEqHfDTj9tfMt6znpooZr); it is being built in small PRs and
   stays open to revision. "Voting round" in the user's words is the existing Ask cohort step.
 behaviors:
@@ -24,18 +24,20 @@ behaviors:
       creates the item and opens it, with no intermediate form.
     details: >-
       A non-empty list keeps a create row at its end and a create button on the title line. A new
-      study is named on its track. Draft with assistant is offered on the empty track rather than
-      as a floating page button.
+      study is named by its question at the top of the study. Draft with assistant is offered on
+      the study rather than as a floating page button.
     source:
       text: create new by just clicking empty list
       reference: jev-polls project thread "Rethink the main user flow", Giulio, 2026-10-09
   - id: railway-track
     description: >-
-      A study opens as a railway-style track: rounds are stations on a left-to-right line, and a
-      plus control on the line inserts a round already connected at that point.
+      A study opens as a railway.com-style canvas: rounds are cards on a dotted canvas, wired by
+      their outputs, each showing its type, question, a status dot and who answers.
     details: >-
-      Branches split the line on a condition and may rejoin. Free placement, drag and
-      click-to-create (studies.canvas-drag-nodes, studies.canvas-click-create) remain available.
+      Rounds are added from a Create control in the canvas corner or by clicking empty canvas;
+      free placement and drag remain (studies.canvas-drag-nodes, studies.canvas-click-create).
+      The user clarified that "railway" means railway.com, so this is a canvas, not a literal
+      track.
     source:
       text: >-
         pipeline editor railway-style from which I branch into creating a voting round with types,
@@ -43,16 +45,19 @@ behaviors:
       reference: jev-polls project thread "Rethink the main user flow", Giulio, 2026-10-09
   - id: round-panel
     description: >-
-      Selecting a round shows its type, question, inputs, outputs and cohort in one panel beside
-      the track, each marked when it still needs attention.
+      Selecting a round slides a panel over the canvas with one row of tabs (Question, Answers,
+      Inputs, Cohort), each marked when it still needs attention; Esc or a close control hides it.
+    details: >-
+      Modeled on railway.com's service panel. Answers also lists what later rounds can use as
+      inputs. Selecting another round, adding one, or connecting an input reopens the panel.
     source:
       text: creating a voting round with types, inputs, outputs and which needs a cohort assigned
       reference: jev-polls project thread "Rethink the main user flow", Giulio, 2026-10-09
   - id: inline-cohort-create
     description: >-
-      A round's cohort picker offers New cohort; saving that cohort adds it to the shared library,
-      links it to the project, assigns it to the round, and returns to the track with the round
-      selected.
+      A round's Cohort tab offers New cohort, built inside the panel; accepting it adds it to the
+      shared library, links it to the project, assigns it to the round, and shows the Cohort tab
+      again with it selected.
     details: Cancelling returns to the same round with nothing changed.
     source:
       text: needs a cohort assigned that I can create right there and then and navigate back to pipeline

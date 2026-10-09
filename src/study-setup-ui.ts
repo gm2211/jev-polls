@@ -61,7 +61,8 @@ function stageForm(p,s,focused=false){
   const cohortBody=setupCohortPicker(p,s);
   const answerBody='<div class="setup-section-heading"><h3>'+ (q.type==='choice'?'Options to compare':'How should they answer?') +'</h3></div>'+answer;
   const toolbar='<div class="setup-step-toolbar">'+picker+'</div>';
-  const content=focused?toolbar+questionBody+'<div class="setup-columns"><section>'+cohortBody+'</section><section>'+answerBody+'</section></div>':setupWizard(p,s,qid,q,pool,toolbar,[questionBody,cohortBody,answerBody]);
+  const outputs='<section class="round-outputs"><h3>Later steps can use</h3><p class="subtle">'+esc(phaseOutput(p,s).map(o=>flowOutputLabel(p,s,o)).filter((v,i,a)=>a.indexOf(v)===i).join(' · ')||'This step has no outputs yet.')+'</p></section>';
+  const content=focused==='question'?questionBody:focused==='answers'?answerBody+outputs:focused?toolbar+questionBody+'<div class="setup-columns"><section>'+cohortBody+'</section><section>'+answerBody+'</section></div>':setupWizard(p,s,qid,q,pool,toolbar,[questionBody,cohortBody,answerBody]);
   return '<section class="panel setup-panel"><form data-form="study-setup" data-question-id="'+attr(qid)+'">'+content+'</form></section>';
 }
 function setupWizardKey(p,s,qid){return 'setup-wizard-'+p.id+'-'+s.id+'-'+qid}
