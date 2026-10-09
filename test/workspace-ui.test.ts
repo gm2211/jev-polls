@@ -1047,6 +1047,28 @@ test('confirming a project rename saves it so a reload keeps the new name', asyn
   assert.equal(S.dirty, false); assert.equal(S.revision, 2);
 });
 
+test('project list row renames inline and the check icon saves the new name', async () => {
+  const browser = browserHarness(false); await settle();
+  const { S } = browser.client;
+  const click = (dataset: Record<string, string>) => browser.listeners.get('click')!({ target: { closest: () => ({ dataset }) }, preventDefault() {} });
+  assert.match(browser.element('app').innerHTML, /data-act="project-rename" data-id="existing-research" aria-label="Rename project: Existing research"/);
+  click({ act: 'project-rename', id: 'existing-research' });
+  assert.match(browser.element('app').innerHTML, /data-form="project-rename" data-id="existing-research"/);
+  assert.match(browser.element('app').innerHTML, /aria-label="Save project name"/);
+  click({ act: 'project-rename-cancel' });
+  assert.doesNotMatch(browser.element('app').innerHTML, /data-form="project-rename"/);
+  click({ act: 'project-rename', id: 'existing-research' });
+  const form: any = { dataset: { form: 'project-rename', id: 'existing-research' }, reportValidity: () => true, values: { name: '  Naming  ' } };
+  const renamed = structuredClone(S.doc); renamed.projects[0].name = 'Naming';
+  browser.respond('/api/workspace', { revision: 2, document: renamed }, 'POST');
+  browser.listeners.get('submit')!({ target: { closest: () => form }, preventDefault() {} });
+  await settle(); await settle();
+  const saved = browser.bodies.filter(entry => entry.path === '/api/workspace');
+  assert.equal(saved.length, 1);
+  assert.equal((saved[0]!.body as any).document.projects[0].name, 'Naming');
+  assert.equal(S.projectRename, null); assert.equal(S.projectId, null);
+});
+
 test('projects start from a question and assign cohorts only after an explicit choice', async () => {
   const browser = browserHarness(false); await settle();
   const { S, selectProject, render, freshPipeline, act } = browser.client;
