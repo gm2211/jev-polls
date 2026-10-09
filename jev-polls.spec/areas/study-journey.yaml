@@ -130,3 +130,16 @@ behaviors:
     source:
       text: we're switching styles all of a sudden from 1st where Studies is big and not in breadcrumbs to a style where things are in breadcrumbs
       reference: jev-polls project chat, Giulio, 2026-10-09, with a screenshot of the study page tabs
+  - id: sample-within-cohort
+    description: >-
+      A step that asks more distinct people than its cohort's positive-weight personas holds reads
+      "Needs more personas", counts toward "Review run · N to fix", and shows "100 of 8 personas"
+      on its card; fixing it opens the Cohort tab, which says so in plain words and offers
+      "Use all N" and a way to add personas.
+    details: >-
+      Repeats never add people, so only the sample size is compared. The browser-facing plan error
+      for the same rule names the step by number and label instead of its internal ID; CLI errors
+      are unchanged.
+    source:
+      text: Stage 'gamer_interest' sample size 100 exceeds 8 distinct positive-weight profiles
+      reference: jev-polls demo walkthrough, red banner after Review run, 2026-10-09

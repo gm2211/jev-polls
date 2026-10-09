@@ -213,7 +213,7 @@ test('planning validates references, cycles, weighted-profile coverage, and exac
     id: 'first', label: 'First', kind: 'poll', dependsOn: [], cohort: 'panel', size: 4,
     questions: { q: { type: 'noul', label: 'Q', instructions: 'I' } },
   }] }));
-  assert.throws(() => workspacePlan(oversized, 'study'), /exceeds 3 distinct positive-weight profiles/);
+  assert.throws(() => workspacePlan(oversized, 'study'), /Step 1 \(First\) asks 4 people but its cohort has 3\. Lower the sample size to 3/);
 
   const missing = documentWith(cohort(), pipeline({ cohorts: { panel: 'ghost' } }));
   assert.throws(() => workspacePlan(missing, 'study'), /missing cohort id 'ghost'/);

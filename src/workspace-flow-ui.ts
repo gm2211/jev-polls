@@ -52,11 +52,20 @@ function flowDisconnect(p,s,key){
   else s.from={stage:'',question:''};
   reconcileSetupDependencies(s,before,flowInputs(p,s).map(([,input])=>input.stage));
 }
+/** Distinct people a step can draw: personas in positive-weight segments (repeats never add people). */
+function flowAvailablePeople(p,s){const c=poolForPhase(p,s);if(!c)return 0;const live=new Set((c.segments||[]).filter(x=>x.weight>0).map(x=>x.id));return c.personas.filter(x=>live.has(x.segment)).length}
+/** The step's sample size when it asks for more distinct people than its cohort holds, else null. */
+function flowSampleShort(p,s){if(s.kind!=='poll'||s.size===undefined||s.size===null||s.size==='')return null;const have=flowAvailablePeople(p,s),asks=Number(s.size);return have>0&&asks>have?{asks,have}:null}
+function flowSampleNotice(p,s){
+  const short=flowSampleShort(p,s);if(!short)return '';
+  return '<div class="warning flow-sample-notice" role="alert"><p>Asks '+short.asks.toLocaleString('en-US')+' people but this cohort has '+short.have.toLocaleString('en-US')+'. Lower the sample size to '+short.have.toLocaleString('en-US')+' or add personas.</p><div class="row"><button type="button" class="button small primary" data-act="flow-sample-all" data-id="'+attr(s.id)+'">Use all '+short.have.toLocaleString('en-US')+'</button><button type="button" class="button small" data-act="phase-pool" data-id="'+attr(poolForPhase(p,s).id)+'">Add personas</button></div></div>';
+}
 function flowReadiness(p,s){
   if(s.kind==='poll'){
     if(!Object.values(s.questions||{}).length||Object.values(s.questions).some(q=>!q.label.trim()||q.label==='What should this phase decide?'))return 'Needs question';
     if(!poolForPhase(p,s)?.personas.length)return 'Needs cohort';
     if(Object.values(s.questions).some(q=>q.type==='choice'?Object.keys(q.criteria).length<2||Object.entries(q.criteria).some(([key,value])=>!String(optionName(key,value)).trim()):q.type==='score'?q.criteria.length<2||q.criteria.some(value=>!value.trim()):false))return 'Needs options';
+    if(flowSampleShort(p,s))return 'Needs more personas';
   }else if(!flowInputs(p,s).length)return 'Needs input';
   if(flowInputs(p,s).some(([,input])=>!resolvedQuestion(p,input.stage,input.question)))return 'Needs input';
   if(s.kind==='aggregate'&&new Set(s.inputs.map(input=>setupAnswerSignature(resolvedQuestion(p,input.stage,input.question)))).size>1)return 'Options differ';
@@ -73,7 +82,7 @@ function flowNode(p,s){
   const targetable=pending&&flowCanConnect(p,pending.stage,pending.question,s)&&!flowAlreadyConnected(p,s,pending.stage,pending.question);
   return '<article class="flow-node" data-flow-node="'+attr(s.id)+'" data-stage-index="'+p.stages.indexOf(s)+'" data-selected="'+(S.stageId===s.id)+'" data-targetable="'+!!targetable+'" aria-label="'+attr(stepTitle(p,s))+'">'+
     '<div class="flow-node-header"><span class="flow-number">'+(p.stages.indexOf(s)+1)+'</span><span class="flow-status" data-ready="'+(status==='Ready')+'">'+esc(status)+'</span><button class="button small icon-button" data-act="flow-add-menu" data-id="'+attr(s.id)+'" aria-label="Add after '+attr(stepTitle(p,s))+'" title="Add follow-up or result">'+icon('plus')+'</button></div>'+
-    '<button class="flow-select" data-act="flow-select" data-id="'+attr(s.id)+'" aria-pressed="'+(S.stageId===s.id)+'" aria-label="'+(targetable?'Connect to ':'Edit ')+attr(stepTitle(p,s))+'"><strong>'+esc(stepTitle(p,s).replace(/^\d+\. /,''))+'</strong><span>'+esc(s.kind==='poll'?(pool?.name||'Choose a cohort'):(s.kind==='aggregate'?'Combine compatible answers':'Select leading option'))+'</span>'+(s.kind==='poll'?'<small>'+Number(s.size??pool?.personas.length??0).toLocaleString('en-US')+' personas · '+answerName(outputs[0]?.type)+'</small>':'')+'</button>'+
+    '<button class="flow-select" data-act="flow-select" data-id="'+attr(s.id)+'" aria-pressed="'+(S.stageId===s.id)+'" aria-label="'+(targetable?'Connect to ':'Edit ')+attr(stepTitle(p,s))+'"><strong>'+esc(stepTitle(p,s).replace(/^\d+\. /,''))+'</strong><span>'+esc(s.kind==='poll'?(pool?.name||'Choose a cohort'):(s.kind==='aggregate'?'Combine compatible answers':'Select leading option'))+'</span>'+(s.kind==='poll'?'<small>'+(()=>{const short=flowSampleShort(p,s);return short?'<span class="flow-sample-short">'+short.asks.toLocaleString('en-US')+' of '+short.have.toLocaleString('en-US')+' personas</span>':Number(s.size??pool?.personas.length??0).toLocaleString('en-US')+' personas'})()+' · '+answerName(outputs[0]?.type)+'</small>':'')+'</button>'+
     (s.kind==='poll'&&pool?.personas.length?'<div class="flow-node-hosts"><button data-act="flow-cohort-map" data-id="'+attr(s.id)+'" aria-label="Inspect '+attr(pool.name)+' cohort members"><span class="flow-host-dots" aria-hidden="true">'+pool.personas.slice(0,16).map(()=>'<i></i>').join('')+'</span><span>Explore '+pool.personas.length+' members</span></button></div>':'')+
     (targetable?'<button class="flow-destination" data-act="flow-connect" data-id="'+attr(s.id)+'" aria-label="Connect here: '+attr(stepTitle(p,s))+'">'+icon('plus')+' Connect here</button>':'')+
     '<div class="flow-node-outputs">'+outputs.map(q=>'<button class="flow-output" data-act="flow-output" data-id="'+attr(s.id)+'" data-question="'+attr(q.id)+'" aria-pressed="'+(pending?.stage===s.id&&pending?.question===q.id)+'" aria-label="Connect '+attr(flowOutputLabel(p,s,q))+' from '+attr(stepTitle(p,s))+'" title="Connect this output to another step"><span class="flow-output-text"><strong>Connect output '+icon('right')+'</strong><span>'+esc(flowOutputLabel(p,s,q))+(outputs.length>1?' · '+esc(q.label||q.id):'')+'</span></span><span class="flow-socket" aria-hidden="true"></span></button>').join('')+'</div>'+
@@ -104,7 +113,7 @@ function flowTodo(p){
   const todo=[];
   for(const s of p.stages){
     if(s.kind==='poll'){const pool=poolForPhase(p,s),questions=Object.values(s.questions||{});if(!questions.length){todo.push({stageId:s.id,tab:'question'});continue}
-      const ready=questions.map(q=>setupWizardReady(q,pool)),tab=ready.some(r=>!r[0])?'question':ready.some(r=>!r[2])?'answers':ready.some(r=>!r[1])?'cohort':null;if(tab)todo.push({stageId:s.id,tab})}
+      const ready=questions.map(q=>setupWizardReady(q,pool)),tab=ready.some(r=>!r[0])?'question':ready.some(r=>!r[2])?'answers':ready.some(r=>!r[1])?'cohort':flowSampleShort(p,s)?'cohort':null;if(tab)todo.push({stageId:s.id,tab,pick:tab==='cohort'&&!flowSampleShort(p,s)})}
     else if(s.kind==='aggregate'&&!s.inputs?.length)todo.push({stageId:s.id,tab:'connections'});
     else if(s.kind==='decision'&&!p.stages.some(x=>x.id===s.from?.stage))todo.push({stageId:s.id,tab:'question'});
   }
@@ -113,13 +122,13 @@ function flowTodo(p){
 function flowRoundTabs(p,s){
   if(s.kind!=='poll')return [['question','Result',false],['connections','Inputs',false]];
   const q=Object.values(s.questions||{})[0],ready=q?setupWizardReady(q,poolForPhase(p,s)):[false,!!poolForPhase(p,s)?.personas.length,false];
-  return [['question','Question',!ready[0]],['answers','Answers',!ready[2]],['connections','Inputs',false],['cohort','Cohort',!ready[1]]];
+  return [['question','Question',!ready[0]],['answers','Answers',!ready[2]],['connections','Inputs',false],['cohort','Cohort',!ready[1]||!!flowSampleShort(p,s)]];
 }
 function flowInspector(p,s){
   if(!s||S.flowPanel===false)return '';
   const tabs=flowRoundTabs(p,s),requested=S.sections['flow-inspector']==='answer'?'answers':S.sections['flow-inspector']||'question',tab=tabs.some(([key])=>key===requested)?requested:'question';
   const kind=s.kind==='poll'?'Ask cohort · '+answerName(Object.values(s.questions||{})[0]?.type):s.kind==='aggregate'?'Combine answers':'Final result';
-  const body=tab==='connections'?flowConnections(p,s):tab==='cohort'?flowCohortMap(p,s):s.kind==='poll'?stageForm(p,s,tab):stageForm(p,s,true);
+  const body=tab==='connections'?flowConnections(p,s):tab==='cohort'?flowSampleNotice(p,s)+flowCohortMap(p,s):s.kind==='poll'?stageForm(p,s,tab):stageForm(p,s,true);
   return '<aside class="flow-inspector round-panel" aria-label="Selected step editor" data-inspector-tab="'+attr(tab)+'"><div class="flow-inspector-head"><div class="round-panel-title"><h2 tabindex="-1">'+esc(stepTitle(p,s))+'</h2><span class="round-panel-kind">'+esc(kind)+'</span></div><div class="row"><button class="button small icon-button" data-act="flow-settings" aria-label="Step settings" title="Step settings">'+icon('settings')+'</button><button class="button small icon-button" data-act="flow-panel-close" aria-label="Close step panel" title="Close (Esc)">'+icon('close')+'</button></div></div><nav class="round-tabs" role="tablist" aria-label="Selected step sections">'+tabs.map(([key,label,todo])=>'<button type="button" role="tab" class="round-tab" data-act="flow-inspector" data-section="'+key+'" aria-selected="'+(tab===key)+'"'+(todo?' data-todo="true"':'')+'>'+label+(todo?'<span class="round-tab-dot" aria-label="needs attention"></span>':'')+'</button>').join('')+'</nav><div class="flow-inspector-body" role="tabpanel">'+body+'</div></aside>';
 }
 function flowWorkspace(p,s){
@@ -131,12 +140,13 @@ function flowWorkspace(p,s){
 function flowAction(a,el){
   if(!a.startsWith('flow-'))return false;
   const p=pipeline();if(!p)return true;
+  if(a==='flow-sample-all'){const target=p.stages.find(x=>x.id===el.dataset.id),have=target?flowAvailablePeople(p,target):0;if(target&&have>0){target.size=have;S.dirty=true;S.plan=null;render();say('Sample size lowered to '+have+'.')}return true}
   if(a==='flow-cohort-change'){S.flowCohortPick=!S.flowCohortPick;render();return true}
   if(a==='flow-cohort-map'){S.flowCohortPick=false;S.stageId=el.dataset.id;S.flowPanel=true;S.sections['flow-inspector']='cohort';render();root.querySelector('.flow-inspector h2')?.focus();return true}
   if(a==='flow-fit'||a==='flow-reset'){S.flowScale=a==='flow-reset'?1:'fit';drawFlowEdges();return true}
   if(a==='flow-inspector'){S.sections['flow-inspector']=el.dataset.section;render();root.querySelector('[data-act=flow-inspector][data-section="'+el.dataset.section+'"]')?.focus();return true}
   if(a==='flow-create-open'){const v=root.querySelector('.flow-viewport');if(!v)return flowAction('flow-add',{dataset:{kind:'independent'}});const scale=flowScaleApplied||1,left=v.scrollLeft+Math.max(0,v.clientWidth-340),top=v.scrollTop+16;flowOpenCreate(p,left/scale,top/scale,left,top);return true}
-  if(a==='flow-fix'){const todo=flowTodo(p)[0];if(!todo){S.flowPanel=true;render();return true}S.sections.pipeline='flow';S.stageId=todo.stageId;S.sections['flow-inspector']=todo.tab;S.flowPanel=true;S.flowCohortPick=todo.tab==='cohort';render();root.querySelector('.round-tab[aria-selected=true]')?.focus();say('Finish this step, then review the run.');return true}
+  if(a==='flow-fix'){const todo=flowTodo(p)[0];if(!todo){S.flowPanel=true;render();return true}S.sections.pipeline='flow';S.stageId=todo.stageId;S.sections['flow-inspector']=todo.tab;S.flowPanel=true;S.flowCohortPick=!!todo.pick;render();root.querySelector('.round-tab[aria-selected=true]')?.focus();say('Finish this step, then review the run.');return true}
   if(a==='flow-panel-close'){S.flowPanel=false;render();root.querySelector('[data-flow-node="'+S.stageId+'"] [data-act=flow-select]')?.focus({preventScroll:true});return true}
   if(a==='flow-settings'){S.flowSettingsReturn=true;S.sections.pipeline='advanced';render();return true}
   if(a==='flow-settings-back'){S.flowSettingsReturn=false;S.sections.pipeline='flow';render();return true}
@@ -332,7 +342,7 @@ export const WORKSPACE_FLOW_CSS = `
 .flow-hint{padding:10px 16px;font-size:12px;color:var(--muted);min-height:42px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
 .flow-viewport{overflow:auto;max-height:calc(100dvh - 350px);min-height:330px;background:var(--raised);padding:24px 16px;border-top:1px solid var(--line)}
 .flow-map{position:relative;display:flex;gap:110px;width:max-content;transform-origin:top left;padding:12px 0}.flow-space{min-width:100%}.flow-column{display:flex;flex-direction:column;justify-content:center;gap:60px;width:232px;flex:none}
-.flow-node{position:relative;width:232px;border:1px solid var(--control-line);border-radius:10px;background:var(--surface);z-index:1;overflow:hidden}.flow-node[data-selected=true]{border:2px solid var(--blue)}.flow-node[data-targetable=true]{border-style:dashed;border-color:var(--blue)}.flow-node-header{display:flex;align-items:center;gap:8px;padding:8px 10px 0}.flow-node-header .button{margin-left:auto;border:0;background:transparent}.flow-number{display:grid;place-items:center;width:22px;height:22px;background:var(--raised);border-radius:6px;font-size:12px;font-variant-numeric:tabular-nums}.flow-status{font-size:11px;color:var(--amber);font-weight:600}.flow-status[data-ready=true]{color:var(--muted)}
+.flow-node{position:relative;width:232px;border:1px solid var(--control-line);border-radius:10px;background:var(--surface);z-index:1;overflow:hidden}.flow-node[data-selected=true]{border:2px solid var(--blue)}.flow-node[data-targetable=true]{border-style:dashed;border-color:var(--blue)}.flow-node-header{display:flex;align-items:center;gap:8px;padding:8px 10px 0}.flow-node-header .button{margin-left:auto;border:0;background:transparent}.flow-number{display:grid;place-items:center;width:22px;height:22px;background:var(--raised);border-radius:6px;font-size:12px;font-variant-numeric:tabular-nums}.flow-status{font-size:11px;color:var(--amber);font-weight:600}.flow-status[data-ready=true]{color:var(--muted)}.flow-select .flow-sample-short{display:inline;color:var(--red);font-weight:600}.flow-sample-notice .row{margin-top:8px}.flow-sample-notice p{margin:0}
 .flow-select{border:0;background:transparent;color:var(--ink);font:inherit;display:grid;gap:8px;padding:10px 12px 14px;text-align:left;width:100%;cursor:pointer}.flow-select:hover{background:var(--hover)}.flow-select strong{font-size:14px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}.flow-select span{font-size:12px;color:var(--muted);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere}.flow-select small{font-size:11px;color:var(--muted)}
 .flow-node-outputs{border-top:1px solid var(--line)}.flow-output{display:flex;justify-content:space-between;align-items:center;gap:8px;width:100%;padding:8px 12px;font:inherit;font-size:11px;color:var(--blue);background:var(--surface);border:0;text-align:left;cursor:pointer}.flow-output span:first-child{overflow-wrap:anywhere}.flow-output:hover,.flow-output[aria-pressed=true]{background:var(--selection)}.flow-socket{width:9px;height:9px;border:2px solid var(--blue);border-radius:50%;flex:none}.flow-output[aria-pressed=true] .flow-socket{background:var(--blue)}
 .flow-node-inputs{padding:6px 12px;background:var(--raised);border-top:1px solid var(--line)}.flow-node-inputs button{border:0;background:transparent;color:var(--muted);font:inherit;font-size:10px;padding:3px 0;display:flex;align-items:center;gap:5px;text-align:left;cursor:pointer;width:100%}.flow-node-inputs button span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.flow-node-inputs .ui-icon{width:12px;height:12px;flex:none}
