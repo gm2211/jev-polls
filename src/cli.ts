@@ -19,6 +19,7 @@ import { agentConnectionConfig } from './agent-config.js';
 import { renderReport } from './report.js';
 import { loadRun } from './run-record.js';
 import { hashValue } from './engine-utils.js';
+import { enforceBudgets, estimateBudgets } from './request-budget.js';
 import { readJson, writeJson, writeText } from './io.js';
 import type { Pipeline, Cohort } from './types.js';
 
@@ -69,9 +70,11 @@ program.command('validate').argument('<file>').description('Validate a pipeline 
 });
 
 function plan(pipeline: Pipeline, cohorts: Record<string, Cohort>) {
+  const budgets = estimateBudgets(pipeline, cohorts, stageOrder(pipeline));
+  const budgetWarnings = enforceBudgets(budgets);
   const eligible = (c: Cohort) => c.personas.filter(p => c.segments.some(s => s.id === p.segment && s.weight > 0)).length;
-  const stages = stageOrder(pipeline).map(s => ({ id: s.id, kind: s.kind, dependsOn: s.dependsOn, join: s.join ?? 'all', conditional: !!s.when, ...(s.kind === 'poll' ? { cohort: s.cohort, respondents: s.size ?? eligible(cohorts[s.cohort]), repeats: s.repeats ?? 1, questionsPerRequest: Object.keys(s.questions).length, maxRequests: (s.size ?? eligible(cohorts[s.cohort])) * (s.repeats ?? 1) } : { maxRequests: 0 }) }));
-  return { pipeline: pipeline.id, stages, maxRequests: stages.reduce((sum, s) => sum + s.maxRequests, 0), note: 'Upper bound includes mutually exclusive branches; cached responses use no new request. Token cost depends on state and question sizes.' };
+  const stages = stageOrder(pipeline).map(s => ({ id: s.id, kind: s.kind, dependsOn: s.dependsOn, join: s.join ?? 'all', conditional: !!s.when, ...(s.kind === 'poll' ? { cohort: s.cohort, respondents: s.size ?? eligible(cohorts[s.cohort]), repeats: s.repeats ?? 1, questionsPerRequest: Object.keys(s.questions).length, maxRequests: (s.size ?? eligible(cohorts[s.cohort])) * (s.repeats ?? 1), ...(budgets[s.id] ? { jevRequestSize: budgets[s.id] } : {}) } : { maxRequests: 0 }) }));
+  return { pipeline: pipeline.id, stages, ...(budgetWarnings.length ? { warnings: budgetWarnings } : {}), maxRequests: stages.reduce((sum, s) => sum + s.maxRequests, 0), note: 'Upper bound includes mutually exclusive branches; cached responses use no new request. jevRequestSize estimates the largest request per step against Jev limits (32,000 tokens for persona details plus the longest question; 64,000 in total); steps over a limit fail this plan.' };
 }
 program.command('plan').argument('<pipeline>').description('Inspect graph and maximum request count without credentials or API calls').action(async file => { const { pipeline, cohorts } = await loadProject(file); output(plan(pipeline, cohorts)); });
 

@@ -32,3 +32,11 @@ behaviors:
     description: Study hashes, cache keys, and derived seeds are identical regardless of OS locale.
   - id: decision-keeps-uncertainty
     description: A Final result step copies its source summary, including uncertainty, and declares a selection without manufacturing certainty.
+  - id: request-size-guard
+    description: >-
+      The engine measures each request before sending and never sends one over a Jev limit; that
+      respondent fails with a clear reason, which fails its step.
+    source:
+      text: >-
+        we're gonna have one Jev for each persona so we need to make sure that the collective size of the question with all the options and the backstory for the persona, any detail and context about the persona, those things have to be within the limits for Jev otherwise it's just not gonna work.
+      reference: 2026-10-09 jev-polls project thread, Giulio

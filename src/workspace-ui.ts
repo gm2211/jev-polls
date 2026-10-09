@@ -360,6 +360,7 @@ function runs(){const arr=projectRuns(),selected=arr.find(r=>r.id===S.liveRunId)
 function runCaveats(plan){return '<aside class="run-caveats" aria-label="How to interpret this run"><p><strong>Model estimates, not human responses.</strong> Use this run to explore ideas, not validate human preferences.</p></aside>'}
 function reviewSource(p,input){const stage=p.stages.find(s=>s.id===input.stage);const q=resolvedQuestion(p,input.stage,input.question);return (stage?.label||input.stage)+' → '+(q?.label||input.question)}
 function reviewCondition(p,c){if(c.all)return '('+c.all.map(x=>reviewCondition(p,x)).join(' AND ')+')';if(c.any)return '('+c.any.map(x=>reviewCondition(p,x)).join(' OR ')+')';if(c.not)return 'NOT ('+reviewCondition(p,c.not)+')';return reviewSource(p,c)+': '+({margin:'lead margin',topProbability:'top probability',mean:'mean score',winner:'winning option'}[c.metric]||c.metric)+' '+({gt:'greater than',gte:'at least',lt:'less than',lte:'at most',eq:'equals',ne:'does not equal'}[c.op]||c.op)+' '+c.value}
+function requestSizeLine(b){if(!b)return '';const k=n=>n>=1000?(n/1000).toFixed(n>=10000?0:1).replace(/\.0$/,'')+'k':String(n);const near=b.status==='warning';return '<p class="request-size'+(near?' warning':' subtle')+'" data-request-size="'+attr(b.status)+'">Largest Jev request ≈ '+b.largestRequestTokens.toLocaleString('en-US')+' of '+k(b.limit)+' tokens'+(near?' · close to the limit':'')+'</p>'}
 function reviewStep(p,item){
  const s=p.stages.find(x=>x.id===item.id),cohort=S.doc.cohorts.find(c=>c.id===p.cohorts[item.cohort]);
  const timing=item.dependsOn.length?'After '+(s?.join==='any'?'any completed step: ':'all completed steps: ')+item.dependsOn.map(id=>p.stages.find(x=>x.id===id)?.label||id).join(', '):'Starts immediately';
@@ -379,7 +380,7 @@ function reviewStep(p,item){
   if(s.kind==='poll')body+='<details data-detail-key="review-context-'+attr(s.id)+'"><summary>Shared and step context</summary><pre>'+esc(JSON.stringify({shared:p.context,step:s.context??null},null,2))+'</pre></details>';
   if(s.when)body+='<p class="review-rule"><strong>Runs only when</strong> '+esc(reviewCondition(p,s.when))+'</p>';
  }
- return '<article class="review-step"><div class="row"><h3>'+esc(item.label)+' '+badge({poll:'Ask cohort',aggregate:'Combine results',decision:'Select result'}[item.kind]||item.kind)+'</h3><span class="badge blue">'+item.requests+' requests</span></div><p class="subtle">'+esc(timing+members)+'</p>'+body+'</article>';
+ return '<article class="review-step"><div class="row"><h3>'+esc(item.label)+' '+badge({poll:'Ask cohort',aggregate:'Combine results',decision:'Select result'}[item.kind]||item.kind)+'</h3><span class="badge blue">'+item.requests+' requests</span></div><p class="subtle">'+esc(timing+members)+'</p>'+requestSizeLine(item.budget)+body+'</article>';
 }
 function review(){
   const p=pipeline();if(!p)return studies();if(!S.plan)return '<div class="panel">'+empty('Preparing run plan','The planner is checking step dependencies, panel sizes, and request limits.')+'</div>';

@@ -6,6 +6,7 @@ import type { Cohort, Json, Pipeline } from './types.js';
 import type { WorkspaceDocument, WorkspaceProject, WorkspaceSaved } from './workspace-types.js';
 import { parseCohort, parsePipeline, stageOrder } from './schema.js';
 import { validateTargets } from './cohort-insights.js';
+import { enforceBudgets, estimateBudgets, type StageBudget } from './request-budget.js';
 
 const FILE_NAME = 'workspace.json';
 const MAX_DOCUMENT_BYTES = MAX_WORKSPACE_BYTES;
@@ -193,17 +194,21 @@ export function resolveWorkspaceProject(document: WorkspaceDocument, pipelineId:
   return { projectId: validated.projects!.find(project => project.pipelineIds.includes(pipelineId))!.id, pipeline, cohorts };
 }
 
-export function workspacePlan(document: WorkspaceDocument, pipelineId: string): {
+export function workspacePlan(document: WorkspaceDocument, pipelineId: string, provider: 'typesafe' | 'gliner' = 'typesafe'): {
   projectId: string;
   pipeline: Pipeline;
   cohorts: Record<string, Cohort>;
   maxRequests: number;
-  stages: Array<{ id: string; label: string; kind: string; dependsOn: string[]; cohort?: string; profiles?: number; repeats?: number; requests: number }>;
+  stages: Array<{ id: string; label: string; kind: string; dependsOn: string[]; cohort?: string; profiles?: number; repeats?: number; requests: number; budget?: StageBudget }>;
   warnings: string[];
 } {
   const { projectId, pipeline, cohorts } = resolveWorkspaceProject(document, pipelineId);
   let maxRequests = 0;
-  const stages = stageOrder(pipeline).map((stage) => {
+  const ordered = stageOrder(pipeline);
+  // Jev limits apply per request; GLiNER has its own input limit enforced at run time.
+  const budgets = provider === 'gliner' ? {} : estimateBudgets(pipeline, cohorts, ordered);
+  const budgetWarnings = enforceBudgets(budgets);
+  const stages = ordered.map((stage) => {
     if (stage.kind !== 'poll') return { id: stage.id, label: stage.label, kind: stage.kind, dependsOn: [...stage.dependsOn], requests: 0 };
     const cohort = cohorts[stage.cohort]!;
     const positiveIds = new Set(cohort.segments.filter((segment) => segment.weight > 0).map((segment) => segment.id));
@@ -211,9 +216,9 @@ export function workspacePlan(document: WorkspaceDocument, pipelineId: string): 
     const repeats = stage.repeats ?? 1;
     const requests = profiles * repeats;
     maxRequests += requests;
-    return { id: stage.id, label: stage.label, kind: stage.kind, dependsOn: [...stage.dependsOn], cohort: stage.cohort, profiles, repeats, requests };
+    return { id: stage.id, label: stage.label, kind: stage.kind, dependsOn: [...stage.dependsOn], cohort: stage.cohort, profiles, repeats, requests, ...(budgets[stage.id] ? { budget: budgets[stage.id]! } : {}) };
   });
-  const warnings = new Set<string>();
+  const warnings = new Set<string>(budgetWarnings);
   for (const cohort of new Set(Object.values(cohorts))) {
     if (cohort.sources.length === 0) warnings.add(`Cohort '${cohort.name}' has no source records; treat profile details and population estimates as assumptions.`);
     if (cohort.assumptions.length > 0) warnings.add(`Cohort '${cohort.name}' contains ${cohort.assumptions.length} declared assumption(s).`);
