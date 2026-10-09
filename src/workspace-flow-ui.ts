@@ -79,10 +79,13 @@ function flowNode(p,s){
     '<div class="flow-node-outputs">'+outputs.map(q=>'<button class="flow-output" data-act="flow-output" data-id="'+attr(s.id)+'" data-question="'+attr(q.id)+'" aria-pressed="'+(pending?.stage===s.id&&pending?.question===q.id)+'" aria-label="Connect '+attr(flowOutputLabel(p,s,q))+' from '+attr(stepTitle(p,s))+'" title="Connect this output to another step"><span class="flow-output-text"><strong>Connect output '+icon('right')+'</strong><span>'+esc(flowOutputLabel(p,s,q))+(outputs.length>1?' · '+esc(q.label||q.id):'')+'</span></span><span class="flow-socket" aria-hidden="true"></span></button>').join('')+'</div>'+
     (flowInputs(p,s).length?'<div class="flow-node-inputs">'+flowInputs(p,s).map(([,input])=>'<button data-act="flow-inputs" data-id="'+attr(s.id)+'" data-flow-source="'+attr(input.stage)+'" data-flow-question="'+attr(input.question)+'" aria-label="From '+attr(inputTitle(p,input))+'">'+icon('right')+'<span>From '+esc(inputTitle(p,input))+'</span></button>').join('')+'</div>':'')+'</article>';
 }
+function flowNewStage(p,kind,source){
+  return kind==='aggregate'?{id:id(),kind:'aggregate',label:'Combined answers',inputs:[],outputQuestion:'combined',dependsOn:[]}:kind==='decision'?{id:id(),kind:'decision',label:'Final result',from:{stage:'',question:''},outputQuestion:'decision',dependsOn:[]}:{id:id(),kind:'poll',label:'New question',cohort:source?.kind==='poll'?source.cohort:Object.keys(p.cohorts)[0]||'',questions:{answer:{type:'choice',label:'',instructions:'Answer the question using your persona and the supplied context.',criteria:{option_a:'',option_b:''}}},inputs:{},dependsOn:[],repeats:1};
+}
 function flowCanvas(p){
   if(!p.stages.length)return empty('Start with your question','Add a question and choose who answers.','<button class="button primary" data-act="flow-add" data-kind="independent">Add question</button>');
   const depths=flowDepths(p),levels=[...new Set(depths.values())].sort((a,b)=>a-b);
-  return '<div class="flow-viewport" tabindex="0" role="region" aria-label="Study flow canvas"><div class="flow-space"><div class="flow-map">'+levels.map(level=>'<div class="flow-column">'+p.stages.filter(s=>depths.get(s.id)===level).map(s=>flowNode(p,s)).join('')+'</div>').join('')+'</div></div></div>';
+  return '<div class="flow-viewport" tabindex="0" role="region" aria-label="Study flow canvas. Drag steps to arrange them; click empty canvas or press Enter to add a step." aria-keyshortcuts="Enter"><div class="flow-space"><div class="flow-map">'+levels.map(level=>'<div class="flow-column">'+p.stages.filter(s=>depths.get(s.id)===level).map(s=>flowNode(p,s)).join('')+'</div>').join('')+'</div>'+flowCreateMenu(p)+'</div></div>';
 }
 function flowConnections(p,s){
   const inputs=flowInputs(p,s),available=dataInputOptions(p,s).flatMap(source=>phaseOutput(p,source).filter(q=>flowCanConnect(p,source.id,q.id,s)&&!flowAlreadyConnected(p,s,source.id,q.id)).map(q=>({source,q})));
@@ -105,7 +108,7 @@ function flowWorkspace(p,s){
   const pending=S.flowSource?.pipelineId===p.id?S.flowSource:null,add=p.stages.find(x=>x.id===S.flowAdd),first=add&&phaseOutput(p,add)[0];
   return '<div class="flow-workspace"><section class="flow-board" aria-label="Study flow"><div class="flow-toolbar"><h2>Study flow <span>'+p.stages.length+' steps</span></h2><div class="row"><button class="button small" data-act="flow-add" data-kind="independent">'+icon('plus')+' Question</button><button class="button small icon-button" data-act="flow-fit" aria-label="Fit flow to view" title="Fit flow to view">'+icon('fit')+'</button><button class="button small" data-act="flow-reset" aria-label="Actual size" title="Actual size">100%</button></div></div>'+
     (add?'<div class="flow-action-bar" aria-label="Add after selected step"><span>After '+esc(stepTitle(p,add))+'</span><div class="row"><button class="button small" data-act="flow-add" data-id="'+attr(add.id)+'" data-kind="poll">Follow-up / branch</button><button class="button small" data-act="flow-add" data-id="'+attr(add.id)+'" data-kind="aggregate">Combine answers</button><button class="button small" data-act="flow-add" data-id="'+attr(add.id)+'" data-kind="decision" '+(first?.type!=='choice'?'disabled':'')+'>Final result</button><button class="button small icon-button" data-act="flow-add-close" aria-label="Close add step actions">'+icon('close')+'</button></div></div>':'')+
-    '<div class="flow-hint" role="status">'+(pending?'<span><strong>2. Choose destination</strong><br>'+esc(inputTitle(p,{stage:pending.stage,question:pending.question}))+' → Click <strong>Connect here</strong> on a highlighted step.</span><button class="button small" data-act="flow-cancel">Cancel connection</button>':'<span><strong>1.</strong> Click <strong>Connect output</strong> → <strong>2.</strong> Click <strong>Connect here</strong>. Or select a step and choose an output in <strong>Inputs</strong>.</span>')+'</div>'+flowCanvas(p)+'</section>'+flowInspector(p,s)+'</div>';
+    '<div class="flow-hint" role="status">'+(pending?'<span><strong>2. Choose destination</strong><br>'+esc(inputTitle(p,{stage:pending.stage,question:pending.question}))+' → Click <strong>Connect here</strong> on a highlighted step.</span><button class="button small" data-act="flow-cancel">Cancel connection</button>':'<span><strong>1.</strong> Click <strong>Connect output</strong> → <strong>2.</strong> Click <strong>Connect here</strong>. Or select a step and choose an output in <strong>Inputs</strong>. Drag steps to arrange them; click empty canvas to add one.</span>')+'</div>'+flowCanvas(p)+'</section>'+flowInspector(p,s)+'</div>';
 }
 function flowAction(a,el){
   if(!a.startsWith('flow-'))return false;
@@ -119,6 +122,12 @@ function flowAction(a,el){
   if(a==='flow-cancel'){S.flowSource=null;render();return true}
   if(a==='flow-add-menu'){S.flowAdd=S.flowAdd===el.dataset.id?null:el.dataset.id;render();return true}
   if(a==='flow-add-close'){S.flowAdd=null;render();return true}
+  if(a==='flow-create'){
+    const m=S.flowCreate;if(m?.pipelineId!==p.id||!FLOW_KINDS.some(k=>k.kind===el.dataset.kind))return true;
+    flowFreezeLayout(p);const stage=flowNewStage(p,el.dataset.kind,null);p.stages.push(stage);p.layout[stage.id]={x:Math.max(0,Math.round(m.x)),y:Math.max(0,Math.round(m.y))};
+    S.stageId=stage.id;S.flowAdd=null;S.flowSource=null;S.flowCreate=null;S.flowCohortPick=stage.kind==='poll';S.sections['flow-inspector']=stage.kind==='poll'?'cohort':'question';
+    S.dirty=true;S.plan=null;render();return true;
+  }
   if(a==='flow-output'){if(!p.stages.some(s=>s.id===el.dataset.id))return true;S.flowSource={pipelineId:p.id,stage:el.dataset.id,question:el.dataset.question};render();root.querySelector('.flow-hint')?.scrollIntoView?.({block:'nearest'});return true}
   if(a==='flow-connect-input'){
     flowConnect(p,el.dataset.source,el.dataset.question,el.dataset.id);S.flowSource=null;S.stageId=el.dataset.id;S.sections['flow-inspector']='connections';S.dirty=true;S.plan=null;render();return true;
@@ -132,10 +141,9 @@ function flowAction(a,el){
   if(a==='flow-inputs'){S.stageId=el.dataset.id;S.sections['flow-inspector']='connections';render();return true}
   if(a==='flow-disconnect'){const s=p.stages.find(s=>s.id===el.dataset.id);if(s)flowDisconnect(p,s,el.dataset.key)}
   else if(a==='flow-add'){
-    const source=p.stages.find(s=>s.id===el.dataset.id),output=source&&phaseOutput(p,source)[0],kind=el.dataset.kind;
-    const stage=kind==='aggregate'?{id:id(),kind:'aggregate',label:'Combined answers',inputs:[],outputQuestion:'combined',dependsOn:[]}:kind==='decision'?{id:id(),kind:'decision',label:'Final result',from:{stage:'',question:''},outputQuestion:'decision',dependsOn:[]}:{id:id(),kind:'poll',label:'New question',cohort:source?.kind==='poll'?source.cohort:Object.keys(p.cohorts)[0]||'',questions:{answer:{type:'choice',label:'',instructions:'Answer the question using your persona and the supplied context.',criteria:{option_a:'',option_b:''}}},inputs:{},dependsOn:[],repeats:1};
+    const source=p.stages.find(s=>s.id===el.dataset.id),output=source&&phaseOutput(p,source)[0],stage=flowNewStage(p,el.dataset.kind,source);
     if(source&&output)flowConnect({...p,stages:[...p.stages,stage]},source.id,output.id,stage.id);
-    p.stages.push(stage);S.stageId=stage.id;S.flowAdd=null;S.flowSource=null;S.flowCohortPick=stage.kind==='poll';S.sections['flow-inspector']=stage.kind==='poll'?'cohort':'question';
+    p.stages.push(stage);S.stageId=stage.id;S.flowAdd=null;S.flowSource=null;S.flowCreate=null;S.flowCohortPick=stage.kind==='poll';S.sections['flow-inspector']=stage.kind==='poll'?'cohort':'question';
   }else return true;
   S.dirty=true;S.plan=null;render();return true;
 }
@@ -143,6 +151,7 @@ function drawFlowEdges(){
   const map=root.querySelector('.flow-map');if(!map)return false;
   map.querySelector('.flow-links')?.remove();map.style.transform='';
   const viewport=map.closest('.flow-viewport'),space=map.closest('.flow-space'),p=pipeline(),nodes=[...map.querySelectorAll('[data-flow-node]')],columns=[...map.querySelectorAll('.flow-column')],edges=[];
+  const free=flowApplyLayout(p,map,nodes);
   let lanes=0;
   for(const target of p.stages){const to=nodes.find(n=>n.dataset.flowNode===target.id);if(!to)continue;
     for(const dep of target.dependsOn){const from=nodes.find(n=>n.dataset.flowNode===dep);if(!from)continue;
@@ -151,20 +160,140 @@ function drawFlowEdges(){
         const output=[...from.querySelectorAll('[data-act=flow-output]')].find(n=>n.dataset.question===input?.question)||from.querySelector('[data-act=flow-output]');
         const inlet=[...to.querySelectorAll('[data-act=flow-inputs]')].find(n=>n.dataset.flowSource===dep&&n.dataset.flowQuestion===input?.question);
         const source=p.stages.find(s=>s.id===dep),q=input&&phaseOutput(p,source).find(q=>q.id===input.question);
-        const skip=columns.indexOf(to.closest('.flow-column'))>columns.indexOf(from.closest('.flow-column'))+1;
+        const skip=!free&&columns.indexOf(to.closest('.flow-column'))>columns.indexOf(from.closest('.flow-column'))+1;
         edges.push({from,to,output,inlet,lane:skip?lanes++:-1,label:input?({summary:'Answer summary',winner:'Leading option',mean:'Mean score',probabilities:q?flowOutputLabel(p,source,q):'Distribution',responses:'Individual answers'}[input.select]||(q?flowOutputLabel(p,source,q):'Result')):'Dependency'});
       }
     }
   }
-  map.style.paddingTop=lanes?(30+lanes*20)+'px':'12px';
+  if(!free)map.style.paddingTop=lanes?(30+lanes*20)+'px':'12px';
   const box=map.getBoundingClientRect(),svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('viewBox','0 0 '+box.width+' '+box.height);svg.setAttribute('aria-hidden','true');svg.classList.add('flow-links');
   for(const edge of edges){
     const from=edge.from.getBoundingClientRect(),to=edge.to.getBoundingClientRect(),out=(edge.output||edge.from).getBoundingClientRect(),inlet=(edge.inlet||edge.to).getBoundingClientRect();
     const a={...from,right:from.right,left:from.left,top:out.top,width:from.width,height:out.height,bottom:out.bottom},b={...to,right:to.right,left:to.left,top:inlet.top,width:to.width,height:inlet.height,bottom:inlet.bottom};
-    const path=document.createElementNS('http://www.w3.org/2000/svg','path');path.setAttribute('d',graphEdgePath(a,b,box,edge.lane));path.setAttribute('class','flow-wire');svg.append(path);
+    const path=document.createElementNS('http://www.w3.org/2000/svg','path');path.setAttribute('d',free?flowEdgePath(a,b,box):graphEdgePath(a,b,box,edge.lane));path.setAttribute('class','flow-wire');svg.append(path);
     const text=document.createElementNS('http://www.w3.org/2000/svg','text');text.textContent=edge.label;text.setAttribute('x',String((from.right+to.left)/2-box.left));text.setAttribute('y',String(edge.lane>=0?8+edge.lane*14:(out.top+out.height/2+inlet.top+inlet.height/2)/2-box.top-8));text.setAttribute('class','flow-wire-label');svg.append(text);
   }
-  map.prepend(svg);const fitted=Math.max(.1,Math.min(1,(viewport.clientWidth-32)/box.width,(viewport.clientHeight-48)/box.height)),scale=S.flowScale==='fit'?fitted:S.flowScale??fitted;map.style.transform='scale('+scale+')';space.style.width=Math.ceil(box.width*scale)+'px';space.style.height=Math.ceil(box.height*scale)+'px';return true;
+  map.prepend(svg);const fitted=Math.max(.1,Math.min(1,(viewport.clientWidth-32)/box.width,(viewport.clientHeight-48)/box.height)),scale=flowDrag?.scale??(S.flowScale==='fit'?fitted:S.flowScale??fitted);flowScaleApplied=scale;map.style.transform='scale('+scale+')';space.style.width=Math.ceil(box.width*scale)+'px';space.style.height=Math.ceil(box.height*scale)+'px';
+  if(S.flowScroll?.pipelineId===p.id){viewport.scrollLeft=S.flowScroll.left;viewport.scrollTop=S.flowScroll.top}
+  flowPlaceMenu(viewport,space);return true;
+}
+
+/* Freeform canvas: drag steps, pan empty canvas, click empty canvas to add a step (Railway/Hex style). */
+const FLOW_KINDS=[
+  {kind:'poll',label:'Ask cohort',hint:'Ask one or more questions to a cohort',keys:'question poll ask survey',icon:'<path d="M5 5h14v10H9l-4 4z"/>'},
+  {kind:'aggregate',label:'Combine answers',hint:'Weight compatible answers together',keys:'aggregate merge weight join',icon:'<path d="M5 5c0 7 7 7 7 14M19 5c0 7-7 7-7 14"/>'},
+  {kind:'decision',label:'Final result',hint:'Select the leading option from a Choice',keys:'decision winner outcome',icon:'<path d="M6 21V4h11l-2 4 2 4H6"/>'},
+];
+let flowDrag=null,flowSuppressClick=false,flowScaleApplied=1,flowFrame=0;
+function flowKindMatches(query){const q=String(query||'').trim().toLowerCase();return FLOW_KINDS.filter(k=>!q||(k.label+' '+k.hint+' '+k.keys).toLowerCase().includes(q))}
+function flowCreateItems(m){
+  const items=flowKindMatches(m.query);m.index=Math.max(0,Math.min(m.index||0,items.length-1));
+  return items.length?items.map((k,i)=>'<button type="button" class="flow-create-item" role="option" id="flow-create-'+k.kind+'" data-act="flow-create" data-kind="'+k.kind+'" aria-selected="'+(i===m.index)+'"><span class="flow-create-kind" data-kind="'+k.kind+'"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">'+k.icon+'</svg></span><span class="flow-create-text"><strong>'+esc(k.label)+'</strong><small>'+esc(k.hint)+'</small></span></button>').join(''):'<p class="flow-create-empty">No matching step</p>';
+}
+function flowCreateMenu(p){
+  const m=S.flowCreate?.pipelineId===p.id?S.flowCreate:null;if(!m)return '';
+  return '<div class="flow-create-menu" role="dialog" aria-label="Add a step"><input class="flow-create-search" type="text" role="combobox" aria-expanded="true" aria-controls="flowCreateList" aria-label="What would you like to add?" placeholder="What would you like to add?" autocomplete="off" spellcheck="false" value="'+attr(m.query||'')+'"><div class="flow-create-list" id="flowCreateList" role="listbox" aria-label="Step kinds">'+flowCreateItems(m)+'</div><p class="flow-create-foot"><kbd>↑</kbd><kbd>↓</kbd> to move · <kbd>Enter</kbd> to add · <kbd>Esc</kbd> to close</p></div>';
+}
+function flowOpenCreate(p,x,y,left,top){S.flowCreate={pipelineId:p.id,x,y,left,top,query:'',index:0,focus:true};S.flowAdd=null;render()}
+function flowCloseCreate(){if(!S.flowCreate)return;S.flowCreate=null;root.querySelector('.flow-create-menu')?.remove();root.querySelector('.flow-viewport')?.focus({preventScroll:true})}
+function flowPlaceMenu(viewport,space){
+  const menu=space.querySelector('.flow-create-menu'),m=S.flowCreate;if(!menu||!m)return;
+  const maxLeft=viewport.scrollLeft+viewport.clientWidth-menu.offsetWidth-24,maxTop=viewport.scrollTop+viewport.clientHeight-menu.offsetHeight-32;
+  menu.style.left=Math.max(0,Math.min(m.left,maxLeft))+'px';menu.style.top=Math.max(0,Math.min(m.top,maxTop))+'px';
+  const input=menu.querySelector('input'),list=menu.querySelector('.flow-create-list');
+  const sync=()=>{list.innerHTML=flowCreateItems(m);const active=list.querySelector('[aria-selected=true]');if(active)input.setAttribute('aria-activedescendant',active.id);else input.removeAttribute('aria-activedescendant')};
+  sync();
+  input.addEventListener('input',e=>{e.stopPropagation();m.query=input.value;m.index=0;sync()});
+  input.addEventListener('keydown',e=>{
+    const count=flowKindMatches(m.query).length;
+    if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();e.stopPropagation();if(count){m.index=(m.index+(e.key==='ArrowDown'?1:count-1))%count;sync()}}
+    else if(e.key==='Enter'){e.preventDefault();e.stopPropagation();list.querySelector('[aria-selected=true]')?.click()}
+    else if(e.key==='Escape'){e.preventDefault();e.stopPropagation();flowCloseCreate()}
+  });
+  if(m.focus){m.focus=false;input.focus({preventScroll:true})}
+}
+function flowLayoutActive(p){return !!p?.layout&&p.stages.some(s=>Object.hasOwn(p.layout,s.id))}
+/** Copies every step's on-screen position into the study so later edits never reshuffle what the user arranged. */
+function flowFreezeLayout(p){
+  if(!p.layout)p.layout={};
+  for(const node of root.querySelectorAll?.('.flow-map [data-flow-node]')||[])if(!Object.hasOwn(p.layout,node.dataset.flowNode))p.layout[node.dataset.flowNode]={x:Math.round(node.offsetLeft),y:Math.round(node.offsetTop)};
+}
+function flowApplyLayout(p,map,nodes){
+  map.classList.remove('flow-free');map.style.width='';map.style.height='';nodes.forEach(n=>{n.style.left='';n.style.top=''});
+  if(!flowLayoutActive(p))return false;
+  const size=Object.fromEntries(nodes.map(n=>[n.dataset.flowNode,{w:n.offsetWidth,h:n.offsetHeight}])),placed={},gap=24;
+  const overlaps=(x,y,w,h)=>Object.values(placed).some(r=>x<r.x+r.w+gap&&x+w+gap>r.x&&y<r.y+r.h+gap&&y+h+gap>r.y);
+  for(const s of p.stages)if(size[s.id]&&p.layout[s.id])placed[s.id]={...p.layout[s.id],...size[s.id]};
+  const depths=flowDepths(p);
+  for(const s of [...p.stages].sort((a,b)=>depths.get(a.id)-depths.get(b.id))){
+    if(!size[s.id]||placed[s.id])continue;
+    const deps=s.dependsOn.map(id=>placed[id]).filter(Boolean),all=Object.values(placed);let x,y;
+    if(deps.length){const right=deps.reduce((a,b)=>a.x+a.w>b.x+b.w?a:b);x=right.x+right.w+80;y=right.y}
+    else{x=all.length?Math.min(...all.map(r=>r.x)):0;y=all.length?Math.max(...all.map(r=>r.y+r.h))+48:0}
+    for(let guard=0;guard<80&&overlaps(x,y,size[s.id].w,size[s.id].h);guard++)y+=32;
+    placed[s.id]={x,y,...size[s.id]};
+  }
+  map.classList.add('flow-free');map.style.paddingTop='0';
+  let width=0,height=0;
+  for(const n of nodes){const r=placed[n.dataset.flowNode];if(!r)continue;n.style.left=r.x+'px';n.style.top=r.y+'px';width=Math.max(width,r.x+r.w);height=Math.max(height,r.y+r.h)}
+  map.style.width=(width+48)+'px';map.style.height=(height+48)+'px';
+  return true;
+}
+function flowEdgePath(a,b,box){
+  const x1=a.right-box.left,y1=a.top+a.height/2-box.top,x2=b.left-box.left-3,y2=b.top+b.height/2-box.top,d=Math.max(48,Math.abs(x2-x1)/2);
+  return 'M '+x1+' '+y1+' C '+(x1+d)+' '+y1+', '+(x2-d)+' '+y2+', '+x2+' '+y2;
+}
+function flowRedraw(){if(flowFrame)return;flowFrame=requestAnimationFrame(()=>{flowFrame=0;drawFlowEdges()})}
+function wireFlowCanvas(){
+document.addEventListener('pointerdown',e=>{
+  if(e.button!==0||S.loading||!e.target?.closest)return;
+  const viewport=e.target.closest('.flow-viewport');
+  if(!viewport||e.target.closest('.flow-create-menu,input,select,textarea,a'))return;
+  const box=viewport.getBoundingClientRect();if(e.clientX>=box.left+viewport.clientLeft+viewport.clientWidth||e.clientY>=box.top+viewport.clientTop+viewport.clientHeight)return;
+  const node=e.target.closest('[data-flow-node]');
+  flowDrag={pointerId:e.pointerId,type:e.pointerType,x:e.clientX,y:e.clientY,node,viewport,moved:false,scrollLeft:viewport.scrollLeft,scrollTop:viewport.scrollTop,menuOpen:!!S.flowCreate};
+});
+document.addEventListener('pointermove',e=>{
+  const d=flowDrag;if(!d||e.pointerId!==d.pointerId)return;
+  const dx=e.clientX-d.x,dy=e.clientY-d.y;
+  if(!d.moved){
+    if(Math.hypot(dx,dy)<5)return;
+    if(!d.node&&d.type==='touch'){flowDrag=null;return}
+    d.moved=true;d.scale=flowScaleApplied;d.viewport.classList.add('flow-dragging');
+    if(d.node){const p=pipeline();flowFreezeLayout(p);d.p=p;d.id=d.node.dataset.flowNode;d.start={...p.layout[d.id]};d.node.classList.add('flow-node-dragging');flowCloseCreate()}
+  }
+  e.preventDefault();
+  if(d.node){d.p.layout[d.id]={x:Math.max(0,Math.round(d.start.x+dx/d.scale)),y:Math.max(0,Math.round(d.start.y+dy/d.scale))};flowRedraw()}
+  else{d.viewport.scrollLeft=d.scrollLeft-dx;d.viewport.scrollTop=d.scrollTop-dy}
+});
+function flowPointerEnd(e,cancelled){
+  const d=flowDrag;if(!d||e.pointerId!==d.pointerId)return;flowDrag=null;
+  d.viewport.classList.remove('flow-dragging');d.node?.classList.remove('flow-node-dragging');
+  if(d.moved){
+    flowSuppressClick=true;setTimeout(()=>{flowSuppressClick=false},0);
+    if(d.node){S.flowScale=d.scale;S.dirty=true;S.plan=null;render()}
+    return;
+  }
+  if(cancelled||d.node||d.menuOpen)return;
+  const p=pipeline(),map=d.viewport.querySelector('.flow-map'),space=d.viewport.querySelector('.flow-space');if(!p||!map||!space)return;
+  flowSuppressClick=true;setTimeout(()=>{flowSuppressClick=false},0);
+  if(S.flowSource){S.flowSource=null;render();return}
+  const mapBox=map.getBoundingClientRect(),spaceBox=space.getBoundingClientRect(),scale=flowScaleApplied||1;
+  flowOpenCreate(p,(e.clientX-mapBox.left)/scale,(e.clientY-mapBox.top)/scale,e.clientX-spaceBox.left,e.clientY-spaceBox.top);
+}
+document.addEventListener('pointerup',e=>flowPointerEnd(e,false));
+document.addEventListener('pointercancel',e=>flowPointerEnd(e,true));
+document.addEventListener('click',e=>{
+  if(flowSuppressClick){flowSuppressClick=false;e.preventDefault();e.stopPropagation();return}
+  if(S.flowCreate&&!e.target?.closest?.('.flow-create-menu'))flowCloseCreate();
+},true);
+document.addEventListener('scroll',e=>{const v=e.target;if(v?.classList?.contains('flow-viewport')&&v.isConnected){const p=pipeline();if(p)S.flowScroll={pipelineId:p.id,left:v.scrollLeft,top:v.scrollTop}}},true);
+root.addEventListener('keydown',e=>{
+  const v=e.target;if(!v?.classList?.contains('flow-viewport')||(e.key!=='Enter'&&e.key!==' ')||S.flowCreate)return;
+  const p=pipeline();if(!p)return;e.preventDefault();
+  const scale=flowScaleApplied||1,left=v.scrollLeft+Math.max(0,v.clientWidth/2-160),top=v.scrollTop+24;
+  flowOpenCreate(p,left/scale,top/scale,left,top);
+});
 }
 
 `;
@@ -195,4 +324,13 @@ export const WORKSPACE_FLOW_CSS = `
 }
 @media(max-width:1000px){.flow-workspace{grid-template-columns:minmax(0,1fr) 320px}.flow-toolbar{flex-wrap:wrap;gap:8px}.flow-toolbar h2{flex:1}}
 @media(max-width:760px){.flow-workspace{grid-template-columns:minmax(0,1fr)}.flow-viewport{min-height:240px;max-height:350px}.flow-inspector-body{max-height:none;min-height:0}.flow-inspector-head h2{font-size:14px}.flow-toolbar{padding:10px 12px}.flow-hint{padding:8px 12px}.flow-column,.flow-node{width:216px}.flow-map{gap:100px}.flow-inspector>.section-tabs .button{flex:1}}
+.flow-space{position:relative}.flow-viewport{cursor:default}.flow-viewport.flow-dragging{cursor:grabbing;user-select:none;-webkit-user-select:none}.flow-viewport.flow-dragging *{cursor:grabbing!important}
+.flow-node{cursor:grab;touch-action:none}.flow-map.flow-free{display:block;padding:0}.flow-map.flow-free .flow-column{display:contents}.flow-map.flow-free .flow-node{position:absolute;margin:0}
+.flow-node-dragging{z-index:3;box-shadow:0 14px 30px rgba(15,35,55,.2)}.flow-node-dragging button{pointer-events:none}
+.flow-create-menu{position:absolute;z-index:6;width:300px;max-width:calc(100vw - 48px);display:grid;gap:2px;padding:6px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink);box-shadow:0 18px 40px rgba(15,35,55,.22);cursor:default}
+.flow-create-search{width:100%;border:0;border-bottom:1px solid var(--line);border-radius:0;padding:10px 10px 12px;margin-bottom:4px;font:inherit;font-size:13px;background:transparent;color:var(--ink);outline:none;box-shadow:none}
+.flow-create-list{display:grid;gap:2px}.flow-create-item{display:flex;align-items:center;gap:10px;width:100%;padding:8px 10px;border:0;border-radius:8px;background:transparent;color:var(--ink);font:inherit;text-align:left;cursor:pointer}.flow-create-item[aria-selected=true],.flow-create-item:hover{background:var(--selection)}
+.flow-create-kind{flex:none;display:grid;place-items:center;width:30px;height:30px;border-radius:8px;border:1px solid var(--line);background:var(--raised);color:var(--blue)}.flow-create-kind .ui-icon{width:16px;height:16px}
+.flow-create-text{display:grid;gap:2px;min-width:0}.flow-create-text strong{font-size:13px}.flow-create-text small{font-size:11px;color:var(--muted)}
+.flow-create-empty{margin:0;padding:10px;font-size:12px;color:var(--muted)}.flow-create-foot{margin:4px 0 0;padding:6px 10px 4px;border-top:1px solid var(--line);font-size:10px;color:var(--muted)}.flow-create-foot kbd{font:inherit;font-size:10px;padding:0 4px;border:1px solid var(--line);border-radius:4px;margin-right:2px}
 `;

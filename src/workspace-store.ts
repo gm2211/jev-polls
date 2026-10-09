@@ -264,7 +264,7 @@ function validateCohortDraft(value: unknown, path: string): void {
 }
 
 function validatePipelineDraft(value: unknown, path: string): void {
-  const p = object(value, path, ['version', 'id', 'name', 'description', 'context', 'cohorts', 'stages'], ['version', 'id', 'name', 'description', 'context', 'cohorts', 'stages']);
+  const p = object(value, path, ['version', 'id', 'name', 'description', 'context', 'cohorts', 'stages', 'layout'], ['version', 'id', 'name', 'description', 'context', 'cohorts', 'stages']);
   versionOne(p.version, `${path}.version`); id(p.id, `${path}.id`);
   for (const key of ['name', 'description'] as const) string(p[key], `${path}.${key}`);
   validateJson(p.context, `${path}.context`);
@@ -273,6 +273,15 @@ function validatePipelineDraft(value: unknown, path: string): void {
   for (const [alias, reference] of Object.entries(refs)) { id(alias, `${path}.cohorts key`); string(reference, `${path}.cohorts.${alias}`); if (reference !== '') id(reference, `${path}.cohorts.${alias}`); }
   array(p.stages, `${path}.stages`, MAX_STAGES).forEach((entry, index) => validateStageDraft(entry, `${path}.stages[${index}]`));
   uniqueIds(p.stages as unknown[], 'stage', `${path}.stages`);
+  if (p.layout !== undefined) {
+    const layout = object(p.layout, `${path}.layout`, undefined, []);
+    if (Object.keys(layout).length > MAX_STAGES) throw new Error(`${path}.layout exceeds ${MAX_STAGES} entries`);
+    for (const [stageId, position] of Object.entries(layout)) {
+      id(stageId, `${path}.layout key`);
+      const point = object(position, `${path}.layout.${stageId}`, ['x', 'y'], ['x', 'y']);
+      for (const axis of ['x', 'y'] as const) if (typeof point[axis] !== 'number' || !Number.isFinite(point[axis])) throw new Error(`${path}.layout.${stageId}.${axis} must be a finite number`);
+    }
+  }
 }
 
 function validateStageDraft(value: unknown, path: string): void {

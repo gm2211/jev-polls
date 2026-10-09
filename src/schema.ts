@@ -32,7 +32,7 @@ export const pipelineSchema = z.object({ version: z.literal(1), id, name: text, 
   z.object({ ...base, kind: z.literal('poll'), cohort: id, questions: z.record(id, questionSchema).refine(v => Object.keys(v).length > 0, 'At least one question is required'), size: z.number().int().positive().optional(), repeats: z.number().int().min(1).max(100).optional(), context: z.json().optional(), inputs: z.record(id, pollInputBinding).optional() }).strict(),
   z.object({ ...base, kind: z.literal('aggregate'), inputs: z.array(z.object({ stage: id, question: id, weight: positive }).strict()).min(1), outputQuestion: id }).strict(),
   z.object({ ...base, kind: z.literal('decision'), from: z.object({ stage: id, question: id }).strict(), outputQuestion: id }).strict(),
-])).min(1) }).strict();
+])).min(1), layout: z.record(id, z.object({ x: z.number().finite(), y: z.number().finite() }).strict()).optional() }).strict();
 
 function assert(value: unknown, message: string): asserts value { if (!value) throw new Error(message); }
 function unique(values: string[], label: string) { assert(new Set(values).size === values.length, `Duplicate ${label}`); }

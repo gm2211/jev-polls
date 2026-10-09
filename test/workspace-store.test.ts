@@ -275,3 +275,18 @@ test('projects own every entity exactly once and enforce pipeline boundaries at 
   assert.equal(validateWorkspaceDocument(unfinished).projects!.length, 2);
   assert.throws(() => workspacePlan(unfinished, 'study'));
 });
+
+test('saved studies keep canvas positions and reject malformed ones', async (t) => {
+  const directory = await temporaryDirectory(); t.after(() => rm(directory, { recursive: true, force: true }));
+  const store = new WorkspaceStore(directory);
+  const document = documentWith();
+  const stageId = document.pipelines[0]!.stages[0]!.id;
+  document.pipelines[0]!.layout = { [stageId]: { x: 120, y: 48 } };
+  await store.save(document, 0);
+  assert.deepEqual((await store.read()).document.pipelines[0]!.layout, { [stageId]: { x: 120, y: 48 } });
+  const bad = structuredClone(document) as any;
+  bad.pipelines[0].layout[stageId] = { x: 'left', y: 0 };
+  assert.throws(() => validateWorkspaceDocument(bad), /layout\..*x must be a finite number/);
+  bad.pipelines[0].layout[stageId] = { x: 0, y: 0, z: 1 };
+  assert.throws(() => validateWorkspaceDocument(bad), /unknown field 'z'/);
+});
