@@ -8,7 +8,14 @@ function workspaceBreadcrumbItems(){
   items.push({label:section,action:S.tab==='studies'?'back-studies':S.tab==='cohorts'?'back-cohorts':S.tab==='runs'?'live-close':'project-settings'});
   if(S.tab==='studies'){
     const study=pipeline();
-    if(study){items.push({label:study.name||studyQuestion(study),action:'edit-review'});if(S.plan)items.push({label:'Review run'})}
+    if(study){
+      // One crumb per level of the hierarchy: study, then the open step, then that step's settings.
+      const mode=S.sections.pipeline||'flow',s=selectedStage(),step=s&&'Step '+(study.stages.findIndex(x=>x.id===s.id)+1);
+      items.push({label:studyQuestion(study),action:'breadcrumb-study'});
+      if(S.plan)items.push({label:'Review run'});
+      else if(s&&mode==='advanced')items.push({label:step,action:'breadcrumb-step'},{label:'Settings'});
+      else if(s&&(mode==='phase'||mode==='flow'&&S.flowPanel!==false))items.push({label:step});
+    }
   }else if(S.tab==='cohorts'){
     const c=S.cohortComposer?projectCohorts().find(c=>c.id===S.cohortTarget):cohort();
     if(c)items.push({label:c.name||'Cohort',action:'breadcrumb-cohort'});
@@ -20,10 +27,11 @@ function workspaceBreadcrumbItems(){
   }
   return items;
 }
-function workspaceBreadcrumbs(sectionRoot=false){
-  // Project tabs sit right under the trail on section pages, so the trail stops at the project instead of repeating the selected tab.
-  const items=workspaceBreadcrumbItems();if(sectionRoot&&items.length===3)items.pop();
-  return '<nav class="workspace-breadcrumbs" aria-label="Breadcrumb"><ol>'+items.map((item,index)=>'<li>'+(index?'<span class="breadcrumb-separator" aria-hidden="true">/</span>':'')+(index===items.length-1?'<span aria-current="page">'+esc(item.label)+'</span>':'<button type="button" class="breadcrumb-link" data-act="'+attr(item.action)+'">'+esc(item.label)+'</button>')+'</li>').join('')+'</ol></nav>';
+function crumbTitle(item){return item.label.length>36?' title="'+attr(item.label)+'"':''}
+function workspaceBreadcrumbs(){
+  // The trail shows where the page sits in the hierarchy, not the click history: every level from Projects down, the current page last and not a link.
+  const items=workspaceBreadcrumbItems();
+  return '<nav class="workspace-breadcrumbs" aria-label="Breadcrumb"><ol>'+items.map((item,index)=>'<li>'+(index?'<span class="breadcrumb-separator" aria-hidden="true">/</span>':'')+(index===items.length-1?'<span'+crumbTitle(item)+' aria-current="page">'+esc(item.label)+'</span>':'<button type="button"'+crumbTitle(item)+' class="breadcrumb-link" data-act="'+attr(item.action)+'">'+esc(item.label)+'</button>')+'</li>').join('')+'</ol></nav>';
 }
 function viewportPageSize(large,small){return (window.innerWidth||1024)<=600?small:large}
 function pageItems(items,key,limit=6){
@@ -50,6 +58,7 @@ function revealSectionField(field){
   }
 }
 function navigationAction(a,el){
+  if(a==='breadcrumb-study'||a==='breadcrumb-step'){S.plan=null;S.sections.pipeline='flow';S.flowSettingsReturn=false;S.flowPanel=a==='breadcrumb-step';render();(a==='breadcrumb-step'?root.querySelector('.flow-inspector h2'):root.querySelector('h1'))?.focus();return true}
   if(a==='breadcrumb-cohort'){S.cohortComposer=false;S.personaOpen=false;render();root.querySelector('h1')?.focus();return true}
   if(a==='section-view'){if(S.targetDraft)readTargetForm();S.sections[el.dataset.sectionKey]=el.dataset.sectionId;render();root.querySelectorAll('[data-act=section-view]').forEach(b=>{if(b.dataset.sectionKey===el.dataset.sectionKey&&b.dataset.sectionId===el.dataset.sectionId)b.focus()});drawStageEdges();return true}
   if(a==='page-action'){if(S.targetDraft)readTargetForm();S.listPages[el.dataset.pageKey]=Math.max(0,Number(el.dataset.page));const shares=el.closest?.('[data-form=segment-shares]');if(shares){const page=pageItems(cohort().segments,'segments',viewportPageSize(4,3));shares.querySelectorAll('.segment-weight-row').forEach((row,i)=>row.hidden=i<page.start||i>=page.end);const pager=shares.querySelector('.pagination');if(pager)pager.outerHTML=page.controls;shares.querySelector('.page-select')?.focus();return true}render();root.querySelector('h1')?.focus();return true}
@@ -74,7 +83,7 @@ export const NAVIGATION_CSS = `
 .phase-edit-cue{display:block;margin-top:10px;font-size:11px;font-weight:700;color:var(--blue)}.phase-basics{padding-bottom:8px;border-bottom:1px solid var(--line)}.phase-cohort-hint{display:flex;justify-content:space-between;align-items:center;gap:10px;color:var(--muted);font-size:11px}.phase-cohort-hint .button{white-space:nowrap}.phase-form-tabs>.question-card{margin-top:8px}.phase-form-tabs .phase-basics .field,.phase-form-tabs .question-card .field{margin-bottom:6px}.phase-form-tabs .sticky-actions{display:flex;justify-content:space-between}
 [hidden]{display:none!important}
 .shell{padding:14px 24px 16px;max-width:1440px}
-.workspace-breadcrumbs{flex:1;min-width:0;font-size:12px;color:var(--muted)}.workspace-breadcrumbs ol{display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;list-style:none;padding:0;margin:0}.workspace-breadcrumbs li{display:flex;align-items:baseline;gap:8px;min-width:0;max-width:100%;overflow-wrap:anywhere}.workspace-breadcrumbs [aria-current=page]{color:var(--ink)}.breadcrumb-separator{flex:none}.workspace-breadcrumbs .breadcrumb-link{padding-block:7px}.detail-back{margin-bottom:6px}
+.workspace-breadcrumbs{flex:1;min-width:0;font-size:12px;color:var(--muted)}.workspace-breadcrumbs ol{display:flex;align-items:center;flex-wrap:wrap;gap:4px 8px;list-style:none;padding:0;margin:0}.workspace-breadcrumbs li{display:flex;align-items:baseline;gap:8px;min-width:0;max-width:100%;overflow-wrap:anywhere}.workspace-breadcrumbs [aria-current=page]{color:var(--ink)}.workspace-breadcrumbs li>:not(.breadcrumb-separator){max-width:36ch;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}@media(max-width:600px){.workspace-breadcrumbs li:not(:nth-last-child(-n+2)){display:none}.workspace-breadcrumbs li:nth-last-child(2) .breadcrumb-separator{display:none}.workspace-breadcrumbs ol{flex-wrap:nowrap}.workspace-breadcrumbs li>:not(.breadcrumb-separator){max-width:24ch}}.breadcrumb-separator{flex:none}.workspace-breadcrumbs .breadcrumb-link{padding-block:7px}.detail-back{margin-bottom:6px}
 .project-navigation{margin-bottom:12px;padding-bottom:10px;gap:12px}
 .breadcrumb-link{appearance:none;border:0;border-radius:3px;background:transparent;padding:0;min-width:0;color:var(--muted);font:inherit;text-align:left;overflow-wrap:anywhere;cursor:pointer}.breadcrumb-link:hover{color:var(--blue);text-decoration:underline;text-underline-offset:3px}.breadcrumb-link:focus-visible{outline:2px solid var(--blue);outline-offset:3px}
 
