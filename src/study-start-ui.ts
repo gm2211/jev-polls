@@ -1,4 +1,4 @@
-/** One-click creation: empty lists are the create control, and a new study is named on its own page. Inline edits keep on Enter or blur and cancel on Esc, so the page's Save stays the only save button. */
+/** One-click creation: empty lists are the create control, and a new study is named on its own page. Inline edits save on Enter and discard on Esc or click-away, so the page's Save stays the only save button. */
 export const STUDY_START_CLIENT = String.raw`
 function emptyCreate(act,title,hint){
   return '<button type="button" class="empty-create" data-act="'+act+'"><span class="empty-create-plus" aria-hidden="true">'+icon('plus')+'</span><strong>'+esc(title)+'</strong><span class="empty-create-hint">'+esc(hint)+'</span></button>';
@@ -14,9 +14,9 @@ function createStudy(){
 function studyTitle(p){
   if(S.studyTitleEdit!==p.id)return '<div class="study-title"><h1 tabindex="-1">'+esc(studyQuestion(p))+'</h1><button type="button" class="button small icon-button study-title-edit" data-act="study-title-edit" aria-label="Edit study question" title="Edit study question">'+icon('edit')+'</button></div>';
   const question=p.description?.trim()||'';
-  return '<form class="study-title study-title-form" data-form="study-title" data-id="'+attr(p.id)+'" data-inline-edit="study-title-cancel"><h1 class="visually-hidden" tabindex="-1">'+esc(studyQuestion(p))+'</h1><input name="question" value="'+attr(question)+'" required maxlength="500" placeholder="What do you want to find out?" aria-label="Study question" aria-describedby="inlineEditHint" title="Enter or click away to keep · Esc to cancel" autocomplete="off">'+inlineEditHint()+'</form>';
+  return '<form class="study-title study-title-form" data-form="study-title" data-id="'+attr(p.id)+'" data-inline-edit="study-title-cancel"><h1 class="visually-hidden" tabindex="-1">'+esc(studyQuestion(p))+'</h1><input name="question" value="'+attr(question)+'" required maxlength="500" placeholder="What do you want to find out?" aria-label="Study question" aria-describedby="inlineEditHint" title="Enter to save · Esc or click away to discard" autocomplete="off">'+inlineEditHint()+'</form>';
 }
-function inlineEditHint(){return '<span id="inlineEditHint" class="inline-edit-hint">Enter to keep · Esc to cancel</span>'}
+function inlineEditHint(){return '<span id="inlineEditHint" class="inline-edit-hint">Enter to save · Esc or click away to discard</span>'}
 function inlineEditOpen(form){return form.dataset.form==='study-title'?S.studyTitleEdit===form.dataset.id:form.dataset.form==='project-rename'?S.projectRename===form.dataset.id:false}
 function inlineEditCancel(form){act(null,{dataset:{act:form.dataset.inlineEdit}})}
 root.addEventListener('keydown',e=>{
@@ -24,9 +24,8 @@ root.addEventListener('keydown',e=>{
   e.preventDefault();e.stopPropagation();inlineEditCancel(form);
 },true);
 root.addEventListener('focusout',e=>{
-  const form=e.target.closest?.('[data-inline-edit]');if(!form||form.contains(e.relatedTarget)||!form.isConnected||!inlineEditOpen(form))return;
-  const input=form.querySelector('input');
-  if(!String(input?.value||'').trim())inlineEditCancel(form);else form.requestSubmit();
+  const form=e.target.closest?.('[data-inline-edit]');if(!form||form.contains(e.relatedTarget)||!form.isConnected||!inlineEditOpen(form)||!document.hasFocus())return;
+  inlineEditCancel(form);
 });
 function submitStudyTitle(form){
   const p=S.doc.pipelines.find(x=>x.id===form.dataset.id);if(!p){S.studyTitleEdit=null;render();return}
