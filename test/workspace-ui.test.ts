@@ -2345,7 +2345,9 @@ test('study navigation has clear scope, a reachable single-study library and con
   const before=JSON.stringify(S.doc);render();let html=browser.element('app').innerHTML;
   assert.doesNotMatch(html,/aria-label="Workspace views"|>Advanced<|Apply phase/);const location=html.match(/<nav class="workspace-breadcrumbs"[\s\S]*?<\/nav>/)![0];assert.equal((location.match(/<button/g)||[]).length,3);assert.equal((location.match(/aria-current="page"/g)||[]).length,1);assert.match(location,/class="breadcrumb-link" data-act="projects"/);assert.match(location,/data-act="back-studies">Studies/);assert.doesNotMatch(html,/← Studies|← Projects/);assert.match(html,/>Pipeline</);assert.match(html,/aria-label="Step settings" title="Step settings"/);
   act(null,{dataset:{act:'section-view',sectionKey:'pipeline',sectionId:'advanced'}});html=browser.element('app').innerHTML;
-  assert.match(html,/Back to question/);assert.match(html,/Step settings · 1\./);assert.doesNotMatch(html,/aria-label="Study sections"|Apply phase/);
+  assert.match(html,/Back to question/);assert.match(html,/<strong>Step 1 settings · [^<]+<\/strong>/);
+  {const p=S.doc.pipelines[0],q=Object.values(p.stages[0].questions)[0] as any,old=[p.description,q.label];p.description=q.label='Which name sells best?';render();assert.match(browser.element('app').innerHTML,/<strong>Step 1 settings<\/strong>/,'a step asking the study question is not repeated');[p.description,q.label]=old;render();html=browser.element('app').innerHTML}
+  assert.doesNotMatch(html,/aria-label="Study sections"|Apply phase/);
   assert.match(html,/data-settings-mode="simple"/);
   act(null,{dataset:{act:'section-view',sectionKey:'step-settings-study-panel',sectionId:'advanced'}});html=browser.element('app').innerHTML;
   for(const field of ['questionInstructions','criteria','stageContext','repeats'])assert.match(html,new RegExp('name="'+field+'"'));
