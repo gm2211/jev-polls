@@ -1158,7 +1158,9 @@ test('cohort editor has an explicit path back to the library and keeps unsaved e
   assert.match(cohorts(), /role="tablist"/);
   act(null, { dataset: { act: 'open-cohort', id: 'cohort' } });
   assert.doesNotMatch(browser.element('app').innerHTML, /role="tablist"|role="tabpanel"/);
-  assert.match(browser.element('app').innerHTML, /Back to cohorts/);
+  // The breadcrumb is the one way back; a duplicate back button would compete with it.
+  assert.match(browser.element('app').innerHTML, /class="breadcrumb-link" data-act="back-cohorts">Cohorts</);
+  assert.doesNotMatch(browser.element('app').innerHTML, /Back to cohorts/);
   assert.match(browser.element('app').innerHTML, /Original cohort/);
   act(null, { dataset: { act: 'cohort-section', section: 'definition' } });
   assert.match(browser.element('app').innerHTML, /data-form="cohort"/);
@@ -2790,4 +2792,29 @@ test('run review explains real questions, data flow, conditions and cohort termi
   pipeline.stages[1].join = 'any';
   assert.match(review(), /available inputs only/);
   assert.equal(browser.requests.filter(path => path === '/api/run').length, 0);
+});
+
+test('page anatomy keeps brand, breadcrumbs, project tabs and header actions distinct', async () => {
+  const shell = renderWorkspace('test', 'token');
+  assert.match(shell, /<span class="wordmark-text"><b>jev<\/b><i>Research desk<\/i><\/span>/);
+  assert.doesNotMatch(shell, /jev <i>\/ /, 'the app name must not read as a breadcrumb');
+  const browser = browserHarness(); await settle();
+  const { S, act, render } = browser.client;
+  const html = () => browser.element('app').innerHTML;
+  S.tab = 'studies'; S.pipelineId = null; render();
+  const navigation = html().match(/<div class="project-navigation">[\s\S]*?<\/nav><\/div>/)![0];
+  assert.doesNotMatch(navigation, /<button class="button/, 'the breadcrumb row holds only the trail');
+  assert.doesNotMatch(html(), /aria-label="Edit project"/);
+  assert.match(html(), /<\/div><button type="button" class="project-settings-link" data-act="project-settings">[\s\S]*?Project settings<\/span><\/button><\/div>/);
+  act(null, { dataset: { act: 'project-settings' } });
+  assert.doesNotMatch(html(), /Back to project/);
+  S.dirty = true; render();
+  assert.match(html(), /class="button primary save-button"[^>]*aria-label="Save changes"[^>]*>[\s\S]*?<span aria-hidden="true">Save<\/span>/);
+  act(null, { dataset: { act: 'tab', tab: 'cohorts' } });
+  const header = html().match(/<div class="header-actions">[\s\S]*?<\/div>/)![0];
+  assert.ok(header.indexOf('data-act="save"') < header.indexOf('data-act="new-cohort"'), 'Save leads every header action group');
+  act(null, { dataset: { act: 'open-cohort', id: 'cohort' } });
+  act(null, { dataset: { act: 'open-persona', id: 'person' } });
+  assert.doesNotMatch(html(), /Back to cohort/);
+  assert.match(html(), /class="breadcrumb-link" data-act="breadcrumb-cohort">/);
 });
