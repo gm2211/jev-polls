@@ -1,13 +1,12 @@
 id: projects
 name: Projects and persistence
 prose: >-
-  A project groups a research brief with its cohorts, study, and run history. Drafts save locally
-  with revision control. Open decision (not yet accepted): whether a project holds one study or
-  many, and whether cohorts belong to one project or are shared across projects through tags or
-  groups instead of project ownership. On 2026-10-09 the user leaned toward one study per project
-  but saw cases for several, and questioned whether projects are needed at all versus tagging or
-  grouping cohorts. Until that is decided, today's rules (one study per project, project-owned
-  cohorts) stay in place. The general save model for other edits is still open.
+  A project holds a research brief, one or more studies, and their run history. Cohorts live in a
+  shared workspace cohort library; projects link to the cohorts they use, so one cohort can serve
+  several projects. Drafts save locally with revision control. Decided 2026-10-09: the user
+  accepted the linked-library proposal (projects keep brief, studies, and runs; cohorts move to a
+  shared library that projects link to). The general save model for edits other than renames is
+  still open.
 behaviors:
   - id: create-project
     description: New project asks for a name and research brief, saves it, and opens its Studies tab.
@@ -17,15 +16,38 @@ behaviors:
       name; it is not autosaved.
     details: >-
       Saving depends on context. Short identity edits such as a project name are committed
-      explicitly with a check icon. This behavior covers renames only; the save model for other
-      edits remains an open decision.
+      explicitly with a check icon. This behavior covers renames only.
     source:
       text: >-
         Depends on the context - if I'm renaming a project I would imagine I'd want a save button
         (mostly like a check icon)
       reference: 2026-10-09 jev-polls project thread, Giulio
   - id: project-ownership
-    description: Every cohort and study belongs to exactly one project, and a study cannot use another project's cohort.
+    description: >-
+      Every study and run belongs to exactly one project; cohorts belong to the shared library
+      and are linked to projects rather than owned by them.
+    source:
+      text: 'for q1: I like your proposal'
+      reference: >-
+        2026-10-09 jev-polls project thread, Giulio, accepting the linked cohort library proposal
+  - id: multiple-studies
+    description: A project can hold several studies, each with its own flow, reviews, and runs.
+    source:
+      text: 'for q1: I like your proposal'
+      reference: >-
+        2026-10-09 jev-polls project thread, Giulio, accepting the linked cohort library proposal
+  - id: shared-cohort-library
+    description: >-
+      The workspace keeps one cohort library. A project links existing library cohorts or creates
+      new ones, and a study can use any cohort linked to its project.
+    details: >-
+      Editing a library cohort changes it for every project that links it; runs keep the cohort
+      snapshot they used, so past results never change. Unlinking a cohort from a project does
+      not delete it from the library.
+    source:
+      text: 'for q1: I like your proposal'
+      reference: >-
+        2026-10-09 jev-polls project thread, Giulio, accepting the linked cohort library proposal
   - id: legacy-migration
     description: >-
       A workspace saved before projects existed opens under an "Existing research" project with

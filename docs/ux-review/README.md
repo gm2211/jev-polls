@@ -178,7 +178,7 @@ than satisfied, because no live TypeSafe run was made.
 | `execution/exact-response-cache` | gap | E8 |
 | `cli/protect-artifacts`, `credentials-and-security/verify-then-save` | gap | E11 |
 | `review-and-run/stale-plan-explained` | gap | H1 |
-| `agent-collaboration/clean-draft-sync` | gap | H2 |
+| `agent-collaboration/clean-draft-sync`, `agent-collaboration/field-level-merge`, `agent-collaboration/refresh-keeps-draft`, `agent-collaboration/save-conflict-resolution` | gap | H2 |
 | `review-and-run/budget-minimum-visible` | gap | H4 |
 | `interface-quality/errors-in-context` | gap | H5 |
 | `drafting/ready-provider-default` | gap | H6 |
@@ -197,7 +197,9 @@ than satisfied, because no live TypeSafe run was made.
 | `interface-quality/no-dead-ui` | gap | L7 |
 | `navigation/platform-shortcut-hint`, `live-and-replay/replay-controls` | gap | L8 |
 | `drafting/unsupported-credential-store` | gap | L9 |
+| `projects/multiple-studies`, `projects/shared-cohort-library`, `projects/project-ownership`, `projects/rename-confirm` | gap | M5, new decisions |
 
-The following are **open decisions** and are labeled as proposals in the area prose: one study or
-many per project (M5), the save model (M3), conflict resolution for agent edits (H2), run
-cancellation (H3), and URL routing (§1).
+The following are **open decisions** and are labeled as proposals in the area prose: the save
+model beyond renames (M3), run cancellation (H3), and URL routing (§1). Decided on 2026-10-09:
+field-level merging of agent edits (H2) and a shared cohort library with several studies per
+project (M5).
