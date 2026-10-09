@@ -109,3 +109,13 @@ behaviors:
       reference: >-
         jev-polls project chat, Giulio, 2026-10-09, with a screenshot of the study title repeated
         in "Step settings · 1. <same question>"
+  - id: answer-kind-first
+    description: >-
+      Editing an Ask cohort step starts with "What kind of answer?": Yes / no, Compare options or
+      Ordered scale, each with a one-line explanation, before the question text, name or personas.
+    details: >-
+      Shown first on the step panel's Question tab and in Step settings. The app has no separate
+      ranking type; Compare options ranks the options by preference, and its hint says so.
+    source:
+      text: "first step should be choosing question tipe: yes / no, ranking, noul (or whatever the jev types are)"
+      reference: jev-polls project chat, Giulio, 2026-10-09, with a screenshot of Step settings
