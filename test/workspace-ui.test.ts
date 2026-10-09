@@ -2238,7 +2238,8 @@ test('project entry and back navigation visit every breadcrumb level and preserv
   act(null,{dataset:{act:'open-project',id:'existing-research'}});
   assert.equal(S.pipelineId,null);assert.equal(S.stageId,null);assert.equal(S.tab,'studies');assert.equal(S.studyLibrary,true);
   assert.doesNotMatch(html(),/aria-label="Project sections"|class="project-overview"/);
-  assert.match(html(),/data-act="projects">Projects<\/button>.*data-act="project-overview">Existing research<\/button>.*<span aria-current="page">Studies<\/span>/);
+  // Section pages end the trail at the project; the selected tab right under it names the section.
+  assert.match(html(),/data-act="projects">Projects<\/button>.*<span aria-current="page">Existing research<\/span><\/li><\/ol><\/nav><\/div><div class="project-tabs">/);
   assert.match(html(),/Your research questions/);
   assert.match(html(),/class="breadcrumb-link" data-act="projects">Projects/);
   act(null,{dataset:{act:'open-pipeline',id:'study'}});
@@ -2761,7 +2762,7 @@ test('one breadcrumb trail covers creation, cohorts, personas, settings and live
   }
   trail(['Projects']);act(null,{dataset:{act:'new-project'}});trail(['Projects','New project']);
   act(null,{dataset:{act:'open-project',id:'existing-research'}});
-  act(null,{dataset:{act:'tab',tab:'cohorts'}});trail(['Projects','Existing research','Cohorts']);
+  act(null,{dataset:{act:'tab',tab:'cohorts'}});trail(['Projects','Existing research']);
   act(null,{dataset:{act:'open-cohort',id:'cohort'}});trail(['Projects','Existing research','Cohorts','Original cohort']);
   act(null,{dataset:{act:'open-persona',id:'person'}});trail(['Projects','Existing research','Cohorts','Original cohort','Adult participant']);
   S.doc.cohorts[0].personas[0].background='Unsaved background';S.dirty=true;
@@ -2774,7 +2775,7 @@ test('one breadcrumb trail covers creation, cohorts, personas, settings and live
   act(null,{dataset:{act:'project-settings'}});trail(['Projects','Existing research','Project settings']);
   S.snap.runs=[{id:'run-1',projectId:S.projectId,pipelineName:'Original study',status:'running',message:'Working',createdAt:new Date().toISOString(),liveMembers:[]}];
   act(null,{dataset:{act:'tab',tab:'runs'}});trail(['Projects','Existing research','Runs','Original study · run-1']);
-  act(null,{dataset:{act:'live-close'}});trail(['Projects','Existing research','Runs']);
+  act(null,{dataset:{act:'live-close'}});trail(['Projects','Existing research']);
   assert.equal(S.doc.cohorts[0].personas[0].background,'Unsaved background');assert.equal(S.dirty,true);
   S.doc.projects.find((p:any)=>p.id===S.projectId).pipelineIds=[];
   act(null,{dataset:{act:'project-overview'}});trail(['Projects','Existing research','Studies','New study']);
