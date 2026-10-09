@@ -1079,7 +1079,7 @@ test('projects start from a question and assign cohorts only after an explicit c
   const before = JSON.stringify(S.doc);
   selectProject('existing-research');
   assert.equal(S.tab, 'studies');
-  assert.equal(S.pipelineId,null);assert.match(html(),/Your research questions/);
+  assert.equal(S.pipelineId,null);assert.match(html(),/<h1 tabindex="-1">Studies<\/h1>/);
   act(null,{dataset:{act:'open-pipeline',id:'study'}});
   assert.match(html(), /<h1[^>]*>Which direction should we choose\?<\/h1>/);
   assert.match(html(), /aria-label="Study editor"/);assert.doesNotMatch(html(), /id="tab-cohorts"/);
@@ -1091,8 +1091,8 @@ test('projects start from a question and assign cohorts only after an explicit c
 
   S.doc.pipelines = []; S.doc.projects[0].pipelineIds = [];
   S.tab = 'studies'; render();
-  assert.match(html(), /What question do you want to answer\?/);
-  assert.doesNotMatch(html(), /data-act="new-cohort"|A clean research bench/);
+  assert.match(html(), /<button type="button" class="empty-create" data-act="create-study">/);
+  assert.doesNotMatch(html(), /data-act="new-cohort"|A clean research bench|data-act="draft-panel-open"/);
   assert.equal(freshPipeline('Question first').cohorts.audience, '');
   S.preferredCohortId = 'cohort';
   assert.equal(freshPipeline('Use this audience').cohorts.audience, 'cohort');
@@ -1613,14 +1613,14 @@ test('workspace tabs clear cohort selections and open the study library while pr
   act(null, { dataset: { act: 'tab', tab: 'studies' } });
   assert.equal(S.pipelineId, null);
   assert.match(browser.element('app').innerHTML, /<nav class="app-sidebar" aria-label="Project">/);
-  assert.match(browser.element('app').innerHTML, /Your research questions/);
+  assert.match(browser.element('app').innerHTML, /<h1 tabindex="-1">Studies<\/h1>/);
   assert.deepEqual(JSON.parse(JSON.stringify(S.doc)), JSON.parse(JSON.stringify(draft)));
 });
 
 
 test('project detail submission saves metadata and pipeline creation assigns ownership', async () => {
   const browser = browserHarness(); await settle();
-  const { S, render } = browser.client;
+  const { S, render, act } = browser.client;
   const submit = (kind: string, values: Record<string, string>) => {
     const form = { dataset: { form: kind }, values };
     browser.listeners.get('submit')!({ target: { closest: () => form }, preventDefault() {} });
@@ -1631,19 +1631,32 @@ test('project detail submission saves metadata and pipeline creation assigns own
   assert.equal(S.doc.projects[0].name, 'Renamed project');
   assert.equal(S.doc.projects[0].description, 'Updated research brief');
   S.doc.pipelines = []; S.doc.projects[0].pipelineIds = []; S.pipelineId = null; S.tab = 'studies'; render();
-  assert.match(browser.element('app').innerHTML, /data-form="new-pipeline"/);
-  submit('new-pipeline', { question: 'Which service is preferred?' });
+  assert.match(browser.element('app').innerHTML, /class="empty-create" data-act="create-study"/);
+  act(null, { dataset: { act: 'create-study' } });
   assert.equal(S.doc.pipelines.length, 1);
   assert.equal(S.doc.projects[0].pipelineIds[0], S.doc.pipelines[0].id);
-  assert.equal(S.doc.pipelines[0].name, 'Renamed project study');
+  assert.equal(S.doc.pipelines[0].name, 'Study 1');
+  assert.equal(S.pipelineId, S.doc.pipelines[0].id, 'a new study opens straight away');
   assert.equal(S.sections.pipeline, 'flow');
-  assert.equal(S.sections['phase-' + S.stageId], 'question');
-  const beforeRejected = JSON.stringify(S.doc), selectedId = S.pipelineId;
-  submit('new-pipeline', { question: 'Second pipeline?' });
-  assert.equal(S.doc.pipelines.length, 1, 'new project keeps one pipeline');
-  assert.equal(JSON.stringify(S.doc), beforeRejected);
-  assert.equal(S.pipelineId, selectedId);
-  assert.equal(S.newQuestion, 'Second pipeline?', 'rejected creation preserves typed question');
+  assert.match(browser.element('app').innerHTML, /data-form="study-title"[\s\S]*placeholder="What do you want to find out\?"/);
+  browser.listeners.get('submit')!({ target: { closest: () => ({ dataset: { form: 'study-title', id: S.pipelineId }, values: { question: 'Which service is preferred?' } }) }, preventDefault() {} });
+  const created = S.doc.pipelines[0];
+  assert.equal(created.description, 'Which service is preferred?');
+  assert.equal(created.context.decisionQuestion, 'Which service is preferred?');
+  assert.equal(Object.values(created.stages[0].questions)[0].label, 'Which service is preferred?', 'an empty first question takes the study question');
+  assert.match(browser.element('app').innerHTML, /<h1 tabindex="-1">Which service is preferred\?<\/h1>/);
+  act(null, { dataset: { act: 'study-title-edit' } });
+  browser.listeners.get('submit')!({ target: { closest: () => ({ dataset: { form: 'study-title', id: created.id }, values: { question: '  ' } }) }, preventDefault() {} });
+  assert.equal(created.description, 'Which service is preferred?', 'a blank question is refused');
+  assert.match(browser.element('app').innerHTML, /data-form="study-title"/);
+  act(null, { dataset: { act: 'study-title-cancel' } });
+  assert.doesNotMatch(browser.element('app').innerHTML, /data-form="study-title"/);
+  act(null, { dataset: { act: 'back-studies' } });
+  assert.match(browser.element('app').innerHTML, /class="create-row study-create-row" data-act="create-study"/);
+  act(null, { dataset: { act: 'create-study' } });
+  assert.equal(S.doc.pipelines.length, 2, 'a project holds several studies');
+  assert.equal(S.doc.pipelines[1].name, 'Study 2');
+  assert.deepEqual(S.doc.projects[0].pipelineIds, S.doc.pipelines.map((p: any) => p.id));
 });
 
 
@@ -2262,7 +2275,7 @@ test('project entry and back navigation visit every breadcrumb level and preserv
   assert.doesNotMatch(html(),/aria-label="Project sections"|class="project-overview"/);
   // Section pages end the trail at the project; the selected tab right under it names the section.
   assert.match(html(),/data-act="projects">Projects<\/button>.*<span aria-current="page">Existing research<\/span><\/li><\/ol><\/nav><\/div>/);assert.match(html(),/<nav class="app-sidebar"/);
-  assert.match(html(),/Your research questions/);
+  assert.match(html(),/<h1 tabindex="-1">Studies<\/h1>/);
   assert.match(html(),/class="breadcrumb-link" data-act="projects">Projects/);
   act(null,{dataset:{act:'open-pipeline',id:'study'}});
   assert.match(html(),/data-act="projects">Projects<\/button>.*data-act="project-overview">Existing research<\/button>.*data-act="back-studies">Studies<\/button>/);
@@ -2270,10 +2283,10 @@ test('project entry and back navigation visit every breadcrumb level and preserv
   S.doc.pipelines[0].description='Unfinished study question';S.dirty=true;
   S.sections['setup-wizard-study-panel-answer']='options';const before=JSON.stringify(S.doc);
   act(null,{dataset:{act:'back-studies'}});assert.equal(S.projectId,'existing-research');assert.equal(S.pipelineId,null);
-  assert.match(html(),/Your research questions/);
+  assert.match(html(),/<h1 tabindex="-1">Studies<\/h1>/);
   act(null,{dataset:{act:'open-pipeline',id:'study'}});
   act(null,{dataset:{act:'project-overview'}});assert.equal(S.projectId,'existing-research');assert.equal(S.tab,'studies');assert.equal(S.studyLibrary,true);assert.equal(S.pipelineId,null);assert.equal(S.stageId,null);
-  assert.match(html(),/Your research questions/);
+  assert.match(html(),/<h1 tabindex="-1">Studies<\/h1>/);
   act(null,{dataset:{act:'projects'}});assert.equal(S.projectId,null);
   act(null,{dataset:{act:'open-project',id:'existing-research'}});
   assert.equal(S.pipelineId,null);assert.equal(S.tab,'studies');assert.equal(S.studyLibrary,true);
@@ -2298,7 +2311,7 @@ test('every project tab selects its matching panel directly and keeps pending st
   assert.equal(q.label,'Which title should we choose?','leaving editor flushes pending fields before render');
   root.querySelectorAll=()=>[];
   const before=JSON.stringify(S.doc);
-  for(const [tab,label,content] of [['studies','Studies','Your research questions'],['cohorts','Cohorts','Your virtual cohorts'],['runs','Runs','Study runs']]){
+  for(const [tab,label,content] of [['studies','Studies','<h1 tabindex="-1">Studies</h1>'],['cohorts','Cohorts','<h1 tabindex="-1">Cohorts</h1>'],['runs','Runs','Study runs']]){
     click({act:'tab',tab});
     const links=[...html().matchAll(/<button[^>]*class="side-link"[^>]*data-act="tab"[^>]*>/g)].map(match=>match[0]);
     assert.equal(links.length,3);
@@ -2335,7 +2348,7 @@ test('study navigation has clear scope, a reachable single-study library and con
   act(null,{dataset:{act:'section-view',sectionKey:'pipeline',sectionId:'phase'}});
   assert.match(browser.element('app').innerHTML,/Keep typed detail/);
   act(null,{dataset:{act:'back-studies'}});assert.equal(S.pipelineId,null);render();html=browser.element('app').innerHTML;
-  assert.match(html,/Your studies|Your research questions/);assert.match(html,/<nav class="app-sidebar"/);assert.doesNotMatch(html,/data-act="new-study"|data-form="new-pipeline"/);
+  assert.match(html,/<h1 tabindex="-1">Studies<\/h1>/);assert.match(html,/<nav class="app-sidebar"/);assert.doesNotMatch(html,/data-act="new-study"|data-form="new-pipeline"/);
   assert.match(html,/<button type="button" class="listrow study-list-row" data-act="open-pipeline" data-id="study" aria-label="Open study: /);assert.doesNotMatch(html,/>Open study<|<div class="listrow">/);
   S.studyComposer=true;render();assert.doesNotMatch(browser.element('app').innerHTML,/data-form="new-pipeline"/);
   act(null,{dataset:{act:'new-study'}});assert.equal(S.studyComposer,false);assert.doesNotMatch(browser.element('app').innerHTML,/data-form="new-pipeline"/);
@@ -2795,7 +2808,7 @@ test('one breadcrumb trail covers creation, cohorts, personas, settings and live
   act(null,{dataset:{act:'live-close'}});trail(['Projects','Existing research']);
   assert.equal(S.doc.cohorts[0].personas[0].background,'Unsaved background');assert.equal(S.dirty,true);
   S.doc.projects.find((p:any)=>p.id===S.projectId).pipelineIds=[];
-  act(null,{dataset:{act:'project-overview'}});trail(['Projects','Existing research','Studies','New study']);
+  act(null,{dataset:{act:'project-overview'}});trail(['Projects','Existing research']);
 });
 
 
@@ -2816,8 +2829,8 @@ test('new study command exists only for empty projects and opens creation from a
   S.doc.projects.find((p:any)=>p.id===S.projectId).pipelineIds=[];S.pipelineId=null;S.tab='cohorts';
   assert.equal(commandEntries().some((entry:any)=>entry.id==='new-study'),true);
   commandExecute('new-study');
-  assert.equal(S.tab,'studies');assert.equal(S.studyComposer,true);
-  assert.match(browser.element('app').innerHTML,/data-form="new-pipeline"/);
+  assert.equal(S.tab,'studies');assert.equal(S.doc.pipelines.filter((p:any)=>p.id===S.pipelineId).length,1);
+  assert.match(browser.element('app').innerHTML,/data-form="study-title"/);
   assert.equal(browser.bodies.length,0);
 });
 
@@ -2894,4 +2907,15 @@ test('project sidebar lists sections with counts and opens a study from any sect
   assert.doesNotMatch(sidebar(), /data-tab="studies" aria-current="page"/, 'the open study, not the section, is current');
   act(null, { dataset: { act: 'side-study', id: 'missing' } });
   assert.equal(S.pipelineId, study.id, 'an unknown study id changes nothing');
+});
+
+test('an empty cohort list is one click target and a full one ends with a create card', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, act, render } = browser.client;
+  const html = () => browser.element('app').innerHTML;
+  act(null, { dataset: { act: 'tab', tab: 'cohorts' } });
+  assert.match(html(), /class="create-row pool-create" data-act="new-cohort"/);
+  S.doc.projects.find((p: any) => p.id === S.projectId).cohortIds = []; render();
+  assert.match(html(), /<button type="button" class="empty-create" data-act="new-cohort">[\s\S]*?<strong>New cohort<\/strong>/);
+  assert.doesNotMatch(html(), /data-tab="agents"/);
 });

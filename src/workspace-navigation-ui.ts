@@ -9,7 +9,6 @@ function workspaceBreadcrumbItems(){
   if(S.tab==='studies'){
     const study=pipeline();
     if(study){items.push({label:study.name||studyQuestion(study),action:'edit-review'});if(S.plan)items.push({label:'Review run'})}
-    else if(!projectPipelines().length)items.push({label:'New study'});
   }else if(S.tab==='cohorts'){
     const c=S.cohortComposer?projectCohorts().find(c=>c.id===S.cohortTarget):cohort();
     if(c)items.push({label:c.name||'Cohort',action:'breadcrumb-cohort'});

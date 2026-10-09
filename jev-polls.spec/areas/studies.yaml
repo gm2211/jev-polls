@@ -5,7 +5,13 @@ prose: >-
   selected step's Question, Cohort, and Inputs. Named inputs pass typed outputs from earlier steps.
 behaviors:
   - id: create-study
-    description: Entering a question and choosing Create study opens a study with one Ask cohort step on its canvas.
+    description: >-
+      New study creates a study at once and opens it with one Ask cohort step on its canvas and
+      the study question field focused; saving the question also fills an empty first question.
+    details: >-
+      A project can hold several studies (projects.multiple-studies); new studies are named
+      "Study N" until their question is set. Changed 2026-10-09 from a question-first form, per
+      study-journey.empty-list-creates.
   - id: step-kinds
     description: >-
       Steps are Ask cohort (one or more questions to a sampled cohort), Combine answers (weighted

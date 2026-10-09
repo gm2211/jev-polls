@@ -53,7 +53,7 @@ function commandExecute(id){
   else if(row.cohort){act(null,{dataset:{act:'open-cohort',id:row.cohort}});if(row.persona)act(null,{dataset:{act:'open-persona',id:row.persona}})}
   else if(row.run){S.tab='runs';S.liveRunId=row.run;S.liveStage='';S.liveMemberKey='';S.plan=null;render()}
   else if(row.action==='new-project'){selectProject(null);act(null,{dataset:{act:'new-project'}})}
-  else if(row.action==='new-study'){S.tab='studies';act(null,{dataset:{act:'new-study'}})}
+  else if(row.action==='new-study'){act(null,{dataset:{act:'create-study'}})}
   else if(row.action==='ai-open'){render();act(null,{dataset:{act:'ai-open'}})}
   else if(row.action)act(null,{dataset:{act:row.action,tab:row.tab}});
   else render();
