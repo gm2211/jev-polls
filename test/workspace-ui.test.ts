@@ -2573,6 +2573,32 @@ test('project deletion confirms scope, preserves cancel, and removes only owned 
   assert.equal(browser.storage.has('jev-local-job:http://127.0.0.1:4180:existing-research'),false);assert.equal(browser.storage.has('jev-local-job:http://127.0.0.1:4180:keep-project'),true);
 });
 
+test('study rows have a quick delete that confirms before removing only that study',async()=>{
+  const browser=browserHarness();await settle();const {S,act,render}=browser.client;
+  const other=structuredClone(S.doc.pipelines[0]);other.id='other-study';other.description='Keep this study';S.doc.pipelines.push(other);S.doc.projects[0].pipelineIds.push(other.id);
+  const target=S.doc.pipelines[0],cohorts=JSON.stringify(S.doc.cohorts);
+  S.tab='studies';S.pipelineId=null;render();
+  const html=browser.element('app').innerHTML;
+  assert.match(html,/class="study-list-item"><button[^>]*data-act="open-pipeline" data-id="[^"]+"[\s\S]*?<\/button><button[^>]*data-act="delete-study" data-id="/);
+  assert.match(html,/aria-label="Delete study: [^"]+"/);
+  const before=JSON.stringify(S.doc);
+  S.snap.activeRun={pipelineId:target.id};assert.throws(()=>act(null,{dataset:{act:'delete-study',id:target.id}}),/run to finish/);
+  assert.equal(browser.element('deleteStudyDialog').open,false);S.snap.activeRun=null;
+  act(null,{dataset:{act:'delete-study',id:target.id}});
+  assert.equal(browser.element('deleteStudyDialog').open,true);assert.match(browser.element('deleteStudyDescription').textContent,/Remove “.+” and its \d+ steps? from this draft\?/);
+  assert.equal(JSON.stringify(S.doc),before);
+  act(null,{dataset:{act:'delete-study-close'}});assert.equal(browser.element('deleteStudyDialog').open,false);assert.equal(JSON.stringify(S.doc),before);
+  act(null,{dataset:{act:'delete-study',id:target.id}});
+  S.remoteRevision=S.revision+1;assert.throws(()=>act(null,{dataset:{act:'delete-study-confirm'}}),/Workspace changed/);S.remoteRevision=null;
+  act(null,{dataset:{act:'delete-study-confirm'}});
+  assert.equal(browser.element('deleteStudyDialog').open,false);
+  assert.equal(JSON.stringify(S.doc.pipelines.map(p=>p.id)),'["other-study"]');assert.equal(JSON.stringify(S.doc.projects[0].pipelineIds),'["other-study"]');
+  assert.equal(JSON.stringify(S.doc.cohorts),cohorts);assert.equal(S.dirty,true);assert.equal(browser.bodies.length,0);
+  assert.doesNotMatch(browser.element('app').innerHTML,new RegExp('data-id="'+target.id+'"'));
+  act(null,{dataset:{act:'delete-study',id:'other-study'}});act(null,{dataset:{act:'delete-study-confirm'}});
+  assert.equal(S.doc.pipelines.length,0);assert.match(browser.element('app').innerHTML,/class="empty-create" data-act="create-study"/);
+});
+
 test('project deletion handles last project and blocks stale or newly active confirmations',async()=>{
   const browser=browserHarness();await settle();const {S,act}=browser.client;
   act(null,{dataset:{act:'delete-project',id:'existing-research'}});

@@ -13,6 +13,16 @@ behaviors:
       A project can hold several studies (projects.multiple-studies); new studies are named
       "Study N" until their question is set. Changed 2026-10-09 from a question-first form, per
       study-journey.empty-list-creates.
+  - id: delete-study
+    description: >-
+      Each row in a project's studies list has a delete button that asks for confirmation before
+      removing that study from the draft; the project's cohorts and saved run reports stay.
+    details: >-
+      Blocked while the study's run is active. Like other deletions, it applies to the draft until
+      changes are saved (projects.delete-project).
+    source:
+      text: should have quick delete (with confirmation)
+      reference: jev-polls project chat, Giulio, 2026-10-09, with a screenshot of the Studies list
   - id: step-kinds
     description: >-
       Steps are Ask cohort (one or more questions to a sampled cohort), Combine answers (weighted
