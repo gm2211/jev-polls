@@ -9,7 +9,7 @@
   },
   "exports": "./dist/index.js",
   "scripts": {
-    "start": "node --import tsx src/cli.ts workspace",
+    "start": "node --import tsx src/cli.ts workspace --port 4181",
     "build": "npm run build:byos && tsc -p tsconfig.json",
     "check": "npm run build:byos && tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test test/*.test.ts",

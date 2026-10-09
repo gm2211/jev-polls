@@ -12,6 +12,13 @@ behaviors:
     source:
       text: Keep machine output as JSON on stdout and progress as JSON lines on stderr.
       reference: AGENTS.md
+  - id: fixed-workspace-port
+    description: >-
+      npm start serves the workspace on the fixed port 4181 and exits with an EADDRINUSE error
+      instead of choosing another port when 4181 is taken.
+    source:
+      text: can we please stop changing port
+      reference: Jev Polls project thread, 2026-10-09
   - id: protect-artifacts
     description: run and report refuse to replace existing artifacts unless --overwrite is given.
   - id: budget-precheck
