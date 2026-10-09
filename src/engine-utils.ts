@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { Json } from './types.js';
+import type { Json, Question, Stage } from './types.js';
 
 export function stableStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
@@ -39,4 +39,19 @@ export function isJson(value: unknown): value is Json {
 
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+export function resolveQuestion(stages: Stage[], stageId: string, questionId: string, seen = new Set<string>()): Question | undefined {
+  const key = `${stageId}.${questionId}`;
+  if (seen.has(key)) return undefined;
+  seen.add(key);
+  const stage = stages.find((candidate) => candidate.id === stageId);
+  if (!stage) return undefined;
+  if (stage.kind === 'poll') return stage.questions[questionId];
+  if (stage.kind === 'decision' && stage.outputQuestion === questionId) return resolveQuestion(stages, stage.from.stage, stage.from.question, seen);
+  if (stage.kind === 'aggregate' && stage.outputQuestion === questionId) {
+    const input = stage.inputs[0];
+    return input ? resolveQuestion(stages, input.stage, input.question, seen) : undefined;
+  }
+  return undefined;
 }

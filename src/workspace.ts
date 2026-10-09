@@ -394,7 +394,7 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
       const input = z.object({ pipelineId: safeId, projectId: safeId.optional(), provider: evaluationProvider.default('typesafe') }).strict().parse(await body(request));
       const saved = await store.read();
       let project;
-      try { project = workspacePlan(saved.document, input.pipelineId); }
+      try { project = workspacePlan(saved.document, input.pipelineId, input.provider); }
       catch (error) { throw new HttpError(400, 'INVALID_STUDY', validationMessage(error)); }
       if (input.projectId && input.projectId !== project.projectId) throw new HttpError(400, 'INVALID_STUDY', 'Pipeline does not belong to the selected project.');
       const planToken = randomBytes(24).toString('hex');
@@ -423,7 +423,7 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
         if (!currentReview || currentReview.expires < Date.now() || currentReview.pipelineId !== input.pipelineId || currentReview.provider !== input.provider || currentReview.revision !== input.revision || latest.revision !== input.revision) {
           throw new HttpError(409, 'REVIEW_REQUIRED', 'Study changed or review expired. Review it again before running.');
         }
-        const project = workspacePlan(latest.document, input.pipelineId);
+        const project = workspacePlan(latest.document, input.pipelineId, input.provider);
         if (input.projectId && input.projectId !== project.projectId) throw new HttpError(400, 'INVALID_STUDY', 'Pipeline does not belong to the selected project.');
         if (input.maxRequests < project.maxRequests) throw new HttpError(400, 'BUDGET_TOO_SMALL', 'Request budget must cover the reviewed upper bound. Reduce sample sizes or repeats first.');
         if (activeRun) throw new HttpError(409, 'RUN_IN_PROGRESS', 'A study is already running. Wait for it to finish.');

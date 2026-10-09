@@ -1,5 +1,6 @@
 import type { AuthStatus } from './auth.js';
 import type { Cohort, Pipeline, Usage } from './types.js';
+import type { StageBudget } from './request-budget.js';
 
 /** Editable drafts use the same shape as runnable artifacts; validation happens at review. */
 export interface WorkspaceProject { id: string; name: string; description: string; cohortIds: string[]; pipelineIds: string[] }
@@ -17,5 +18,5 @@ export interface WorkspaceSnapshot extends WorkspaceSaved { auth: AuthStatus; gl
 export interface WorkspacePlan {
   pipelineId: string; projectId?: string; revision: number; planToken: string; model: string; maxRequests: number; warnings: string[];
   provider?: 'typesafe' | 'gliner';
-  stages: { id: string; label: string; kind: string; dependsOn: string[]; cohort?: string; profiles?: number; repeats?: number; requests: number }[];
+  stages: { id: string; label: string; kind: string; dependsOn: string[]; cohort?: string; profiles?: number; repeats?: number; requests: number; budget?: StageBudget }[];
 }

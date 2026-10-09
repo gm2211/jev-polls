@@ -9,7 +9,8 @@ import { summarizeVotes } from './analysis.js';
 import { ProviderError, type ProviderResponseIssue } from './provider.js';
 import { validateClassifierAnswer } from './gliner-provider.js';
 import { inputSelectCompatible } from './schema.js';
-import { errorMessage, hashValue, isFiniteProbability, seededRandom, stableStringify } from './engine-utils.js';
+import { errorMessage, hashValue, isFiniteProbability, resolveQuestion, seededRandom, stableStringify } from './engine-utils.js';
+import { buildPollState, requestSizeProblem } from './request-budget.js';
 
 interface CacheEntry { version: 1; key: string; request: EvaluationRequest; evaluation: Evaluation }
 
@@ -43,6 +44,7 @@ class RequestLimiter {
 
 class RequestLimitError extends Error {}
 class InvalidEvaluationError extends Error {}
+class RequestTooLargeError extends Error {}
 
 export function validateEvaluation(evaluation: Evaluation, questions: Record<string, Question>): void {
   if (!evaluation || typeof evaluation !== 'object' || !evaluation.answers || typeof evaluation.answers !== 'object') {
@@ -306,23 +308,19 @@ export async function runPipeline(pipeline: Pipeline, cohorts: Record<string, Co
           const member = { stage: stage.id, personaId: job.persona.id, label: job.persona.label, segment: job.segmentId, age: job.persona.age, repeat: job.repeat };
           options.onMemberProgress?.({ ...member, status: 'running' });
           const requestSeed = `${options.seed}:${stage.id}:${job.persona.id}:${job.repeat}`;
-          const state: Record<string, Json> = {
-            pipelineContext: pipeline.context,
-            cohort: { id: cohort.id, name: cohort.name, population: cohort.population, description: cohort.description },
-            persona: job.persona as unknown as Json,
-            sharedContext: job.persona.attributes,
-            stageContext: stage.context ?? null,
-          };
-          if (stage.inputs !== undefined) state.inputs = resolvePollInputs(stage.inputs, stages);
-          else state.upstream = upstream.map((item) => ({ stage: item.id, label: item.label, summaries: item.summaries })) as unknown as Json;
+          const state = buildPollState(pipeline, cohort, stage, job.persona, stage.inputs !== undefined
+            ? { inputs: resolvePollInputs(stage.inputs, stages) }
+            : { upstream: upstream.map((item) => ({ stage: item.id, label: item.label, summaries: item.summaries })) as unknown as Json });
           const request: EvaluationRequest = {
             model: options.model,
             seed: requestSeed,
-            state: state as Json,
+            state,
             questions: questionsForSeed(stage.questions, requestSeed),
           };
           const requestKey = hashValue({ version: 1, provider: options.provider.name, ...(options.provider.cacheIdentity ? { providerIdentity: options.provider.cacheIdentity } : {}), request });
           try {
+            const oversized = options.provider.name === 'gliner' ? undefined : requestSizeProblem(request.state, request.questions);
+            if (oversized) throw new RequestTooLargeError(oversized);
             let evaluation = options.cacheDir && !options.refresh ? await loadCached(options.cacheDir, requestKey, request, request.questions) : undefined;
             let cacheHit = Boolean(evaluation);
             if (evaluation) usage.cacheHits += 1;
@@ -566,21 +564,6 @@ function questionSignature(question: Question): string {
   return `score:${JSON.stringify(question.criteria)}`;
 }
 
-function resolveQuestion(stages: Stage[], stageId: string, questionId: string, seen = new Set<string>()): Question | undefined {
-  const key = `${stageId}.${questionId}`;
-  if (seen.has(key)) return undefined;
-  seen.add(key);
-  const stage = stages.find((candidate) => candidate.id === stageId);
-  if (!stage) return undefined;
-  if (stage.kind === 'poll') return stage.questions[questionId];
-  if (stage.kind === 'decision' && stage.outputQuestion === questionId) return resolveQuestion(stages, stage.from.stage, stage.from.question, seen);
-  if (stage.kind === 'aggregate' && stage.outputQuestion === questionId) {
-    const input = stage.inputs[0];
-    return input ? resolveQuestion(stages, input.stage, input.question, seen) : undefined;
-  }
-  return undefined;
-}
-
 function questionsForSeed(questions: Record<string, Question>, seed: string): Record<string, Question> {
   return Object.fromEntries(Object.entries(questions).map(([id, question]) => {
     if (question.type !== 'choice') return [id, question];
@@ -596,6 +579,7 @@ function questionsForSeed(questions: Record<string, Question>, seed: string): Re
 
 function safeRequestFailure(error: unknown): string {
   if (error instanceof RequestLimitError) return 'request limit reached';
+  if (error instanceof RequestTooLargeError) return error.message;
   if (error instanceof InvalidEvaluationError) return 'invalid provider response';
   if (!(error instanceof ProviderError)) return 'provider request failed';
   if (error.code === 'TYPESAFE_RESPONSE_INVALID') {

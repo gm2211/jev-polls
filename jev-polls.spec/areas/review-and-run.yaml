@@ -31,3 +31,13 @@ behaviors:
     description: Normal runs use the selected live provider with no silent mock fallback; mock runs never enter workspace history.
   - id: one-run-at-a-time
     description: Only one workspace run is active at a time, and starting another reports that a run is in progress.
+  - id: jev-request-budget
+    description: >-
+      Review estimates each step's largest Jev request (persona details plus the longest question,
+      limit 32k tokens; plus all questions, limit 64k) and blocks a step over a limit, naming the
+      step, estimated size, limit and largest contributor; steps above 80% only warn. Each step
+      shows its largest request.
+    source:
+      text: >-
+        we're gonna have one Jev for each persona so we need to make sure that the collective size of the question with all the options and the backstory for the persona, any detail and context about the persona, those things have to be within the limits for Jev otherwise it's just not gonna work.
+      reference: 2026-10-09 jev-polls project thread, Giulio

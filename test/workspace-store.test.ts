@@ -198,7 +198,9 @@ test('planning validates references, cycles, weighted-profile coverage, and exac
   const doc = documentWith();
   const plan = workspacePlan(doc, 'study');
   assert.equal(plan.maxRequests, 6); // 3 eligible positive-weight profiles × 2 repeats.
-  assert.deepEqual(plan.stages[0], { id: 'first', label: 'First question', kind: 'poll', dependsOn: [], cohort: 'panel', profiles: 3, repeats: 2, requests: 6 });
+  const { budget, ...firstStage } = plan.stages[0]!;
+  assert.deepEqual(firstStage, { id: 'first', label: 'First question', kind: 'poll', dependsOn: [], cohort: 'panel', profiles: 3, repeats: 2, requests: 6 });
+  assert.equal(budget?.status, 'ok');
   assert.ok(plan.warnings.some((warning) => warning.includes('assumed population weight')));
   assert.ok(plan.warnings.some((warning) => warning.includes('synthetic fields')));
   assert.ok(plan.warnings.some((warning) => warning.includes('no source records')));
