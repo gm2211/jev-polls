@@ -1,0 +1,33 @@
+id: review-and-run
+name: Review and run
+prose: >-
+  Inference happens only after an explicit review of an exact saved revision with a request
+  budget. Open proposals (not yet accepted): Cancel run and a cancelled run status (docs/ux-review
+  H3).
+behaviors:
+  - id: no-implicit-inference
+    description: >-
+      Opening the workspace, connecting an account, saving, drafting, searching, and navigating
+      never start a study.
+  - id: request-plan
+    description: >-
+      Review run validates and saves, then shows each step's request count, the total upper bound
+      (sum of size × repeats), provider and model, and evidence warnings.
+  - id: plan-busy-state
+    description: A visible busy state shows while the plan is prepared, and repeated clicks have no effect.
+  - id: run-gate
+    description: >-
+      Run study requires the exact reviewed revision, a single-use plan token that expires after
+      15 minutes, and a request limit no lower than the plan bound.
+  - id: budget-minimum-visible
+    description: The request limit field shows the plan's minimum and blocks lower values before submission.
+  - id: stale-plan-explained
+    description: >-
+      When the saved revision changes or the plan expires, the review page says the plan is out of
+      date and offers Review again.
+  - id: provider-required
+    description: Without a ready evaluation provider, Run study is disabled and Set up evaluation provider is offered.
+  - id: no-mock-fallback
+    description: Normal runs use the selected live provider with no silent mock fallback; mock runs never enter workspace history.
+  - id: one-run-at-a-time
+    description: Only one workspace run is active at a time, and starting another reports that a run is in progress.

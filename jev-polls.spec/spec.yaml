@@ -1,0 +1,36 @@
+version: '2'
+name: Jev Polls
+description: >-
+  Local research instrument for synthetic audience studies. Researchers define weighted cohorts of
+  adult synthetic personas, connect typed questions into an acyclic study flow, review an explicit
+  request budget, run live evaluations, and inspect weighted, uncertainty-preserving results in the
+  browser workspace, standalone reports, the CLI, and MCP tools for existing agents.
+target:
+  type: web
+  url: http://127.0.0.1:4180/
+assumptions:
+  - description: The workspace server is running locally (jev-polls workspace or npm start).
+    check: curl -sf http://127.0.0.1:4180/status
+  - description: >-
+      Live evaluation behaviors need a verified TypeSafe key or the optional local GLiNER setup.
+      Offline checks use the developer-only mock provider.
+narrative_path: ../docs/ux-review/README.md
+test_dir: test/
+areas:
+  - areas/overview.yaml
+  - areas/vocabulary.yaml
+  - areas/projects.yaml
+  - areas/cohorts.yaml
+  - areas/cohort-generation.yaml
+  - areas/studies.yaml
+  - areas/review-and-run.yaml
+  - areas/execution.yaml
+  - areas/live-and-replay.yaml
+  - areas/analysis.yaml
+  - areas/reports.yaml
+  - areas/drafting.yaml
+  - areas/agent-collaboration.yaml
+  - areas/navigation.yaml
+  - areas/credentials-and-security.yaml
+  - areas/interface-quality.yaml
+  - areas/cli.yaml

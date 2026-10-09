@@ -1,0 +1,23 @@
+id: agent-collaboration
+name: Agent collaboration (MCP)
+prose: >-
+  Existing agents read and edit the same workspace through local MCP tools. Open decision (not yet
+  accepted): how the browser resolves an agent edit that arrives while the user has unsaved changes
+  (per-item choice or blocking the agent until the user saves) (docs/ux-review H2).
+behaviors:
+  - id: loopback-only
+    description: The MCP adapter accepts only a loopback workspace URL and refuses redirects.
+  - id: revision-checked-upserts
+    description: Agent saves are revision-checked and project-scoped, and creating a study in a multi-project workspace requires its project.
+  - id: explicit-agent-runs
+    description: run_study requires the reviewed revision, a fresh plan token, and a request budget.
+  - id: no-credential-relay
+    description: MCP tools never ask for, return, or log account keys.
+  - id: clean-draft-sync
+    description: With no unsaved edits, the browser picks up agent saves automatically and says what changed.
+  - id: dirty-draft-preserved
+    description: >-
+      With unsaved edits, agent saves never overwrite them; the browser shows a conflict notice and
+      lets the user resolve it without exporting files.
+  - id: guide-covers-projects
+    description: The agent guide's MCP workflow includes creating or selecting a project before saving cohorts or studies.

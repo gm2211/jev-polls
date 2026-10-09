@@ -1,0 +1,36 @@
+id: overview
+name: Product boundaries
+prose: >-
+  Jev Polls is an agent-driven research companion. The researcher's own agent or the local drafting
+  assistant prepares cohorts and studies; TypeSafe (or local GLiNER) supplies typed judgments per
+  synthetic profile. Results are modeled judgments, never observed human data. These boundaries
+  apply to every other area.
+behaviors:
+  - id: synthetic-not-observed
+    description: >-
+      No surface presents mock distributions, synthetic personas, or simulated ballots as observed
+      human data.
+    details: >-
+      Reports, the workspace, CLI output, and exports label results as synthetic cohort judgments.
+      A large number of profiles is never described as an equivalent number of surveyed people.
+    source:
+      text: Never present mock distributions or synthetic profiles as observed human data.
+      reference: AGENTS.md
+  - id: sourced-versus-synthetic
+    description: Sourced facts and synthetic assumptions stay distinguishable in every artifact.
+    details: >-
+      Profiles stay question-independent: no answer preference is inserted to steer a result.
+      Weighting is always explicit, with its basis recorded.
+    source:
+      text: >-
+        Preserve sourced facts versus synthetic assumptions, profile-independent question
+        preparation, and explicit weighting.
+      reference: AGENTS.md
+  - id: empty-start
+    description: A new workspace starts empty; example content is loaded only on explicit request.
+  - id: local-only
+    description: The workspace serves only on the user's own computer and keeps drafts and reports in the local workspace directory.
+  - id: typed-outputs
+    description: >-
+      Study results are typed judgments and probabilities (Choice, Score, Yes/No); no text
+      generation is implied by a result.

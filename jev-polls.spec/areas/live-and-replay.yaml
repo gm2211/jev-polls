@@ -1,0 +1,19 @@
+id: live-and-replay
+name: Live view and replay
+behaviors:
+  - id: live-lanes
+    description: >-
+      Watch voting shows real waiting, thinking, evaluated, and failed member evaluations, and
+      selecting a member shows its returned answers or recorded failure.
+  - id: resilient-polling
+    description: Live status survives transient fetch errors with a visible reconnecting notice.
+  - id: replay-without-models
+    description: >-
+      Replay voting uses saved member order, never calls a model, and states that it does not
+      reflect recorded timing.
+  - id: replay-controls
+    description: >-
+      Replay offers play, pause, step, restart, 1×/2×/4× speed, and a position slider that updates
+      while dragging; selecting a member pauses playback.
+  - id: evaluations-not-shares
+    description: Live token counts describe evaluations, not weighted audience shares.

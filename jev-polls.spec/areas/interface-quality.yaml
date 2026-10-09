@@ -1,0 +1,34 @@
+id: interface-quality
+name: Interface quality
+prose: >-
+  The workspace is a working research instrument: clear readouts, aligned records, visible
+  controls, one focused task surface (docs/design-direction.md).
+behaviors:
+  - id: focused-tabs-pagination
+    description: Views prefer focused tabs and pagination over long pages or stacked editors.
+    source:
+      text: Prefer focused tabs and pagination over long pages or stacked editors.
+      reference: AGENTS.md
+  - id: no-controls-in-disclosures
+    description: Buttons and editable controls never sit inside collapsible disclosures.
+    source:
+      text: Keep buttons and editable controls outside collapsible disclosures.
+      reference: AGENTS.md
+  - id: reachable-actions
+    description: Navigation, save actions, and page controls stay easy to reach.
+  - id: responsive-no-clipping
+    description: >-
+      Every view works at 375, 768, 1024, and 1440px and under zoom with natural overflow and no
+      clipped controls.
+  - id: target-size
+    description: Interactive targets are at least 44px and keyboard focus is visible.
+  - id: theme-and-accent
+    description: >-
+      Primary actions use orange and successful progress uses steel blue; light and dark modes stay
+      readable, and the initial theme follows the OS preference.
+  - id: errors-in-context
+    description: Errors appear in the dialog or field that raised them.
+  - id: destructive-actions-recoverable
+    description: Removing steps, personas, segments, sources, questions, or inputs, or replacing options, can be undone or is confirmed.
+  - id: no-dead-ui
+    description: Every view and control in the workspace is reachable.
