@@ -1,0 +1,15 @@
+id: vocabulary
+name: Vocabulary
+prose: >-
+  User-facing copy uses one term per concept. Saved JSON and CLI contracts keep their existing keys
+  (pipeline, stage, poll, aggregate, decision, noul).
+behaviors:
+  - id: one-term-per-concept
+    description: >-
+      The workspace, README, agent guide, and reports use Project, Study, Step, Question, Cohort,
+      Persona, Segment, Input, and Run for user-facing concepts.
+    details: >-
+      Study corresponds to the pipeline contract; Step to a stage; Ask cohort, Combine answers, and
+      Final result to poll, aggregate, and decision stages; Yes/No to Noul.
+  - id: documented-labels-exist
+    description: Every control label named in the README or agent guide exists in the workspace with that wording.

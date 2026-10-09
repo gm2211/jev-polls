@@ -1,0 +1,34 @@
+id: execution
+name: Execution
+prose: Deterministic, bounded, validated execution of a reviewed study.
+behaviors:
+  - id: topological-parallel
+    description: Steps run in dependency order, and ready steps run in parallel under one global concurrency limit.
+  - id: request-budget
+    description: New provider requests never exceed the request limit; cache hits do not count.
+  - id: seeded-sampling
+    description: >-
+      Sampling is stratified by segment, without replacement, from the run seed, with at least one
+      persona per positive-weight segment; Choice option order is shuffled per request from the seed.
+  - id: batched-per-persona
+    description: All questions for one persona in a step go in one request; unrelated personas stay isolated.
+  - id: validated-before-use
+    description: >-
+      Provider answers are validated (IDs, types, distributions summing to 1, consistent winners and
+      means) before caching or aggregation; malformed answers fail the respondent.
+  - id: exact-response-cache
+    description: >-
+      Validated responses are cached by provider, endpoint, and exact request and revalidated on
+      read; --refresh bypasses the cache.
+  - id: failed-respondent-fails-step
+    description: >-
+      One failed respondent fails its step; descendants are skipped, the run is marked failed, and
+      partial results are saved.
+  - id: skipped-source-skips
+    description: A Combine answers or Final result step whose source was skipped is itself skipped, not failed.
+  - id: repeats-not-people
+    description: Repeats are averaged per persona and never increase the respondent count.
+  - id: locale-independent-hashes
+    description: Study hashes, cache keys, and derived seeds are identical regardless of OS locale.
+  - id: decision-keeps-uncertainty
+    description: A Final result step copies its source summary, including uncertainty, and declares a selection without manufacturing certainty.

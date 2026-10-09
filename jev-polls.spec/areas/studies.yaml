@@ -1,0 +1,44 @@
+id: studies
+name: Study flow
+prose: >-
+  A study is an acyclic flow of steps. The workspace opens it on a canvas with an inspector for the
+  selected step's Question, Cohort, and Inputs. Named inputs pass typed outputs from earlier steps.
+behaviors:
+  - id: create-study
+    description: Entering a question and choosing Create study opens a study with one Ask cohort step on its canvas.
+  - id: step-kinds
+    description: >-
+      Steps are Ask cohort (one or more questions to a sampled cohort), Combine answers (weighted
+      compatible inputs), or Final result (a declared selection from a Choice source).
+  - id: question-types
+    description: >-
+      Questions are Choice (2–255 options), Score (2–10 ordered levels), or Yes/No.
+  - id: connect-outputs
+    description: >-
+      Connect output then Connect here adds a named input to the target step and makes the source
+      a dependency; cycles and incompatible projections are refused with the reason.
+  - id: input-projections
+    description: >-
+      An input selects a source output's summary, winner (Choice), mean (Score, Yes/No),
+      probabilities (Choice, Score), or weighted responses.
+  - id: named-inputs-visible
+    description: >-
+      Users can see and rename each input name in the default editor and reference it as
+      inputs.<name> in question text.
+  - id: branches-and-joins
+    description: >-
+      Steps support join all or any and conditions built from all, any, not, and comparisons on a
+      direct dependency's winner, margin, top probability, or mean.
+    details: >-
+      Winner, margin, and top probability apply to Choice only. Schema, engine, and docs follow the
+      same rule.
+  - id: optional-inputs-null
+    description: An input from a skipped optional branch is passed as null.
+  - id: sample-size-bounds
+    description: >-
+      Sample size lies between the number of positive-weight segments and the number of eligible
+      personas; repeats lie between 1 and 100.
+  - id: multiple-cohorts
+    description: Different steps can consult different cohorts.
+  - id: structured-context
+    description: Step and shared context can be edited without writing raw JSON.

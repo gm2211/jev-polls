@@ -1,0 +1,22 @@
+id: cli
+name: CLI
+behaviors:
+  - id: commands
+    description: >-
+      The CLI provides init, schema, guide, validate, plan, workspace, connect, mcp, mcp-config, run,
+      report, compare, simulate, cohort list/import/inspect/sample, and auth status/set/check.
+  - id: json-io
+    description: >-
+      Machine output is JSON on stdout, progress is JSON lines on stderr, failures exit nonzero, and
+      mcp reserves stdout for JSON-RPC.
+    source:
+      text: Keep machine output as JSON on stdout and progress as JSON lines on stderr.
+      reference: AGENTS.md
+  - id: protect-artifacts
+    description: run and report refuse to replace existing artifacts unless --overwrite is given.
+  - id: budget-precheck
+    description: run refuses a request limit below the plan bound before making any request.
+  - id: connect-imports-only
+    description: connect imports a CLI study into the workspace idempotently without running it and refuses conflicting reimports.
+  - id: plan-without-credentials
+    description: plan reports the request bound without credentials or model calls.

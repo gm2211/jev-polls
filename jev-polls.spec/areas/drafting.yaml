@@ -1,0 +1,25 @@
+id: drafting
+name: Drafting assistants
+prose: >-
+  The drafting assistant uses the user's ChatGPT subscription or an installed, authenticated Codex
+  or Claude CLI to propose cohorts and studies. It cannot browse for evidence.
+behaviors:
+  - id: provider-choice
+    description: >-
+      The AI pill lets the user choose a drafting provider and model once for every cohort and
+      study.
+  - id: ready-provider-default
+    description: When any drafting provider is ready, a ready one is selected by default.
+  - id: proposals-explicit
+    description: Proposals stay separate until the user applies them; discarding leaves the workspace unchanged.
+  - id: isolated-agent-runs
+    description: >-
+      One drafting job runs at a time, prompts go via stdin, work happens in an isolated temporary
+      directory with bounded time and output, cancellation stops it, and CLI diagnostics are never
+      shown.
+  - id: context-matched-panel
+    description: Draft with assistant opened from Cohorts drafts cohorts; opened from Studies it drafts a study.
+  - id: unsupported-credential-store
+    description: >-
+      Where no supported credential store exists, ChatGPT sign-in explains the limitation and
+      points to Codex or Claude Code.

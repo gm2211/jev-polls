@@ -1,0 +1,15 @@
+id: analysis
+name: Analysis
+behaviors:
+  - id: weighted-summaries
+    description: >-
+      Summaries report weighted probabilities, winner, margin, top probability, and mean with
+      segment and repeat breakdowns.
+  - id: compare-like-for-like
+    description: >-
+      compare refuses runs with different providers, models, or study graphs and notes changes in
+      cohort, weights, respondents, or repeats.
+  - id: conditional-simulation
+    description: >-
+      simulate draws seeded virtual votes from saved distributions without model calls and labels
+      intervals as conditional on model outputs, not population confidence.

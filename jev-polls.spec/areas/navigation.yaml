@@ -1,0 +1,18 @@
+id: navigation
+name: Navigation and search
+prose: >-
+  Open proposal (not yet accepted): URL-addressable views so reload, Back, and links return to the
+  same view (today every view is in-memory state, docs/ux-review §1).
+behaviors:
+  - id: breadcrumbs
+    description: A breadcrumb trail moves back through projects, studies, cohorts, personas, and run review.
+  - id: command-palette
+    description: >-
+      Cmd+K (Ctrl+K elsewhere) searches every workspace destination, including unsaved edits;
+      arrow keys move through every result and Enter opens it.
+  - id: platform-shortcut-hint
+    description: The shortcut hint shows ⌘ K on macOS and Ctrl K elsewhere.
+  - id: ask-ai
+    description: >-
+      Ask AI or Shift+Enter sends a natural-language request that can search, navigate to a
+      validated result, or open a prefilled creation or editing flow, without saving or running.

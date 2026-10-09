@@ -1,0 +1,42 @@
+id: cohorts
+name: Cohorts
+prose: >-
+  A cohort is a weighted set of adult synthetic personas with sources, segments, assumptions, and
+  optional distribution targets. Drafts accept incomplete work; review applies the full runnable
+  rules (for example draft ages 0–120 versus runnable 18–120).
+behaviors:
+  - id: adults-only
+    description: Runnable cohorts contain only adult personas aged 18 to 120.
+  - id: strict-validation
+    description: >-
+      Runnable cohorts reject unknown fields, duplicate IDs, unresolved source or segment
+      references, and source URLs that are not http(s) or embed credentials.
+  - id: weight-basis
+    description: >-
+      Every segment weight states its basis (sourced, assumed, or user); a sourced weight cites at
+      least one source, at least one segment has positive weight, and every positive-weight segment
+      has a persona.
+  - id: source-provenance
+    description: Each source records its URL, retrieval date, what it supports, and its limitations.
+  - id: synthetic-fields-labeled
+    description: Each persona lists which of its fields are synthetic, and the workspace shows that distinction.
+  - id: cohort-share-visible
+    description: Each persona row shows its effective cohort share.
+  - id: distribution-targets
+    description: >-
+      Distribution targets on age, segment, or an attribute accept buckets totaling 100 percent
+      within 0.01 and allocate exactly the requested persona count.
+  - id: manual-editing
+    description: >-
+      Users can create a cohort manually and add, edit, or remove personas, segments, and sources
+      without the drafting assistant.
+  - id: persona-browsing
+    description: >-
+      Persona lists paginate with stable page membership, can be grouped by attribute, and stay
+      usable for a 20,000-persona cohort.
+  - id: content-addressed-import
+    description: cohort import stores an immutable revision named by the cohort ID and a content hash.
+  - id: sampling-preserves-weights
+    description: >-
+      cohort sample draws distinct profiles without replacement from a seed, keeps segment weights,
+      records an assumption, and refuses to overwrite an existing file.

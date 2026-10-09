@@ -1,0 +1,19 @@
+id: reports
+name: Reports
+behaviors:
+  - id: standalone-offline
+    description: Reports are standalone HTML with no network dependencies, fonts, or CDN.
+  - id: escaped-content
+    description: All untrusted text is escaped, and only http(s) source links are rendered.
+  - id: provenance
+    description: >-
+      Reports state the recorded provider and returned model revisions, and mock reports are
+      labeled demo data.
+  - id: report-contents
+    description: >-
+      Reports include a stage map with skipped and failed branches, distributions, segment filters,
+      respondent drilldown, source provenance, assumptions, repeat breakdown, and raw JSON export.
+  - id: open-without-losing-edits
+    description: Open report opens a separate tab so unsaved workspace edits stay intact.
+  - id: consistent-style
+    description: Reports share the workspace's visual language and vocabulary.

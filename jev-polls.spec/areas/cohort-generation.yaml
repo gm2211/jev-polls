@@ -1,0 +1,36 @@
+id: cohort-generation
+name: Cohort generation
+prose: >-
+  Generation turns a short audience brief into an editable cohort through the selected drafting
+  provider. It proposes; the user adopts.
+behaviors:
+  - id: saves-before-generating
+    description: >-
+      Generate cohort validates and saves current edits first; a failed save or conflicting revision
+      leaves the draft intact and does not start generation.
+  - id: readiness-explained
+    description: Generate cohort is disabled with a visible reason until a brief, a persona count, and a ready drafting provider exist.
+  - id: truthful-progress
+    description: >-
+      Generation progress shows real job counts, elapsed time, and observed activity; estimates
+      are labeled as uncertain, and no progress or model reasoning is invented.
+    source:
+      text: Use real job counts, elapsed time, and observed activity in the generation readout.
+      reference: docs/design-direction.md
+  - id: batched-and-validated
+    description: >-
+      Cohorts up to 20,000 personas are generated in validated batches; changed metadata, wrong
+      counts, quota mismatches, or invented sources reject the whole proposal, and nothing partial
+      is published.
+  - id: proposal-then-adopt
+    description: >-
+      A generated cohort stays a proposal until the user chooses Review and edit cohort; Discard
+      version leaves the workspace unchanged, and only the selected cohort can change.
+  - id: stale-proposal-refused
+    description: A proposal based on an older revision cannot be adopted and must be regenerated.
+  - id: cancel-generation
+    description: Cancel generation stops the job and leaves the workspace unchanged.
+  - id: regenerate-persona
+    description: Regenerating one persona keeps its ID, segment, and weight and may cite only existing sources.
+  - id: no-inference-from-generation
+    description: Generation never starts a study evaluation.

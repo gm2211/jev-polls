@@ -1,0 +1,42 @@
+id: projects
+name: Projects and persistence
+prose: >-
+  A project groups a research brief with its cohorts, study, and run history. Drafts save locally
+  with revision control. Open decisions (not yet accepted): whether a project holds one study or
+  many (today one is enforced while the README implies several, docs/ux-review M5), and whether
+  saving becomes autosave with undo instead of per-section Apply plus an icon-only Save
+  (docs/ux-review M3).
+behaviors:
+  - id: create-project
+    description: New project asks for a name and research brief, saves it, and opens its Studies tab.
+  - id: project-ownership
+    description: Every cohort and study belongs to exactly one project, and a study cannot use another project's cohort.
+  - id: legacy-migration
+    description: >-
+      A workspace saved before projects existed opens under an "Existing research" project with
+      every cohort and study preserved.
+  - id: revision-safe-save
+    description: >-
+      Saves are atomic, increase the revision by one, and are refused when based on a stale
+      revision.
+    details: Concurrent saves from other processes are serialized; the browser's unsaved draft is never discarded by a refused save.
+  - id: preserve-unsaved-edits
+    description: Unsaved fields persist when switching sections, tabs, pages, or projects.
+    source:
+      text: Preserve unsaved fields when switching sections or pages
+      reference: AGENTS.md
+  - id: draft-export-import
+    description: >-
+      Data exports all projects, cohorts, and studies (including unsaved edits) as JSON and imports
+      such a file for review before saving; exports exclude run history and credentials.
+  - id: reload-saved
+    description: Reload saved restores the last saved workspace and discards unsaved edits only after the user chooses it.
+  - id: delete-project
+    description: >-
+      Deleting a project asks for confirmation, is blocked while one of its runs or drafts is
+      active, and keeps its saved run reports reachable.
+  - id: storage-limits
+    description: >-
+      A workspace holds up to 100 projects, 100 cohorts, 100 studies, 500 steps per study, and
+      20,000 personas per cohort within 20 MiB, and every size the store accepts can be saved from
+      the browser.
