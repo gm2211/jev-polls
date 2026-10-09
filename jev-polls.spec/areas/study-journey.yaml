@@ -1,0 +1,73 @@
+id: study-journey
+name: Main study journey
+prose: >-
+  The path from a new project to a running study. Each screen leads into the next: create a
+  project, land on its studies, open a study's track, add rounds on the track, give each round a
+  cohort (creating one on the spot if needed), then review and run. Requested 2026-10-09 by Giulio
+  after "Draft pipeline" sat alone beside the first-study form. The detailed shape below (sidebar,
+  railway track, round panel sections, return bar) is the proposal shown in the "Jev study flow"
+  mockups (https://claude.ai/artifact/EEEqHfDTj9tfMt6znpooZr); it is being built in small PRs and
+  stays open to revision. "Voting round" in the user's words is the existing Ask cohort step.
+behaviors:
+  - id: project-lands-on-studies
+    description: >-
+      Creating a project opens its studies list straight away: the list when studies exist, or an
+      empty list that offers to create the first one.
+    source:
+      text: >-
+        I create a project -> right away list of studies or create new if none presetn (look up
+        examples online of ux for empty lists and create new by just clicking empty list e.g.)
+      reference: jev-polls project thread "Rethink the main user flow", Giulio, 2026-10-09
+  - id: empty-list-creates
+    description: >-
+      An empty studies or cohorts list is itself the create control: clicking anywhere in it
+      creates the item and opens it, with no intermediate form.
+    details: >-
+      A non-empty list keeps a create row at its end and a create button on the title line. A new
+      study is named on its track. Draft with assistant is offered on the empty track rather than
+      as a floating page button.
+    source:
+      text: create new by just clicking empty list
+      reference: jev-polls project thread "Rethink the main user flow", Giulio, 2026-10-09
+  - id: railway-track
+    description: >-
+      A study opens as a railway-style track: rounds are stations on a left-to-right line, and a
+      plus control on the line inserts a round already connected at that point.
+    details: >-
+      Branches split the line on a condition and may rejoin. Free placement, drag and
+      click-to-create (studies.canvas-drag-nodes, studies.canvas-click-create) remain available.
+    source:
+      text: >-
+        pipeline editor railway-style from which I branch into creating a voting round with types,
+        inputs, outputs
+      reference: jev-polls project thread "Rethink the main user flow", Giulio, 2026-10-09
+  - id: round-panel
+    description: >-
+      Selecting a round shows its type, question, inputs, outputs and cohort in one panel beside
+      the track, each marked when it still needs attention.
+    source:
+      text: creating a voting round with types, inputs, outputs and which needs a cohort assigned
+      reference: jev-polls project thread "Rethink the main user flow", Giulio, 2026-10-09
+  - id: inline-cohort-create
+    description: >-
+      A round's cohort picker offers New cohort; saving that cohort adds it to the shared library,
+      links it to the project, assigns it to the round, and returns to the track with the round
+      selected.
+    details: Cancelling returns to the same round with nothing changed.
+    source:
+      text: needs a cohort assigned that I can create right there and then and navigate back to pipeline
+      reference: jev-polls project thread "Rethink the main user flow", Giulio, 2026-10-09
+  - id: project-sidebar
+    description: >-
+      Inside a project, a sidebar holds the way back to all projects, the project name, Studies
+      (with each study nested beneath it), Cohorts, Runs and Settings, each section with its count.
+    details: >-
+      The open section or study is marked current. On narrow screens the sidebar becomes a single
+      scrollable row above the page and nested studies are hidden.
+    source:
+      text: >-
+        also consider something like this as a possible layout inspiration (it's still not
+        perfect, but navigation tabs here are in a sidebar)
+      reference: >-
+        jev-polls project chat, Giulio, 2026-10-09, with screenshots of the TypeSafe AI console;
+        follows "while I generally love tabbed uis, the way this is structured is confusing"

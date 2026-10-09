@@ -23,6 +23,7 @@ areas:
   - areas/cohorts.yaml
   - areas/cohort-generation.yaml
   - areas/studies.yaml
+  - areas/study-journey.yaml
   - areas/review-and-run.yaml
   - areas/execution.yaml
   - areas/live-and-replay.yaml

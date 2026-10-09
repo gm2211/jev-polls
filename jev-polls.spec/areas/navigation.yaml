@@ -19,20 +19,22 @@ behaviors:
     description: A breadcrumb trail moves back through projects, studies, cohorts, personas, and run review.
   - id: page-anatomy
     description: >-
-      Every workspace page reads top-down as brand, breadcrumb trail, project tabs where the page
-      has them, then one page header.
+      Every workspace page reads as brand bar, then (inside a project) the project sidebar beside
+      the page, whose content starts with the breadcrumb trail and one page header.
     details: >-
-      The breadcrumb row holds only the trail. Project tabs (Studies, Cohorts, Runs) sit directly
-      under the trail, above the page title, with a Project settings link at the end of the same
-      row. On a section page the trail ends at the project, because the selected tab already names
-      the section; deeper pages (a study, cohort, persona, or run) keep the section in the trail.
+      The breadcrumb row holds only the trail. Project sections (Studies, Cohorts, Runs, Settings)
+      live in the sidebar (study-journey.project-sidebar), not in a tab row. On a section page the
+      trail ends at the project, because the sidebar already marks the section; deeper pages (a
+      study, cohort, persona, or run) keep the section in the trail. Replaced the top tab row on
+      2026-10-09 per the redesign thread.
     source:
       text: navigations an breadcrumbs are still a little awkward - the positioning of some controls and title also is
       reference: project thread, Giulio, 2026-10-09
   - id: tabs-follow-breadcrumbs
     description: >-
-      Project tabs follow the breadcrumb trail directly, and the trail never repeats the selected
-      tab as its last level.
+      The breadcrumb trail never repeats the selected section as its last level, and no section
+      tab row sits between the trail and the page header.
+    details: Section navigation moved to the project sidebar on 2026-10-09.
     source:
       text: the positioning of the tabs wrt breadcrumbs is confusing
       reference: project chat, Giulio, 2026-10-09

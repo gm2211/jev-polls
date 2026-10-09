@@ -1232,7 +1232,7 @@ test('cohort editor has an explicit path back to the library and keeps unsaved e
   S.doc.cohorts[0].name = 'Unsaved audience edit'; S.dirty = true;
   assert.match(cohorts(), /Unsaved changes/);
   act(null, { dataset: { act: 'back-cohorts' } });
-  assert.match(browser.element('app').innerHTML, /role="tablist"/);
+  assert.match(browser.element('app').innerHTML, /<nav class="app-sidebar" aria-label="Project">/);
   assert.match(browser.element('app').innerHTML, /Unsaved audience edit/);
   assert.equal(S.doc.cohorts[0].name, 'Unsaved audience edit');
 });
@@ -1396,13 +1396,13 @@ test('cohort generation is entered explicitly and its return action restores the
   assert.doesNotMatch(browser.element('app').innerHTML, /role="tablist"/);
   assert.match(browser.element('app').innerHTML, /Back to cohorts/);
   act(null, { dataset: { act: 'cohort-generator-close' } });
-  assert.match(browser.element('app').innerHTML, /role="tablist"/);
+  assert.match(browser.element('app').innerHTML, /<nav class="app-sidebar" aria-label="Project">/);
   assert.doesNotMatch(browser.element('app').innerHTML, /cohort-generator/);
   S.doc.cohorts = browser.snapshot().document.cohorts;
   act(null, { dataset: { act: 'new-cohort' } });
   S.cohortPrompt = 'New audience brief';
   act(null, { dataset: { act: 'cohort-generator-close' } });
-  assert.match(browser.element('app').innerHTML, /role="tablist"/);
+  assert.match(browser.element('app').innerHTML, /<nav class="app-sidebar" aria-label="Project">/);
   assert.equal(S.cohortPrompt, 'New audience brief');
 
   act(null, { dataset: { act: 'open-cohort', id: 'cohort' } });
@@ -1603,7 +1603,7 @@ test('workspace tabs clear cohort selections and open the study library while pr
   const draft = structuredClone(S.doc);
   S.tab = 'cohorts'; S.cohortId = 'cohort'; S.personId = 'person';
   act(null, { dataset: { act: 'tab', tab: 'cohorts' } });
-  assert.match(browser.element('app').innerHTML, /role="tablist"/);
+  assert.match(browser.element('app').innerHTML, /<nav class="app-sidebar" aria-label="Project">/);
   assert.doesNotMatch(browser.element('app').innerHTML, /Back to cohorts|Back to cohort/);
   assert.equal(S.cohortId, null); assert.equal(S.personId, null);
   assert.equal(S.cohortComposer, false); assert.equal(S.cohortReturn, null);
@@ -1612,7 +1612,7 @@ test('workspace tabs clear cohort selections and open the study library while pr
   S.pipelineId = 'study'; S.stageId = 'panel';
   act(null, { dataset: { act: 'tab', tab: 'studies' } });
   assert.equal(S.pipelineId, null);
-  assert.match(browser.element('app').innerHTML, /role="tablist"/);
+  assert.match(browser.element('app').innerHTML, /<nav class="app-sidebar" aria-label="Project">/);
   assert.match(browser.element('app').innerHTML, /Your research questions/);
   assert.deepEqual(JSON.parse(JSON.stringify(S.doc)), JSON.parse(JSON.stringify(draft)));
 });
@@ -2261,7 +2261,7 @@ test('project entry and back navigation visit every breadcrumb level and preserv
   assert.equal(S.pipelineId,null);assert.equal(S.stageId,null);assert.equal(S.tab,'studies');assert.equal(S.studyLibrary,true);
   assert.doesNotMatch(html(),/aria-label="Project sections"|class="project-overview"/);
   // Section pages end the trail at the project; the selected tab right under it names the section.
-  assert.match(html(),/data-act="projects">Projects<\/button>.*<span aria-current="page">Existing research<\/span><\/li><\/ol><\/nav><\/div><div class="project-tabs">/);
+  assert.match(html(),/data-act="projects">Projects<\/button>.*<span aria-current="page">Existing research<\/span><\/li><\/ol><\/nav><\/div>/);assert.match(html(),/<nav class="app-sidebar"/);
   assert.match(html(),/Your research questions/);
   assert.match(html(),/class="breadcrumb-link" data-act="projects">Projects/);
   act(null,{dataset:{act:'open-pipeline',id:'study'}});
@@ -2300,17 +2300,12 @@ test('every project tab selects its matching panel directly and keeps pending st
   const before=JSON.stringify(S.doc);
   for(const [tab,label,content] of [['studies','Studies','Your research questions'],['cohorts','Cohorts','Your virtual cohorts'],['runs','Runs','Study runs']]){
     click({act:'tab',tab});
-    const buttons=[...html().matchAll(/<button[^>]*role="tab"[^>]*>/g)].map(match=>match[0]);
-    assert.equal(buttons.length,3);
-    assert.equal(buttons.filter(button=>button.includes('aria-selected="true"')).length,1);
-    for(const button of buttons){
-      const selected=button.includes('id="tab-'+tab+'"');
-      assert.match(button,new RegExp('aria-selected="'+selected+'"'));
-      assert.match(button,new RegExp('tabindex="'+(selected?'0':'-1')+'"'));
-    }
-    const panels=[...html().matchAll(/<section[^>]*role="tabpanel"[^>]*>/g)].map(match=>match[0]);
-    assert.equal(panels.length,1);
-    assert.match(panels[0]!,new RegExp('id="view-'+tab+'".*aria-labelledby="tab-'+tab+'"'));
+    const links=[...html().matchAll(/<button[^>]*class="side-link"[^>]*data-act="tab"[^>]*>/g)].map(match=>match[0]);
+    assert.equal(links.length,3);
+    assert.equal(links.filter(link=>link.includes('aria-current="page"')).length,1);
+    for(const link of links)assert.equal(link.includes('aria-current="page"'),link.includes('data-tab="'+tab+'"'));
+    assert.doesNotMatch(html(),/role="tablist"|role="tabpanel"/);
+    assert.match(html(),new RegExp('<section id="view-'+tab+'"'));
     assert.ok(html().includes(content),label+' displays its content');
     assert.match(html(),/class="breadcrumb-link" data-act="projects">Projects/);
     assert.doesNotMatch(html(),/aria-label="Project sections"/);
@@ -2340,7 +2335,7 @@ test('study navigation has clear scope, a reachable single-study library and con
   act(null,{dataset:{act:'section-view',sectionKey:'pipeline',sectionId:'phase'}});
   assert.match(browser.element('app').innerHTML,/Keep typed detail/);
   act(null,{dataset:{act:'back-studies'}});assert.equal(S.pipelineId,null);render();html=browser.element('app').innerHTML;
-  assert.match(html,/Your studies|Your research questions/);assert.match(html,/role="tablist"/);assert.doesNotMatch(html,/data-act="new-study"|data-form="new-pipeline"/);
+  assert.match(html,/Your studies|Your research questions/);assert.match(html,/<nav class="app-sidebar"/);assert.doesNotMatch(html,/data-act="new-study"|data-form="new-pipeline"/);
   assert.match(html,/<button type="button" class="listrow study-list-row" data-act="open-pipeline" data-id="study" aria-label="Open study: /);assert.doesNotMatch(html,/>Open study<|<div class="listrow">/);
   S.studyComposer=true;render();assert.doesNotMatch(browser.element('app').innerHTML,/data-form="new-pipeline"/);
   act(null,{dataset:{act:'new-study'}});assert.equal(S.studyComposer,false);assert.doesNotMatch(browser.element('app').innerHTML,/data-form="new-pipeline"/);
@@ -2868,7 +2863,7 @@ test('page anatomy keeps brand, breadcrumbs, project tabs and header actions dis
   const navigation = html().match(/<div class="project-navigation">[\s\S]*?<\/nav><\/div>/)![0];
   assert.doesNotMatch(navigation, /<button class="button/, 'the breadcrumb row holds only the trail');
   assert.doesNotMatch(html(), /aria-label="Edit project"/);
-  assert.match(html(), /<\/div><button type="button" class="project-settings-link" data-act="project-settings">[\s\S]*?Project settings<\/span><\/button><\/div>/);
+  assert.match(html(), /<nav class="app-sidebar" aria-label="Project">[\s\S]*?data-act="project-settings"[^>]*><span class="side-label">Settings<\/span><\/button><\/nav>/);
   act(null, { dataset: { act: 'project-settings' } });
   assert.doesNotMatch(html(), /Back to project/);
   S.dirty = true; render();
@@ -2880,4 +2875,23 @@ test('page anatomy keeps brand, breadcrumbs, project tabs and header actions dis
   act(null, { dataset: { act: 'open-persona', id: 'person' } });
   assert.doesNotMatch(html(), /Back to cohort/);
   assert.match(html(), /class="breadcrumb-link" data-act="breadcrumb-cohort">/);
+});
+
+test('project sidebar lists sections with counts and opens a study from any section', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, act, render } = browser.client;
+  const html = () => browser.element('app').innerHTML;
+  const study = S.doc.pipelines[0]; assert.ok(study, 'fixture has a study');
+  S.tab = 'cohorts'; S.pipelineId = null; render();
+  const sidebar = () => html().match(/<nav class="app-sidebar"[\s\S]*?<\/nav>/)![0];
+  assert.match(sidebar(), /data-act="projects"[\s\S]*All projects/);
+  assert.match(sidebar(), /data-tab="studies"><span class="side-label">Studies<\/span><span class="side-count">\d+<\/span>/);
+  assert.match(sidebar(), /data-tab="cohorts" aria-current="page">/);
+  assert.match(sidebar(), new RegExp('data-act="side-study" data-id="' + study.id + '"'));
+  act(null, { dataset: { act: 'side-study', id: study.id } });
+  assert.equal(S.tab, 'studies'); assert.equal(S.pipelineId, study.id);
+  assert.match(sidebar(), new RegExp('data-act="side-study" data-id="' + study.id + '" aria-current="page"'));
+  assert.doesNotMatch(sidebar(), /data-tab="studies" aria-current="page"/, 'the open study, not the section, is current');
+  act(null, { dataset: { act: 'side-study', id: 'missing' } });
+  assert.equal(S.pipelineId, study.id, 'an unknown study id changes nothing');
 });
