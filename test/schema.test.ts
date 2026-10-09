@@ -82,3 +82,9 @@ test('cohorts validate optional regeneration distribution targets', () => {
   c.distributionTargets[1].field = 'attributes.residence.__proto__';
   assert.throws(() => parseCohort(c), /safe attributes/);
 });
+
+test('study layout stores finite canvas positions only', () => {
+  assert.deepEqual(parsePipeline({ ...pipeline(), layout: { first: { x: 10, y: 20.5 } } }).layout, { first: { x: 10, y: 20.5 } });
+  assert.throws(() => parsePipeline({ ...pipeline(), layout: { first: { x: 10 } } }));
+  assert.throws(() => parsePipeline({ ...pipeline(), layout: { first: { x: 1, y: 2, z: 3 } } }), /Unrecognized/);
+});

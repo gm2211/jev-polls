@@ -35,7 +35,7 @@ async function flowHarness() {
   };
   const html = renderWorkspace('flow-test', 'token');
   const script = html.match(/<script nonce="flow-test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.flowTest={S,flowAction,flowConnect,flowDisconnect,flowInputs,flowNode,flowReadiness,flowConnections,flowCohortMap};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.flowTest={S,flowAction,flowCreateMenu,flowKindMatches,flowConnect,flowDisconnect,flowInputs,flowNode,flowReadiness,flowConnections,flowCohortMap};})();');
   new Script(exposed).runInNewContext(context);
   await new Promise<void>(resolve => setImmediate(resolve));
   const client = context.flowTest;
@@ -311,4 +311,35 @@ test('independent question starts cohort selection inside pipeline without chang
   const html = flowCohortMap(pipeline, added);
   assert.match(html, /data-act="new-cohort"/);
   assert.doesNotMatch(html, /name="setupPrompt"/);
+});
+
+test('canvas create menu lists every step kind, filters by text and places the new step where the canvas was clicked', async () => {
+  const { S, pipeline, flowAction, flowCreateMenu, flowKindMatches } = await flowHarness();
+  assert.equal(flowCreateMenu(pipeline), '');
+  S.flowCreate = { pipelineId: 'study', x: 412.4, y: 96.6, left: 0, top: 0, query: '', index: 0 };
+  const menu = flowCreateMenu(pipeline);
+  for (const label of ['Ask cohort', 'Combine answers', 'Final result']) assert.match(menu, new RegExp(label));
+  assert.deepEqual(plain(flowKindMatches('comb').map((k: any) => k.kind)), ['aggregate']);
+  assert.deepEqual(plain(flowKindMatches('winner').map((k: any) => k.kind)), ['decision']);
+  const before = JSON.stringify(pipeline.stages);
+  flowAction('flow-create', { dataset: { kind: 'aggregate' } });
+  const added = pipeline.stages.at(-1);
+  assert.equal(JSON.stringify(pipeline.stages.slice(0, -1)), before);
+  assert.equal(added.kind, 'aggregate');
+  assert.deepEqual(plain(added.inputs), []);
+  assert.deepEqual(plain(pipeline.layout[added.id]), { x: 412, y: 97 });
+  assert.equal(S.stageId, added.id);
+  assert.equal(S.flowCreate, null);
+  assert.equal(S.dirty, true);
+});
+
+test('canvas create ignores unknown kinds and menus opened for another study', async () => {
+  const { S, pipeline, flowAction } = await flowHarness();
+  const count = pipeline.stages.length;
+  S.flowCreate = { pipelineId: 'other-study', x: 0, y: 0, left: 0, top: 0, query: '', index: 0 };
+  flowAction('flow-create', { dataset: { kind: 'poll' } });
+  S.flowCreate = { pipelineId: 'study', x: 0, y: 0, left: 0, top: 0, query: '', index: 0 };
+  flowAction('flow-create', { dataset: { kind: 'script' } });
+  assert.equal(pipeline.stages.length, count);
+  assert.equal(pipeline.layout, undefined);
 });

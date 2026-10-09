@@ -42,3 +42,24 @@ behaviors:
     description: Different steps can consult different cohorts.
   - id: structured-context
     description: Step and shared context can be edited without writing raw JSON.
+  - id: canvas-drag-nodes
+    description: >-
+      Steps can be dragged anywhere on the study canvas; connections follow the moved step, and the
+      position is saved with the study so it survives reload.
+    details: >-
+      A press that moves less than a few pixels is still a click (select, connect, add). Steps
+      without a saved position keep the automatic left-to-right layout by dependency depth. Dragging
+      empty canvas pans the view. Positions are layout only and never change the study's logic.
+    source:
+      text: should be able to drag around.
+      reference: jev-polls project thread, 2026-10-09
+  - id: canvas-click-create
+    description: >-
+      Clicking empty canvas opens a filterable menu of step kinds (Ask cohort, Combine answers,
+      Final result) at the pointer; choosing one creates that step at the clicked spot and selects it.
+    details: >-
+      Modeled on Railway and Hex canvases. The menu is keyboard operable (type to filter, arrows,
+      Enter, Escape) and closes on outside click. New steps start unconnected.
+    source:
+      text: should be able to click on canvas to create node with dropdown - look at railway.com or hex.com for inspiration
+      reference: jev-polls project thread, 2026-10-09

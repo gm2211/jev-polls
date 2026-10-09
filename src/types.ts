@@ -18,7 +18,7 @@ export interface PollStage extends BaseStage { kind: 'poll'; cohort: string; que
 export interface AggregateStage extends BaseStage { kind: 'aggregate'; inputs: { stage: string; question: string; weight: number }[]; outputQuestion: string }
 export interface DecisionStage extends BaseStage { kind: 'decision'; from: { stage: string; question: string }; outputQuestion: string }
 export type Stage = PollStage | AggregateStage | DecisionStage;
-export interface Pipeline { version: 1; id: string; name: string; description: string; context: Json; cohorts: Record<string, string>; stages: Stage[] }
+export interface Pipeline { version: 1; id: string; name: string; description: string; context: Json; cohorts: Record<string, string>; stages: Stage[]; /** Canvas positions by stage id; layout only, never study logic. */ layout?: Record<string, { x: number; y: number }> }
 /** Native independent sigmoid scores retained before relative normalization. These are not calibrated probabilities. */
 export interface LabelScoreEvidence { semantics: 'independent_sigmoid'; rawScores: Record<string, number>; rawLogits: Record<string, number> }
 export interface ChoiceAnswer { type: 'choice'; choice: string; probabilities: Record<string, number>; confidence?: number; classifier?: LabelScoreEvidence }
