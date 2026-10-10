@@ -9,7 +9,11 @@ behaviors:
       Generate cohort validates and saves current edits first; a failed save or conflicting revision
       leaves the draft intact and does not start generation.
   - id: readiness-explained
-    description: Generate cohort is disabled with a visible reason until a brief, a persona count, and a ready drafting provider exist.
+    description: >-
+      Generate cohort is disabled with a visible reason when the persona count or the drafting
+      provider is not ready; an empty brief alone keeps the button enabled and shows its reason
+      only after the user presses it (cohorts.new-cohort-page).
+    details: Changed 2026-10-10 so the New cohort page does not warn before the user has typed.
   - id: truthful-progress
     description: >-
       Generation progress shows real job counts, elapsed time, and observed activity; estimates
