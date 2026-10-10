@@ -2,8 +2,8 @@ id: review-and-run
 name: Review and run
 prose: >-
   Inference happens only after an explicit review of an exact saved revision with a request
-  budget. Open proposals (not yet accepted): Cancel run and a cancelled run status (docs/ux-review
-  H3).
+  budget. A running study can be cancelled; partial results are kept and labeled. Decided
+  2026-10-10 (docs/ux-review H3).
 behaviors:
   - id: no-implicit-inference
     description: >-
@@ -29,6 +29,25 @@ behaviors:
     description: Without a ready evaluation provider, Run study is disabled and Set up evaluation provider is offered.
   - id: no-mock-fallback
     description: Normal runs use the selected live provider with no silent mock fallback; mock runs never enter workspace history.
+  - id: cancel-run
+    description: >-
+      Cancel run stops new evaluations, lets in-flight ones finish, and saves the run as
+      cancelled with its partial results.
+    source:
+      text: 1b 2a
+      reference: >-
+        2026-10-10 jev-polls project thread, Giulio, choosing option A for run cancellation: cancel and keep partial results
+  - id: cancelled-run-results
+    description: >-
+      A cancelled run's report and live view label results as partial, and re-running the same
+      study reuses cached answers so unchanged requests are not spent again.
+    details: >-
+      Example: a 66-request plan cancelled after 10 requests costs 56 new requests on an unchanged
+      re-run; only requests whose question changed are re-evaluated.
+    source:
+      text: 1b 2a
+      reference: >-
+        2026-10-10 jev-polls project thread, Giulio, choosing option A for run cancellation: cancel and keep partial results
   - id: one-run-at-a-time
     description: Only one workspace run is active at a time, and starting another reports that a run is in progress.
   - id: jev-request-budget

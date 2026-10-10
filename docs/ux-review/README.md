@@ -197,9 +197,12 @@ than satisfied, because no live TypeSafe run was made.
 | `interface-quality/no-dead-ui` | gap | L7 |
 | `navigation/platform-shortcut-hint`, `live-and-replay/replay-controls` | gap | L8 |
 | `drafting/unsupported-credential-store` | gap | L9 |
+| `projects/explicit-save`, `projects/local-drafts-survive` | gap | M3 |
+| `review-and-run/cancel-run`, `review-and-run/cancelled-run-results` | gap | H3 |
 | `projects/multiple-studies`, `projects/shared-cohort-library`, `projects/project-ownership`, `projects/rename-confirm` | gap | M5, new decisions |
 
-The following are **open decisions** and are labeled as proposals in the area prose: the save
-model beyond renames (M3), run cancellation (H3), and URL routing (§1). Decided on 2026-10-09:
+The following are **open decisions** and are labeled as proposals in the area prose: URL
+routing (§1). Decided on 2026-10-10: explicit Save with local drafts (M3) and run cancellation
+with partial results (H3). Decided on 2026-10-09:
 field-level merging of agent edits (H2) and a shared cohort library with several studies per
 project (M5).
