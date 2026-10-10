@@ -2975,6 +2975,20 @@ test('project sidebar lists sections with counts and opens a study from any sect
   assert.equal(S.pipelineId, study.id, 'an unknown study id changes nothing');
 });
 
+test('long sidebar names ellipsize inside the sidebar and show in full on hover', async () => {
+  const shell = renderWorkspace('test', 'token');
+  // A grid track sized by a nowrap label grows past the sidebar and hard-clips it; minmax(0,1fr) keeps it bounded.
+  assert.match(shell, /\.side-group\{display:grid;grid-template-columns:minmax\(0,1fr\)/);
+  assert.match(shell, /\.side-children\{display:grid;grid-template-columns:minmax\(0,1fr\)/);
+  assert.match(shell, /\.side-label\{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap\}/);
+  const browser = browserHarness(); await settle();
+  const { S, render } = browser.client;
+  const long = 'Which name will make my $20 game sell the most copies to strategy players on Steam?';
+  S.doc.pipelines[0].description = long; S.tab = 'studies'; S.pipelineId = S.doc.pipelines[0].id; render();
+  const sidebar = browser.element('app').innerHTML.match(/<nav class="app-sidebar"[\s\S]*?<\/nav>/)![0];
+  assert.ok(sidebar.includes('aria-current="page" title="Which name will make my $20 game sell the most copies to strategy players on Steam?"'));
+});
+
 test('an empty cohort list is one click target and a full one ends with a create card', async () => {
   const browser = browserHarness(); await settle();
   const { S, act, render } = browser.client;
