@@ -5,8 +5,9 @@ prose: >-
   shared workspace cohort library; projects link to the cohorts they use, so one cohort can serve
   several projects. Drafts save locally with revision control. Decided 2026-10-09: the user
   accepted the linked-library proposal (projects keep brief, studies, and runs; cohorts move to a
-  shared library that projects link to). The general save model for edits other than renames is
-  still open.
+  shared library that projects link to). Decided 2026-10-10: edits are
+  kept as local drafts automatically and reach the shared workspace only through one explicit
+  Save.
 behaviors:
   - id: create-project
     description: New project asks for a name and research brief, saves it, and opens its Studies tab.
@@ -29,6 +30,25 @@ behaviors:
     source:
       text: I should be able to rename project right here
       reference: 2026-10-09 jev-polls project chat, Giulio, on the project list row
+  - id: explicit-save
+    description: >-
+      Edits are committed to the shared workspace only by one Save action (button or Cmd/Ctrl+S);
+      a single indicator shows when unsaved changes exist, and no section needs its own Apply.
+    details: >-
+      Short identity fields such as names keep their check-icon confirm (rename-confirm).
+      Deleting an item is part of the draft and takes effect on Save like any other edit.
+    source:
+      text: 1b 2a
+      reference: >-
+        2026-10-10 jev-polls project thread, Giulio, choosing option B for saving: explicit Save with automatic local drafts
+  - id: local-drafts-survive
+    description: >-
+      Unsaved edits are kept locally and automatically, so a refresh, a restart of the browser
+      tab, or a server restart does not lose them.
+    source:
+      text: 1b 2a
+      reference: >-
+        2026-10-10 jev-polls project thread, Giulio, choosing option B for saving: explicit Save with automatic local drafts
   - id: project-ownership
     description: >-
       Every study and run belongs to exactly one project; cohorts belong to the shared library
