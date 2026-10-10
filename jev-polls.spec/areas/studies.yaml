@@ -14,6 +14,22 @@ behaviors:
       A project can hold several studies (projects.multiple-studies); new studies are named
       "Study N" until their question is set. Changed 2026-10-09 from a question-first form, per
       study-journey.empty-list-creates.
+  - id: study-named-by-question
+    description: >-
+      A study is identified by its research question everywhere it is listed or referred to:
+      studies list, sidebar, breadcrumbs, page title, run cards, run detail, search results and the
+      report headline; the study name is secondary, shown as the report subtitle and used for
+      exported files and the CLI.
+    details: >-
+      Before 2026-10-10 the Runs page, run breadcrumb, search palette and report used the study
+      name while every other surface used the question, so one study read as two. A run card's
+      title links back to its study, the run id is a tooltip on the date rather than a heading,
+      and the two static explainer cards on the Runs page were folded into one sentence under the
+      list. In study settings the question is a multi-line field, placed before the name. A study
+      with an empty question falls back to its name.
+    source:
+      text: One study, two names (UI audit, item 1) and Runs page shows a UUID and two permanent explainer cards (item 11)
+      reference: jev-polls project thread "UI audit in a headless browser", 2026-10-10
   - id: one-new-study-button
     description: >-
       A project's study list offers a single New study button, in the page header; the empty list

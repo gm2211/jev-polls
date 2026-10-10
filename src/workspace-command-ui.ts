@@ -1,6 +1,7 @@
 /** Global command navigation and an in-context drafting inspector. */
 export const COMMAND_CLIENT = String.raw`
 const commandState={open:false,query:'',index:0,page:0,returnFocus:null,focus:null,draftProject:null,busy:false,error:'',answer:'',request:0,job:null,resultIds:null,material:'',filename:'',fileError:'',reading:false,readVersion:0};
+function commandStudyLabel(p){return p.description?.trim()||(typeof p.context?.decisionQuestion==='string'&&p.context.decisionQuestion.trim())||p.name||'Untitled study'}
 function commandEntries(){
   if(!S.doc)return [];
   const rows=[{id:'projects',label:'All projects',detail:'Workspace',action:'projects'},{id:'new-project',label:'New project',detail:'Create research project',action:'new-project'},{id:'settings',label:'AI settings',detail:'Models and providers',action:'ai-open'}];
@@ -9,14 +10,14 @@ function commandEntries(){
   for(const p of S.doc.projects||[]){
     rows.push({id:'project:'+p.id,label:p.name,detail:'Project',project:p.id});
     for(const pipeline of S.doc.pipelines.filter(x=>p.pipelineIds.includes(x.id))){
-      rows.push({id:'pipeline:'+p.id+':'+pipeline.id,label:pipeline.name,detail:p.name+' · Study',search:pipeline.description||'',project:p.id,pipeline:pipeline.id});
-      for(const stage of pipeline.stages)rows.push({id:'stage:'+p.id+':'+pipeline.id+':'+stage.id,label:stage.label||stage.id,detail:p.name+' · '+pipeline.name+' · Step',search:JSON.stringify(stage.questions||{}),project:p.id,pipeline:pipeline.id,stage:stage.id});
+      rows.push({id:'pipeline:'+p.id+':'+pipeline.id,label:commandStudyLabel(pipeline),detail:p.name+' · Study',search:pipeline.name,project:p.id,pipeline:pipeline.id});
+      for(const stage of pipeline.stages)rows.push({id:'stage:'+p.id+':'+pipeline.id+':'+stage.id,label:stage.label||stage.id,detail:p.name+' · '+commandStudyLabel(pipeline)+' · Step',search:JSON.stringify(stage.questions||{}),project:p.id,pipeline:pipeline.id,stage:stage.id});
     }
     for(const cohort of S.doc.cohorts.filter(x=>p.cohortIds.includes(x.id))){
       rows.push({id:'cohort:'+p.id+':'+cohort.id,label:cohort.name,detail:p.name+' · Cohort',search:cohort.description||'',project:p.id,cohort:cohort.id});
       for(const person of cohort.personas||[])rows.push({id:'persona:'+p.id+':'+cohort.id+':'+person.id,label:person.label,detail:p.name+' · '+cohort.name+' · Persona',search:person.background||'',project:p.id,cohort:cohort.id,persona:person.id});
     }
-    for(const run of S.snap?.runs||[])if(run.projectId===p.id)rows.push({id:'run:'+p.id+':'+run.id,label:run.pipelineName||run.pipelineId||run.id,detail:p.name+' · Run · '+run.status,search:run.id,project:p.id,run:run.id});
+    for(const run of S.snap?.runs||[])if(run.projectId===p.id)rows.push({id:'run:'+p.id+':'+run.id,label:(()=>{const owner=S.doc.pipelines.find(x=>x.id===run.pipelineId);return owner?commandStudyLabel(owner):(run.pipelineName||run.pipelineId||run.id)})(),detail:p.name+' · Run · '+run.status,search:run.id,project:p.id,run:run.id});
   }
   const terms=commandState.query.toLocaleLowerCase().trim().split(/\s+/).filter(Boolean);
   if(commandState.resultIds)return rows.filter(row=>commandState.resultIds.includes(row.id));

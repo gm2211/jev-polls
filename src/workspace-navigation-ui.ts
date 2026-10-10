@@ -23,7 +23,7 @@ function workspaceBreadcrumbItems(){
     else if(c&&S.personaOpen){const person=c.personas.find(person=>person.id===S.personId);if(person)items.push({label:person.label||'Persona'})}
   }else if(S.tab==='runs'){
     const runs=projectRuns(),run=runs.find(r=>r.id===S.liveRunId)||(S.liveRunId!=='history'&&runs.find(r=>r.status==='running'));
-    if(run)items.push({label:run.pipelineName});
+    if(run)items.push({label:runTitle(run)});
   }
   return items;
 }
