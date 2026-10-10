@@ -26,6 +26,21 @@ behaviors:
     description: >-
       Distribution targets on age, segment, or an attribute accept buckets totaling 100 percent
       within 0.01 and allocate exactly the requested persona count.
+  - id: distribution-array-items
+    description: >-
+      A distribution of an array attribute charts each item separately as the share of personas
+      that include it (shares can exceed 100 percent), says so in its note, and still discloses
+      missing values.
+    source:
+      text: favoriteFranchises was charted as whole combinations, giving 96 pages of one-off combos.
+      reference: jev-polls demo recording, 2026-10-10
+  - id: empty-cohorts-copy
+    description: >-
+      The empty Cohorts prompt says the user's drafting AI drafts segments and personas; Jev
+      supplies judgments only and never drafts personas.
+    source:
+      text: Jev does not draft personas; the user's drafting AI does.
+      reference: jev-polls demo recording, 2026-10-10
   - id: manual-editing
     description: >-
       Users can create a cohort manually and add, edit, or remove personas, segments, and sources

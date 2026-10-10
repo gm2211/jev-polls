@@ -32,6 +32,16 @@ export function createCohortInsights() {
     }
     return Array.isArray(value) ? stable(value) : value;
   }
+  function rawFieldValue(persona: any, field: string): unknown {
+    if (!field.startsWith('attributes.')) return undefined;
+    let value: any = persona?.attributes;
+    for (const part of field.slice('attributes.'.length).split('.')) {
+      if (!part || reserved.has(part) || value === null || typeof value !== 'object' || !Object.hasOwn(value, part)) return undefined;
+      value = value[part];
+    }
+    return value;
+  }
+  function arrayItems(value: unknown): string[] { return [...new Set((value as unknown[]).map((item) => (item === null ? 'null' : stable(item))))]; }
   function matchesDistributionBucket(value: unknown, bucket: any, kind?: Kind): boolean {
     const bucketKind = kind ?? (typeof bucket?.min === 'number' || typeof bucket?.max === 'number' ? 'numeric' : 'categorical');
     if (bucketKind === 'numeric') return typeof value === 'number' && Number.isFinite(value) && typeof bucket?.min === 'number' && typeof bucket?.max === 'number' && value >= bucket.min && value < bucket.max;
@@ -145,6 +155,25 @@ export function createCohortInsights() {
       const value = raw === undefined ? null : raw;
       return { persona, value, weight: weighted ? weightById.get(String(persona.id)) ?? 0 : 1 };
     });
+    const multi = field.startsWith('attributes.') && personas.some((persona: any) => Array.isArray(rawFieldValue(persona, field)));
+    if (multi) {
+      const items = new Map<string, typeof records>();
+      const none: typeof records = [];
+      for (const [index, record] of records.entries()) {
+        const raw = rawFieldValue(personas[index], field);
+        const list = Array.isArray(raw) ? arrayItems(raw) : raw === undefined || raw === null ? [] : [stable(raw)];
+        if (!list.length) none.push(record);
+        for (const item of list) { const group = items.get(item) ?? []; group.push(record); items.set(item, group); }
+      }
+      const totalWeight = weighted ? 1 : records.length;
+      const toBucket = (label: string, members: typeof records, value: unknown) => { const mass = members.reduce((sum, record) => sum + record.weight, 0); return { label, count: members.length, weight: mass, percent: totalWeight > 0 ? mass / totalWeight * 100 : 0, value, member: value !== null } as any; };
+      const buckets = [...items.entries()].sort(([a, am], [b, bm]) => bm.length - am.length || a.localeCompare(b)).map(([item, members]) => toBucket(item, members, item));
+      if (none.length) buckets.push(toBucket('Missing', none, null));
+      const observed = records.reduce((sum, record) => sum + record.weight, 0);
+      const result: any = { field, kind: 'categorical', multi: true, total: records.length, missing: none.length, buckets };
+      if (weighted && observed < 1 - 1e-9) result.warning = `Observed cohort profiles cover ${(observed * 100).toFixed(1)}% of the effective population weight.`;
+      return result;
+    }
     const missing = records.filter((record) => record.value === null);
     const present = records.filter((record) => record.value !== null);
     const observedMass = records.reduce((sum, record) => sum + record.weight, 0);
@@ -226,7 +255,10 @@ export function createCohortInsights() {
     }
     return slots;
   }
-  function matchesBucket(persona: any, field: string, bucket: any, kind?: Kind): boolean { return matchesDistributionBucket(getPersonaFieldValue(persona, field), bucket, kind); }
+  function matchesBucket(persona: any, field: string, bucket: any, kind?: Kind): boolean {
+    if (bucket?.member) { const raw = rawFieldValue(persona, field); return Array.isArray(raw) ? arrayItems(raw).includes(bucket.value) : raw !== undefined && raw !== null && stable(raw) === bucket.value; }
+    if (bucket?.value === null && bucket.label === 'Missing') { const raw = rawFieldValue(persona, field); if (Array.isArray(raw)) return raw.length === 0; }
+    return matchesDistributionBucket(getPersonaFieldValue(persona, field), bucket, kind); }
   return { discoverFields, distribution, effectiveWeights, allocateTargets, matchesBucket, getPersonaFieldValue, matchesDistributionBucket, validateTargets };
 }
 

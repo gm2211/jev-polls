@@ -111,3 +111,16 @@ test('allocates deterministic marginal quotas with separate field orderings', ()
   assert.deepEqual(first.map((slot) => slot.buckets.segment).reduce((counts, index) => { counts[index!] = (counts[index!] ?? 0) + 1; return counts; }, {} as Record<number, number>), { 0: 6, 1: 3, 2: 2 });
   assert.notDeepEqual(first.map((slot) => slot.buckets.segment), first.map((slot) => slot.buckets['attributes.home.region']));
 });
+
+test('array attributes are charted per item with missing values disclosed', () => {
+  const insights = createCohortInsights();
+  const mk = (id: string, attributes: Record<string, unknown>) => ({ id, segment: 's', age: 30, attributes });
+  const arrays = { id: 'c', name: 'C', segments: [{ id: 's', label: 'S', weight: 1 }], personas: [mk('a', { f: ['Doom', 'StarCraft'] }), mk('b', { f: ['Doom'] }), mk('c', { f: ['StarCraft', 'Doom', 'Doom'] }), mk('d', { f: [] }), mk('e', {})] } as any;
+  const result = insights.distribution(arrays, 'attributes.f');
+  assert.equal(result.multi, true);
+  assert.deepEqual(result.buckets.map(({ label, count }: any) => [label, count]), [['Doom', 3], ['StarCraft', 2], ['Missing', 2]]);
+  assert.equal(result.buckets[0].percent, 60);
+  assert.equal(result.missing, 2);
+  assert.deepEqual(arrays.personas.filter((p: any) => insights.matchesBucket(p, 'attributes.f', result.buckets[1])).map((p: any) => p.id), ['a', 'c']);
+  assert.deepEqual(arrays.personas.filter((p: any) => insights.matchesBucket(p, 'attributes.f', result.buckets[2])).map((p: any) => p.id), ['d', 'e']);
+});

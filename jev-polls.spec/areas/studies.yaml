@@ -13,6 +13,20 @@ behaviors:
       A project can hold several studies (projects.multiple-studies); new studies are named
       "Study N" until their question is set. Changed 2026-10-09 from a question-first form, per
       study-journey.empty-list-creates.
+  - id: one-new-study-button
+    description: >-
+      A project's study list offers a single New study button, in the page header; the empty list
+      keeps its own create prompt.
+    source:
+      text: Studies page shows two New study buttons when a study exists.
+      reference: jev-polls demo recording, 2026-10-10
+  - id: count-labels-singular
+    description: >-
+      Count labels on the canvas and cohort views use the singular for one (1 persona, 1 member,
+      1 step), never "1 personas".
+    source:
+      text: step cards on the canvas say 1 personas and Explore 1 members.
+      reference: jev-polls demo recording, 2026-10-10
   - id: delete-study
     description: >-
       Each row in a project's studies list has a delete button that asks for confirmation before

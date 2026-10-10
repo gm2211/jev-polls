@@ -33,3 +33,16 @@ test('attached material accepts UTF-8 text files and rejects other files with fi
   await assert.rejects(materialReadFile(file('a\u0000b')), /UTF-8/); await assert.rejects(materialReadFile(file('bad�')), /UTF-8/);
   await assert.rejects(materialReadFile(file('  \n')), /empty/);
 });
+
+test('markdown renders bold spans that contain inline code', () => {
+  assert.equal(markdownHtml('**Phase 1 (`market`):** rank them'), '<p><strong>Phase 1 (<code>market</code>):</strong> rank them</p>');
+  assert.equal(markdownHtml('**open `<b>` still'), '<p>**open <code>&lt;b&gt;</code> still</p>');
+  assert.equal(markdownHtml('`**not bold**`'), '<p><code>**not bold**</code></p>');
+});
+
+test('markdown renders ordered lists on separate lines and inline after a colon', () => {
+  assert.equal(markdownHtml('Plan:\n1. First **one**\n2. Second `two`\n\nDone'), '<p>Plan:</p><ol><li>First <strong>one</strong></li><li>Second <code>two</code></li></ol><p>Done</p>');
+  assert.equal(markdownHtml('Two phases: 1. Score names 2. Rank <b>finalists</b>'), '<p>Two phases:</p><ol><li>Score names</li><li>Rank &lt;b&gt;finalists&lt;/b&gt;</li></ol>');
+  assert.equal(markdownHtml('- a\n1. b'), '<ul><li>a</li></ul><ol><li>b</li></ol>');
+  assert.equal(markdownHtml('Version: 1. only one'), '<p>Version: 1. only one</p>');
+});

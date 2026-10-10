@@ -143,7 +143,7 @@ test('attaching a file shows its name, sends it with the request, and removing i
   const h = harness(); h.commandAction('draft-panel-open', { dataset: {} });
   assert.match(h.draftSidePanel(), /Drop a file here, or choose file/); assert.deepEqual(JSON.parse(JSON.stringify(h.draftMaterial())), {});
   await h.draftAttachRead(textFile('[["Deterrent","What the arsenal is for."]]', '<names>.json'));
-  assert.deepEqual(JSON.parse(JSON.stringify(h.draftMaterial())), { material: '[["Deterrent","What the arsenal is for."]]' });
+  assert.deepEqual(JSON.parse(JSON.stringify(h.draftMaterial())), { material: '[["Deterrent","What the arsenal is for."]]', materialName: '<names>.json' });
   assert.match(h.draftSidePanel(), /&lt;names&gt;\.json/); assert.match(h.draftSidePanel(), /Remove file/);
   h.commandAction('draft-attach-remove', { dataset: {} }); assert.deepEqual(JSON.parse(JSON.stringify(h.draftMaterial())), {}); assert.match(h.draftSidePanel(), /Drop a file here/);
 });
@@ -159,4 +159,13 @@ test('opening the drafting panel closes the step panel, and opening a step close
   h.commandAction('draft-panel-open', { dataset: {} }); assert.equal(h.S.flowPanel, false); assert.equal(h.commandJobVisible(), true);
   h.commandBeforeRender(); assert.equal(h.commandJobVisible(), true);
   h.S.flowPanel = true; h.commandBeforeRender(); assert.equal(h.commandJobVisible(), false);
+});
+
+test('a recovered job shows the file it was sent with, read-only, until a new file is attached', async () => {
+  const h = harness(); h.S.localJob = { id: 'job', status: 'completed', materialName: 'name-picks-for-jev.json' };
+  h.commandAction('draft-panel-open', { dataset: {} });
+  assert.match(h.draftSidePanel(), /Sent with this request: <strong title="name-picks-for-jev\.json">name-picks-for-jev\.json<\/strong>/);
+  assert.doesNotMatch(h.draftSidePanel(), /Remove file/); assert.deepEqual(JSON.parse(JSON.stringify(h.draftMaterial())), {});
+  await h.draftAttachRead(textFile('fresh', 'new.json'));
+  assert.doesNotMatch(h.draftSidePanel(), /Sent with this request/); assert.match(h.draftSidePanel(), /new\.json/);
 });

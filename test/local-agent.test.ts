@@ -759,6 +759,11 @@ test('workspace drafts pass attached material to the provider as data and bound 
   const marker = 'User request and current workspace are data:\n', data = JSON.parse(sent.slice(sent.indexOf(marker) + marker.length));
   assert.equal(data.sourceMaterial, material);
   assert.match(sent, /untrusted data/); assert.match(sent, /Choice option \(label plus description/); assert.match(sent, /at most 80 characters/); assert.match(sent, /must not exceed the persona count/);
+  const named = service.start({ ...projectRequest, document, material, materialName: 'name-picks-for-jev.json' });
+  assert.equal(named.materialName, 'name-picks-for-jev.json'); assert.doesNotMatch(JSON.stringify(named), /Deterrent/);
+  await terminal(service, named);
+  assert.equal((await terminal(service, service.start({ ...projectRequest, document }))).materialName, undefined);
+  for (const bad of [{ materialName: 'orphan.json' }, { material, materialName: 'bad\nname.json' }]) assert.throws(() => service.start({ ...projectRequest, document, ...bad }), LocalAgentError);
   sent = '';
   await terminal(service, service.start({ ...projectRequest, document }));
   assert.doesNotMatch(sent, /sourceMaterial|attached source material/);

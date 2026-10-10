@@ -33,9 +33,10 @@ function commandFeedback(){return (commandState.busy?'<p class="command-status" 
 function commandPalette(){return commandState.open?'<div class="command-backdrop"><section class="command-palette" role="dialog" aria-modal="true" aria-label="Go anywhere"><div class="command-search"><label class="sr-only" for="commandSearch">Search workspace or ask AI</label><input id="commandSearch" role="combobox" aria-expanded="true" aria-controls="commandOptions" aria-autocomplete="list" autocomplete="off" placeholder="Search or ask AI to do something…" value="'+attr(commandState.query)+'"><button class="button small" data-act="command-close" aria-label="Close command navigation">Esc</button></div><div id="commandResults">'+commandResults()+'</div></section></div>':''}
 function commandJobVisible(){return !!S.projectId&&commandState.draftProject===S.projectId}
 function draftAttach(running){
+  const sent=!commandState.filename?(S.localStart||S.localJob)?.materialName:'';
   const input='<input id="assistantFile" type="file" accept=".txt,.md,.csv,.json,text/plain,text/markdown,text/csv,application/json" hidden>';
   const body=commandState.filename?'<div class="draft-attach-file"><span class="draft-attach-name" title="'+attr(commandState.filename)+'">'+esc(commandState.filename)+'</span><button type="button" class="button small" data-act="draft-attach-remove" '+(running?'disabled':'')+'>Remove file</button></div><p class="subtle">Sent with your request as source material.</p>':'<button type="button" class="draft-drop" data-act="draft-attach-choose" '+(running||commandState.reading?'disabled':'')+'>'+(commandState.reading?'Reading file…':'Drop a file here, or choose file')+'<span>TXT, Markdown, CSV or JSON · up to 256 KiB</span></button>';
-  return '<div class="draft-attach">'+input+body+(commandState.fileError?'<p class="warning" role="alert">'+esc(commandState.fileError)+'</p>':'')+'</div>';
+  return '<div class="draft-attach">'+input+(sent?'<p class="subtle draft-attach-sent">Sent with this request: <strong title="'+attr(sent)+'">'+esc(sent)+'</strong></p>':'')+body+(commandState.fileError?'<p class="warning" role="alert">'+esc(commandState.fileError)+'</p>':'')+'</div>';
 }
 async function draftAttachRead(file){
   if(!file||commandState.reading)return;const version=++commandState.readVersion;commandState.reading=true;commandState.fileError='';render();
@@ -44,7 +45,7 @@ async function draftAttachRead(file){
   finally{if(commandState.readVersion===version){commandState.reading=false;commandState.focus='#assistantPrompt';render()}}
 }
 function draftAttachClear(){commandState.readVersion++;commandState.reading=false;commandState.material='';commandState.filename='';commandState.fileError=''}
-function draftMaterial(){return commandJobVisible()&&commandState.material?{material:commandState.material}:{}}
+function draftMaterial(){return commandJobVisible()&&commandState.material?{material:commandState.material,materialName:commandState.filename}:{}}
 function draftSidePanel(){
   if(!commandJobVisible())return '';
   const active=S.localStart||S.localJob,running=active?.status==='running',review=!!active;
