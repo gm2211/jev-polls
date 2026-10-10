@@ -60,7 +60,7 @@ export interface WorkspaceServerOptions {
   providerFactory?: (name: 'typesafe' | 'gliner') => Provider;
   getGlinerStatus?: () => Promise<{ ready: boolean; model: string; message?: string }>;
   emit?: (event: Record<string, unknown>) => void;
-  localAgents?: Pick<LocalAgentService, 'availability' | 'start' | 'get' | 'cancel' | 'close'>;
+  localAgents?: Pick<LocalAgentService, 'availability' | 'start' | 'get' | 'cancel' | 'close'> & Partial<Pick<LocalAgentService, 'list' | 'settle' | 'disposition'>>;
 }
 
 /** Account connection and review are separate from explicit study execution. */
@@ -330,7 +330,14 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
       });
       send(response, 202, job); return;
     }
-    const agentRoute = /^\/api\/agent\/jobs\/([0-9a-f-]{36})(?:\/(cancel|apply))?$/.exec(pathname);
+    if (method === 'GET' && pathname === '/api/agent/jobs') {
+      const projectId = safeId.optional().parse(new URL(request.url ?? '/', origin).searchParams.get('projectId') ?? undefined);
+      const saved = await store.read();
+      // A completed proposal tied to an older revision can no longer be applied, so it is not offered again.
+      const jobs = (localAgents.list?.(projectId) ?? []).filter(job => job.status !== 'completed' || job.revision === saved.revision);
+      send(response, 200, { jobs }); return;
+    }
+    const agentRoute = /^\/api\/agent\/jobs\/([0-9a-f-]{36})(?:\/(cancel|apply|discard))?$/.exec(pathname);
     if (agentRoute) {
       const job = localAgents.get(agentRoute[1]!);
       if (!job) throw new HttpError(404, 'AGENT_JOB_NOT_FOUND', 'Assistant task was not found. Start a new task.');
@@ -339,11 +346,22 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
         z.object({}).strict().parse(await body(request));
         send(response, 200, localAgents.cancel(job.id)); return;
       }
+      if (method === 'POST' && agentRoute[2] === 'discard') {
+        z.object({}).strict().parse(await body(request));
+        send(response, 200, localAgents.settle?.(job.id, 'discarded') ?? job); return;
+      }
       if (method === 'POST' && agentRoute[2] === 'apply') {
         const input = z.object({ revision: z.number().int().nonnegative().safe() }).strict().parse(await body(request));
+        if (localAgents.disposition?.(job.id) === 'applied') throw new HttpError(409, 'AGENT_PROPOSAL_APPLIED', 'This proposal was already applied, possibly in another tab or window. Reload the saved workspace to see it.');
         if (job.status !== 'completed' || !job.proposal) throw new HttpError(409, 'AGENT_PROPOSAL_NOT_READY', 'A completed proposal is required before applying changes.');
         if (input.revision !== job.revision) throw new WorkspaceConflictError(job.revision, input.revision);
-        const saved = await saveWorkspace(job.proposal.document, input.revision);
+        let saved;
+        try { saved = await saveWorkspace(job.proposal.document, input.revision); }
+        catch (error) {
+          if (error instanceof WorkspaceConflictError && localAgents.disposition?.(job.id) === 'applied') throw new HttpError(409, 'AGENT_PROPOSAL_APPLIED', 'This proposal was already applied, possibly in another tab or window. Reload the saved workspace to see it.');
+          throw error;
+        }
+        localAgents.settle?.(job.id, 'applied');
         send(response, 200, saved); return;
       }
     }

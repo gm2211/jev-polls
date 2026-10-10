@@ -58,7 +58,7 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={commandEntries,commandExecute,inlineCohortJobVisible,inlineCohortTarget,setupCohortPicker,runCaveats,beginRun,commandApplyProposal,commandJobVisible,S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,locationHash,restoreLocation,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,studies,review,say,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,studyQuestionList,validateSetupAnswers,questionParts,upsertQuestion,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={recoverDraftingJob,recoverableDraftingJob,loadLocalAgents,cohortJobNotice,cohortJobNoticeVisible,commandState,adoptCohortProposal,commandEntries,commandExecute,inlineCohortJobVisible,inlineCohortTarget,setupCohortPicker,runCaveats,beginRun,commandApplyProposal,commandJobVisible,S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,locationHash,restoreLocation,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,studies,review,say,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,studyQuestionList,validateSetupAnswers,questionParts,upsertQuestion,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
   if (openExistingProject) (context as any).clientTest.S.projectId = 'existing-research';
@@ -3039,4 +3039,70 @@ test('concurrent batch progress names the running batches, the retry, and divide
   assert.match(draftEstimate(base),/~30–46 min remaining/);
   assert.match(draftEstimate({...base,maxConcurrentBatches:6}),/~5–8 min remaining.*6 at a time/);
   assert.match(html.replace(/retries/,''),/Generating/);
+});
+
+test('a new tab reattaches to a running cohort generation and offers it on the Cohorts list', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, loadLocalAgents, cohortJobNotice, commandState } = browser.client;
+  const running = { id: 'job-run', projectId: 'existing-research', engine: 'codex', status: 'running', revision: 1, message: 'Generating', cohort: { id: 'big-panel', size: 1000, prompt: 'Gamers who play at night' }, progress: { phase: 'generating', completedPersonas: 375, totalPersonas: 1000 } };
+  browser.respond('/api/agent/jobs?projectId=existing-research', { jobs: [running] });
+  S.localJob = null; S.tab = 'cohorts';
+  await loadLocalAgents();
+  assert.equal(S.localJob.id, 'job-run');
+  assert.equal(S.cohortComposer, false, 'the list stays open and offers the job');
+  assert.equal(S.cohortPrompt, 'Gamers who play at night');
+  assert.equal(S.cohortSize, 1000);
+  assert.equal(browser.storage.size, 0, 'nothing was remembered by this tab');
+  const html = browser.element('app').innerHTML;
+  assert.match(html, /Generating 1,000 personas · 375 done/);
+  assert.match(html, /data-act="cohort-job-open"/);
+  assert.doesNotMatch(html, /Click anywhere here to describe an audience/, 'the empty state is replaced');
+  assert.equal(S.localJob.status, 'running');
+  assert.equal(commandState.draftProject, null);
+  S.localJob = { ...running, status: 'completed', proposal: { document: browser.snapshot().document, explanation: 'Done' } };
+  assert.match(cohortJobNotice(), /Cohort ready to review · 1,000 personas/);
+  assert.match(cohortJobNotice(), /Review cohort/);
+});
+
+test('recovery prefers a running job, skips option, persona and command jobs, and opens the Build with words panel for study drafts', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, recoverDraftingJob, recoverableDraftingJob, commandState } = browser.client;
+  const base = { engine: 'codex', revision: 1, message: '', projectId: 'existing-research' };
+  const picked = recoverableDraftingJob([{ ...base, id: 'a', status: 'completed' }, { ...base, id: 'b', status: 'running' }, { ...base, id: 'c', status: 'running', options: { pipelineId: 'p', stageId: 's', questionId: 'q' } }, { ...base, id: 'd', status: 'running', persona: { cohortId: 'c', personaId: 'p' } }]);
+  assert.equal(picked.id, 'b');
+  assert.equal(recoverableDraftingJob([{ ...base, id: 'x', status: 'cancelled' }]), null);
+  assert.equal(recoverableDraftingJob(undefined), null);
+  browser.respond('/api/agent/jobs?projectId=existing-research', { jobs: [{ ...base, id: 'study', status: 'completed', proposal: { document: browser.snapshot().document, explanation: 'Draft' } }] });
+  S.localJob = null;
+  assert.equal(await recoverDraftingJob(), true);
+  assert.equal(S.localJob.id, 'study');
+  assert.equal(commandState.draftProject, 'existing-research');
+  assert.equal(await recoverDraftingJob(), false, 'an already attached job is not replaced');
+  S.localJob = null; commandState.draftProject = null;
+  browser.respond('/api/agent/jobs?projectId=existing-research', { jobs: [] });
+  assert.equal(await recoverDraftingJob(), false);
+  assert.equal(S.localJob, null);
+});
+
+test('discarding or adopting a recovered cohort tells the server so other tabs stop offering it', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, adoptCohortProposal } = browser.client;
+  const document = browser.snapshot().document;
+  document.cohorts.push({ ...document.cohorts[0], id: 'big-panel', name: 'Big panel' });
+  S.localJob = { id: 'job-done', projectId: 'existing-research', engine: 'codex', status: 'completed', revision: 1, message: '', cohort: { id: 'big-panel', size: 1, prompt: 'x' }, proposal: { document, explanation: 'Done' } };
+  adoptCohortProposal();
+  assert.ok(browser.requests.includes('/api/agent/jobs/job-done/discard'));
+  assert.equal(S.localJob, null);
+});
+
+test('a remembered job that another tab applied or discarded is dropped instead of offered again', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, loadLocalAgents } = browser.client;
+  browser.storage.set('jev-local-job:http://127.0.0.1:4180:existing-research', 'job-gone');
+  browser.respond('/api/agent/jobs/job-gone', { id: 'job-gone', projectId: 'existing-research', engine: 'codex', status: 'completed', revision: 1, message: '', settled: 'applied', cohort: { id: 'x', size: 5, prompt: 'p' } });
+  browser.respond('/api/agent/jobs?projectId=existing-research', { jobs: [] });
+  S.localJob = null; S.localLoading = false;
+  await loadLocalAgents();
+  assert.equal(S.localJob, null);
+  assert.equal(browser.storage.has('jev-local-job:http://127.0.0.1:4180:existing-research'), false);
 });

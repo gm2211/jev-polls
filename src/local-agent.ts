@@ -38,6 +38,8 @@ export interface LocalAgentJob {
   options?: { pipelineId: string; stageId: string; questionId: string };
   proposal?: { document: WorkspaceDocument; explanation: string };
   commandResult?: LocalAgentCommandResult;
+  /** Set when a finished proposal was applied or discarded, so other tabs stop offering it. */
+  settled?: 'applied' | 'discarded';
 }
 export interface LocalAgentAvailability { engines: { id: LocalAgentEngine; label: string; available: boolean; installed: boolean; authenticated: boolean; message: string }[] }
 export type LocalAgentCommandResult =
@@ -131,7 +133,7 @@ function optionQuestion(document: WorkspaceDocument, request: NonNullable<LocalA
 
 interface ProcessResult { code: number | null; stdout: string; stderr: string; missing: boolean; limited: boolean }
 interface ProviderSlot { chars: number; tokens?: number }
-interface Entry { public: LocalAgentJob; work?: Promise<void>; aborts: Set<() => void>; slots: Map<number, ProviderSlot>; cancelled: boolean; settled: boolean }
+interface Entry { public: LocalAgentJob; work?: Promise<void>; aborts: Set<() => void>; slots: Map<number, ProviderSlot>; cancelled: boolean; settled: boolean; command?: boolean; disposition?: 'applied' | 'discarded' }
 class DraftFailure extends Error {}
 /** A failure that another attempt cannot fix, so the batch is not retried. */
 class FatalDraftFailure extends DraftFailure {}
@@ -296,13 +298,34 @@ export class LocalAgentService {
     const startedAt = new Date().toISOString();
     const progress: LocalAgentProgress = { phase: 'checking', ...(parsed.cohort ? { completedPersonas: 0, totalPersonas: parsed.cohort.size, completedBatches: 0, totalBatches: Math.ceil(parsed.cohort.size / PERSONAS_PER_BATCH) } : parsed.persona ? { completedPersonas: 0, totalPersonas: 1 } : {}) };
     const job: LocalAgentJob = { ...(parsed.projectId ? { projectId: parsed.projectId } : {}), id: randomUUID(), engine: parsed.engine, revision: parsed.revision, status: 'running', message: 'Checking your AI connection…', startedAt, updatedAt: startedAt, progress, ...(parsed.engine === 'chatgpt' ? { model: parsed.model } : {}), ...(parsed.options ? { options: { pipelineId: parsed.options.pipelineId, stageId: parsed.options.stageId, questionId: parsed.options.questionId } } : {}), ...(parsed.persona ? { persona: parsed.persona } : {}), ...(parsed.cohort ? { cohort: { ...parsed.cohort, prompt: parsed.prompt } } : {}) };
-    const entry: Entry = { public: job, aborts: new Set(), slots: new Map(), cancelled: false, settled: false };
+    const entry: Entry = { public: job, aborts: new Set(), slots: new Map(), cancelled: false, settled: false, ...(parsed.command ? { command: true } : {}) };
     this.jobs.set(job.id, entry);
     entry.work = this.generate(entry, parsed);
     return structuredClone(job);
   }
 
-  get(id: string): LocalAgentJob | undefined { const job = this.jobs.get(id)?.public; return job ? structuredClone(job) : undefined; }
+  get(id: string): LocalAgentJob | undefined { const entry = this.jobs.get(id); return entry ? structuredClone({ ...entry.public, ...(entry.disposition ? { settled: entry.disposition } : {}) }) : undefined; }
+  /**
+   * Drafting jobs a reloaded or new browser tab can reattach to: every running job for the project,
+   * plus the newest finished one (completed or failed) that was not applied or discarded.
+   * Command-palette jobs are transient and never listed.
+   */
+  list(projectId?: string): LocalAgentJob[] {
+    const entries = [...this.jobs.values()].filter(entry => !entry.command && (projectId === undefined || entry.public.projectId === projectId));
+    const running = entries.filter(entry => entry.public.status === 'running');
+    const latest = entries.filter(entry => entry.public.status === 'completed' || entry.public.status === 'failed').at(-1);
+    const finished = latest && !latest.disposition ? latest : undefined;
+    return [...running, ...(finished ? [finished] : [])].map(entry => structuredClone(entry.public));
+  }
+  /** Records that a finished proposal was applied or discarded so it is no longer offered for recovery. */
+  settle(id: string, disposition: 'applied' | 'discarded'): LocalAgentJob | undefined {
+    const entry = this.jobs.get(id);
+    if (!entry) return;
+    if (entry.public.status !== 'running') entry.disposition ??= disposition;
+    return this.get(id);
+  }
+  /** How a finished proposal was resolved, when it was. */
+  disposition(id: string): 'applied' | 'discarded' | undefined { return this.jobs.get(id)?.disposition; }
   cancel(id: string): LocalAgentJob | undefined {
     const entry = this.jobs.get(id);
     if (!entry) return;

@@ -1043,3 +1043,50 @@ test('cancelling stops every in-flight concurrent batch and starts no more', asy
   assert.equal(state.calls.length, callsAtCancel, 'no batch starts after cancellation');
   assert.equal(state.running, 0); assert.equal(service.get(job.id)?.proposal, undefined); assert.equal(service.get(job.id)?.status, 'cancelled');
 });
+
+test('listing returns running jobs and the newest unsettled finished job for one project only', async t => {
+  const gate = deferred<{ connected: boolean; planEnabled: boolean }>();
+  let ready = false;
+  const service = new LocalAgentService({ chatgpt: {
+    status: async () => ready ? { connected: true, planEnabled: true } : gate.promise,
+    generate: async () => ({ text: JSON.stringify({ ...output, documentJson: JSON.stringify({ version: 1, cohorts: [], pipelines: [] }) }) }),
+  } as unknown as ChatGptDraftClient });
+  t.after(() => service.close());
+  const document: WorkspaceDocument = { ...empty, projects: [{ id: 'one', name: 'One', description: '', cohortIds: [], pipelineIds: [] }, { id: 'two', name: 'Two', description: '', cohortIds: [], pipelineIds: [] }] };
+  const first = service.start({ engine: 'chatgpt', model: 'm', prompt: 'Draft one', revision: 3, document, projectId: 'one' });
+  assert.deepEqual(service.list('one').map(job => job.id), [first.id], 'a running job is listed');
+  assert.deepEqual(service.list('two'), [], 'another project never sees it');
+  assert.equal(service.list('one')[0]!.status, 'running');
+  gate.resolve({ connected: true, planEnabled: true });
+  const done = await terminal(service, first);
+  assert.equal(done.status, 'completed');
+  assert.deepEqual(service.list('one').map(job => job.id), [first.id], 'an unapplied completed job stays listed');
+  service.settle(first.id, 'applied');
+  assert.deepEqual(service.list('one'), [], 'an applied job is no longer offered');
+  assert.equal(service.disposition(first.id), 'applied');
+  ready = true;
+  const second = service.start({ engine: 'chatgpt', model: 'm', prompt: 'Draft two', revision: 4, document, projectId: 'one' });
+  await terminal(service, second);
+  const third = service.start({ engine: 'chatgpt', model: 'm', prompt: 'Draft three', revision: 4, document, projectId: 'one' });
+  await terminal(service, third);
+  assert.deepEqual(service.list('one').map(job => job.id), [third.id], 'only the most recent finished job is offered');
+  const cancelled = service.start({ engine: 'chatgpt', model: 'm', prompt: 'Draft four', revision: 4, document, projectId: 'one' });
+  service.cancel(cancelled.id); await terminal(service, cancelled);
+  assert.deepEqual(service.list('one').map(job => job.id), [third.id], 'cancelled jobs are not offered');
+  service.settle(third.id, 'discarded');
+  assert.deepEqual(service.list('one'), []);
+  assert.equal(service.settle(cancelled.id, 'discarded')?.status, 'cancelled');
+});
+
+test('command palette jobs are never listed for recovery', async t => {
+  const gate = deferred<{ connected: boolean; planEnabled: boolean }>();
+  const service = new LocalAgentService({ chatgpt: {
+    status: () => gate.promise,
+    generate: async () => ({ text: '{}' }),
+  } as unknown as ChatGptDraftClient });
+  t.after(async () => { gate.resolve({ connected: false, planEnabled: false }); await service.close(); });
+  const document: WorkspaceDocument = { ...empty, projects: [{ id: 'one', name: 'One', description: '', cohortIds: [], pipelineIds: [] }] };
+  const job = service.start({ engine: 'chatgpt', model: 'm', prompt: 'Find studies', revision: 0, document, projectId: 'one', command: true, commandTargets: [] });
+  assert.equal(job.status, 'running');
+  assert.deepEqual(service.list('one'), []);
+});
