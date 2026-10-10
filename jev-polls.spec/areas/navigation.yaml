@@ -14,7 +14,7 @@ behaviors:
       view), clears any item the hash no longer names (closed cohort, persona, run, or composer),
       and the first paint and restores replace the entry rather than adding one.
     source:
-      text: fix everything (from the UI audit: three clicks in, Back leaves the site)
+      text: "fix everything (from the UI audit: three clicks in, Back leaves the site)"
       reference: jev-polls project thread "UI audit in headless browser", Giulio, 2026-10-10
   - id: reload-keeps-view
     description: >-

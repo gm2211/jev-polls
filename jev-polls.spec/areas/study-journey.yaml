@@ -91,22 +91,55 @@ behaviors:
       reference: jev-polls project thread "Rethink the main user flow", Giulio, 2026-10-09
   - id: round-panel
     description: >-
-      Selecting a round slides a panel over the canvas with one row of tabs (Question, Answers,
-      Inputs, Cohort), each marked when it still needs attention; Esc or a close control hides it.
+      Selecting a round slides a panel over the canvas with one row of tabs; each tab is marked
+      when it still needs attention or is done, and Esc or a close control hides it. An Ask cohort
+      step's tabs are the guided stops (guided-step-setup) followed by Inputs once there is
+      something to connect.
     details: >-
-      Modeled on railway.com's service panel. Answers also lists what later rounds can use as
+      Modeled on railway.com's service panel. Options also lists what later rounds can use as
       inputs. Selecting another round, adding one, or connecting an input reopens the panel.
     source:
       text: creating a voting round with types, inputs, outputs and which needs a cohort assigned
       reference: jev-polls project thread "Rethink the main user flow", Giulio, 2026-10-09
+  - id: guided-step-setup
+    description: >-
+      Adding a step opens its panel as a guided sequence: What to ask (answer format first, then
+      the question), Options (paste, import a file, or draft with your AI; skipped for Yes / no),
+      then Who answers. Each stop ends with Next (Done on the last); Next is held, with a reason,
+      while the stop is unfinished. Tabs show done or to do, and any tab can still be clicked.
+    details: >-
+      Replaces four equal tabs that opened on Cohort. The guided flow says "audience" and "who
+      answers"; the Cohorts page keeps its name (vocabulary owns that decision).
+    source:
+      text: >-
+        there is no guided flow - I have to know about cohorts - I had told you I want an experience
+        like railway.com. // you must be able to produce a 1 minute demo that shows very simple,
+        streamlined, almost guided process, without needing to jump between screens
+      reference: jev-polls project thread, Giulio, 2026-10-10 (both quotes)
+  - id: inline-audience-creation
+    description: >-
+      The Who answers stop lists saved audiences and, in the same panel, offers "Create the
+      audience": describe who they are, how many, Generate. Progress and the reviewed proposal
+      appear in the panel, and "Use this audience" assigns it to the step. A reload during
+      generation returns to this stop.
+    details: >-
+      Reuses the inline cohort generation (inline-cohort-create) without a New cohort button
+      click first. The recovered-job path restores the step from the remembered target, so the
+      draft is not left on the Cohorts page. A draft started in another session or tab still
+      shows on the Cohorts page notice.
+    source:
+      text: >-
+        needs a cohort assigned that I can create right there and then and navigate back to
+        pipeline. // there is no guided flow - I have to know about cohorts
+      reference: jev-polls project thread, Giulio, 2026-10-09 and 2026-10-10
   - id: inline-cohort-create
     description: >-
-      A round's Cohort tab offers New cohort, built inside the panel; accepting it adds it to the
-      shared library, links it to the project, assigns it to the round, and shows the Cohort tab
-      again with it selected.
+      A round's Who answers stop (the Cohort tab) offers a new audience built inside the panel;
+      accepting it adds it to the shared library, links it to the project, assigns it to the round,
+      and shows the stop again with it selected.
     details: >-
-      Back to cohorts returns to the cohort list without changes. With a cohort assigned, the tab
-      offers Open full cohort (the detailed editor, with a way back to the study) and Change cohort.
+      With an audience assigned, the tab offers Open full cohort (the detailed editor, with a way
+      back to the study) and Change cohort. See inline-audience-creation for the form.
     source:
       text: needs a cohort assigned that I can create right there and then and navigate back to pipeline
       reference: jev-polls project thread "Rethink the main user flow", Giulio, 2026-10-09
