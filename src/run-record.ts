@@ -13,12 +13,16 @@ const answer = z.discriminatedUnion('type', [
   z.object({ type: z.literal('score'), score: z.number().finite(), probabilities, confidence: probability.optional(), legend: z.record(z.string(), z.string()), classifier: classifier.optional() }).strict(),
   z.object({ type: z.literal('noul'), noul: probability, classifier: classifier.optional() }).strict(),
 ]);
+const voteSchema = z.object({ personaId: z.string(), cohortId: z.string().optional(), segment: z.string(), repeat: z.number().int().nonnegative(), weight: z.number().finite().nonnegative(), answers: z.record(z.string(), answer), cacheHit: z.boolean(), model: z.string(), batch: z.number().int().positive().optional() }).strict();
+
 export const runSchema = z.object({
   version: z.literal(1), id: z.string(), createdAt: z.string(), finishedAt: z.string(), pipeline: z.unknown(), pipelineHash: z.string(), provider: z.enum(['mock', 'typesafe', 'gliner']), model: z.string(), seed: z.string(), status: z.enum(['completed', 'failed']), cohorts: z.record(z.string(), z.unknown()), warnings: z.array(z.string()),
   usage: z.object({ inputTokens: z.number().nonnegative(), outputTokens: z.number().nonnegative(), requests: z.number().nonnegative(), cacheHits: z.number().nonnegative(), tokenUsage: z.literal('unreported').optional(), measuredInputTokens: z.number().int().nonnegative().optional() }).strict(),
   stages: z.record(z.string(), z.object({ id: z.string(), kind: z.enum(['poll', 'aggregate', 'decision']), label: z.string(), status: z.enum(['completed', 'skipped', 'failed']), reason: z.string().optional(), dependsOn: z.array(z.string()), startedAt: z.string(), finishedAt: z.string(),
-    votes: z.array(z.object({ personaId: z.string(), cohortId: z.string().optional(), segment: z.string(), repeat: z.number().int().nonnegative(), weight: z.number().finite().nonnegative(), answers: z.record(z.string(), answer), cacheHit: z.boolean(), model: z.string() }).strict()),
+    votes: z.array(voteSchema),
     summaries: z.record(z.string(), summary.extend({ bySegment: z.record(z.string(), summary), byRepeat: z.record(z.string(), summary) }).strict()),
+    batching: z.object({ input: z.string(), sourceStage: z.string(), sourceLabel: z.string(), totalResponses: z.number().int().nonnegative(), batchSize: z.number().int().positive(), batches: z.number().int().positive(), groupSize: z.number().int().positive(), reduceRounds: z.number().int().nonnegative(), note: z.string() }).strict().optional(),
+    layers: z.array(z.object({ kind: z.enum(['map', 'reduce']), round: z.number().int().nonnegative(), requests: z.number().int().nonnegative(), votes: z.array(voteSchema) }).strict()).optional(),
   }).strict()),
 }).strict();
 
