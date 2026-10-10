@@ -187,8 +187,8 @@ test('attached add actions create connected follow-up, combine, and final result
     assert.deepEqual(plain(added.dependsOn), ['source']);
     if (kind === 'poll') {
       assert.equal(added.cohort, source.cohort);
-      assert.equal(S.sections['flow-inspector'], 'cohort');
-      assert.equal(S.flowCohortPick, true);
+      assert.equal(S.sections['flow-inspector'], 'question', 'a new step opens the guided sequence at What to ask');
+      assert.equal(S.flowCohortPick, false);
       assert.ok(Object.values<any>(added.inputs).some(input => input.stage === 'source' && input.question === 'answer'));
     } else if (kind === 'aggregate') {
       assert.deepEqual(plain(added.inputs), [{ stage: 'source', question: 'answer', weight: 1 }]);
@@ -298,7 +298,7 @@ test('question and incoming-result labels are escaped in flow markup without mut
 });
 
 
-test('independent question starts cohort selection inside pipeline without changing existing nodes', async () => {
+test('independent question opens What to ask and offers audience creation inside the pipeline without changing existing nodes', async () => {
   const { S, pipeline, flowAction, flowCohortMap } = await flowHarness();
   const before = JSON.stringify(pipeline.stages);
   flowAction('flow-add', { dataset: { kind: 'independent' } });
@@ -307,9 +307,10 @@ test('independent question starts cohort selection inside pipeline without chang
   assert.equal(added.kind, 'poll');
   assert.deepEqual(plain(added.dependsOn), []);
   assert.equal(S.tab, 'studies');
-  assert.equal(S.sections['flow-inspector'], 'cohort');
+  assert.equal(S.sections['flow-inspector'], 'question');
   const html = flowCohortMap(pipeline, added);
-  assert.match(html, /data-act="new-cohort"/);
+  assert.match(html, /Create the audience/);
+  assert.match(html, /data-act="flow-audience-generate"/);
   assert.doesNotMatch(html, /name="setupPrompt"/);
 });
 
@@ -369,4 +370,33 @@ test('a step asking more people than its cohort has needs more personas and open
   assert.equal(flowReadiness(pipeline, source), 'Ready');
   delete source.size;
   assert.equal(flowReadiness(pipeline, source), 'Ready');
+});
+
+test('the guided stops advance with Next, skip Options for Yes / no, and block an unfinished stop', async () => {
+  const { S, pipeline, flowAction, flowRoundTabs, flowInspector, source } = await flowHarness();
+  Object.assign(S, { stageId: 'source', flowPanel: true });
+  S.sections['flow-inspector'] = 'question';
+  const q: any = source.questions.answer;
+  const tabs = () => plain(flowRoundTabs(pipeline, source)).map((t: any) => t[0]);
+  assert.deepEqual(tabs(), ['question', 'answers', 'cohort', 'connections']);
+  assert.match(flowInspector(pipeline, source), /Next: Options/);
+  q.label = '';
+  flowAction('flow-next', { dataset: {} });
+  assert.equal(S.sections['flow-inspector'], 'question', 'an empty question blocks Next');
+  assert.match(S.sections['flow-inspector-error'], /Write the question/);
+  q.label = 'Which name?';
+  flowAction('flow-next', { dataset: {} });
+  assert.equal(S.sections['flow-inspector'], 'answers');
+  assert.equal(S.sections['flow-inspector-error'], undefined);
+  assert.match(flowInspector(pipeline, source), /Next: Who answers/);
+  assert.match(flowInspector(pipeline, source), /data-section="question" aria-selected="false" data-done="true"/);
+  q.type = 'noul'; q.criteria = {};
+  assert.deepEqual(tabs(), ['question', 'cohort', 'connections'], 'Yes / no has no Options stop');
+  S.sections['flow-inspector'] = 'question';
+  flowAction('flow-next', { dataset: {} });
+  assert.equal(S.sections['flow-inspector'], 'cohort');
+  flowAction('flow-next', { dataset: {} });
+  assert.equal(S.sections['flow-inspector'], 'cohort', 'no cohort chosen yet blocks Done');
+  assert.match(S.sections['flow-inspector-error'], /who answers/i);
+  assert.match(flowInspector(pipeline, source), /Create the audience/);
 });

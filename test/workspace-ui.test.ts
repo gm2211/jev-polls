@@ -791,7 +791,7 @@ test('cohort prompt generation scopes the request and previews personas without 
   assert.deepEqual(JSON.parse(JSON.stringify(browser.bodies.at(-1)!.body)), { projectId: 'existing-research', engine: 'codex', prompt: S.cohortPrompt, revision: S.revision, cohort: { id: 'new-audience', size: 2 } });
   assert.equal(JSON.stringify(S.doc), JSON.stringify(original), 'generation cannot modify the workspace draft');
   const review = cohortProposalReview(S.localJob);
-  assert.match(review, /Frequent visitor/); assert.match(review, /Use cohort for this step/);
+  assert.match(review, /Frequent visitor/); assert.match(review, /Use this audience/);
   assert.doesNotMatch(review, /Apply proposal/);
   adoptCohortProposal();
   assert.equal(S.cohortId, 'new-audience'); assert.equal(S.dirty, true); assert.equal(S.cohortComposer, false);
@@ -1426,10 +1426,10 @@ test('empty study cohort selection generates inline without losing question or c
   S.sections['setup-wizard-study-panel-answer'] = 'cohort'; S.sections['flow-inspector']='cohort'; S.dirty = true;
   const before = JSON.stringify(S.doc);
   render();
-  assert.match(browser.element('app').innerHTML, /Who answers this step\?[\s\S]*?New cohort/);
+  assert.match(browser.element('app').innerHTML, /Create the audience[\s\S]*?data-act="flow-audience-generate"/);
   act(null, { dataset: { act: 'new-cohort' } }); await settle();
   assert.equal(S.tab, 'studies');
-  assert.match(browser.element('app').innerHTML, /Who should be in this cohort\?/);
+  assert.match(browser.element('app').innerHTML, /Who are they\?/);
   assert.match(browser.element('app').innerHTML, /data-inspector-tab="cohort"/);
   assert.doesNotMatch(browser.element('app').innerHTML, /Back to study/);
   assert.equal(browser.bodies.length, 0, 'opening the brief neither saves nor starts generation');
@@ -1456,7 +1456,7 @@ test('inline cohort proposal attaches only to its original step after selection 
   S.tab = 'studies'; S.pipelineId = 'study'; S.stageId = 'panel';
   const p = S.doc.pipelines[0], first = p.stages[0];
   p.stages.push({ ...structuredClone(first), id: 'second' });
-  assert.match(setupCohortPicker(p,first), /data-act="new-cohort"[^>]*>[\s\S]*?New cohort/);
+  assert.match(setupCohortPicker(p,first), /Or create the audience[\s\S]*?data-act="flow-audience-generate"/);
   act(null, { dataset: { act: 'new-cohort' } }); await settle();
   const candidate = { ...structuredClone(S.doc.cohorts[0]), id: 'new-audience', name: 'New audience' };
   S.localJob = { id: 'inline-job', status: 'completed', revision: S.revision, cohort: { id: candidate.id, prompt: 'New audience', size: 1 }, proposal: { document: { cohorts: [candidate] }, explanation: 'Synthetic assumptions' } };
@@ -3015,7 +3015,7 @@ test('a selected step opens a closable panel with one row of tabs marking unfini
   S.tab = 'studies'; S.pipelineId = 'study'; S.stageId = 'panel'; S.sections['flow-inspector'] = 'question'; render();
   const tabs = () => [...html().matchAll(/<button type="button" role="tab" class="round-tab" data-act="flow-inspector" data-section="([a-z]+)"[^>]*>/g)].map(m => m[1]);
   assert.match(html(), /<aside class="flow-inspector round-panel"/);
-  assert.deepEqual(tabs(), ['question', 'answers', 'connections', 'cohort']);
+  assert.deepEqual(tabs(), ['question', 'answers', 'cohort'], 'a lone step shows the three guided stops; Inputs appears once there is something to connect');
   assert.match(html(), /data-act="flow-panel-close" aria-label="Close step panel"/);
   act(null, { dataset: { act: 'flow-inspector', section: 'answers' } });
   assert.match(html(), /data-inspector-tab="answers"/);
@@ -3256,4 +3256,33 @@ test('the first question added to an empty canvas opens its panel and takes the 
   assert.equal(S.flowPanel, true);
   assert.equal(Object.values(study.stages[0].questions)[0].label, 'Which name fits best?');
   assert.doesNotMatch(browser.element('app').innerHTML, /class="flow-empty"/);
+});
+
+test('a reload during inline audience generation returns to the step\'s Who answers stop, not a list page', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, act, startCohortJob } = browser.client;
+  S.tab = 'studies'; S.pipelineId = 'study'; S.stageId = 'panel';
+  act(null, { dataset: { act: 'new-cohort' } }); await settle();
+  S.cohortPrompt = 'Virtual weekend readers'; S.cohortTarget = 'new-audience'; S.cohortSize = 1;
+  S.localEngine = 'codex'; S.localEngines = [{ id: 'codex', available: true }];
+  const candidate = { ...structuredClone(S.doc.cohorts[0]), id: 'new-audience', name: 'Weekend readers' };
+  const job = { id: 'reload-job', projectId: S.projectId, status: 'completed', revision: S.revision, cohort: { id: candidate.id, prompt: S.cohortPrompt, size: 1 }, proposal: { document: { cohorts: [candidate] }, explanation: 'Synthetic assumptions' } };
+  browser.respond('/api/agent/jobs', job);
+  await startCohortJob();
+
+  const reloaded = browserHarness(); await settle();
+  for (const [key, value] of browser.storage) reloaded.storage.set(key, value);
+  reloaded.respond('/api/agent/jobs/reload-job', job);
+  const client = reloaded.client;
+  client.S.tab = 'cohorts'; client.S.pipelineId = null; client.S.stageId = null;
+  await client.loadLocalAgents(); await settle();
+  assert.equal(client.S.tab, 'studies');
+  assert.equal(client.S.pipelineId, 'study');
+  assert.equal(client.S.stageId, 'panel');
+  assert.equal(client.S.flowPanel, true);
+  assert.equal(client.S.sections['flow-inspector'], 'cohort');
+  const html = reloaded.element('app').innerHTML;
+  assert.match(html, /data-inspector-tab="cohort"/);
+  assert.match(html, /Use this audience/);
+  assert.doesNotMatch(html, /cohort-job-notice/);
 });
