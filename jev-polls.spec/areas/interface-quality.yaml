@@ -53,3 +53,16 @@ behaviors:
       text: The red error banner stayed visible after the next save and Review run succeeded.
       reference: jev-polls project thread, 2026-10-10
 
+  - id: one-list-row
+    description: >-
+      Projects, Studies and Cohorts lists use the same row: title, an optional one-line subtitle,
+      small counts, a chevron, and trailing icon actions (rename, delete); each list has one create
+      button, on the title line, labeled New project, New study or New cohort.
+    details: >-
+      Before 2026-10-10 the three lists had three designs: project cards with counts and a chevron,
+      study rows with a chevron, and cohort cards with a large persona count, no chevron, a dashed
+      New cohort card at the end and a header button that said Generate cohort. The shared row is
+      listRow in the workspace client.
+    source:
+      text: Three sibling list pages, three card designs (UI audit, item 8)
+      reference: jev-polls project thread "UI audit in a headless browser", 2026-10-10

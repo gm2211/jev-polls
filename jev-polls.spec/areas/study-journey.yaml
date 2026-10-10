@@ -69,7 +69,7 @@ behaviors:
       An empty studies or cohorts list is itself the create control: clicking anywhere in it
       creates the item and opens it, with no intermediate form.
     details: >-
-      A non-empty cohorts list keeps a create row at its end and a create button on the title line; the studies list keeps only the title-line button (studies.one-new-study-button). A new
+      A non-empty studies or cohorts list offers one create control, the title-line button (studies.one-new-study-button; the cohort create row at the end of the list was dropped on 2026-10-10 for interface-quality.one-list-row). A new
       study is named by its question at the top of the study. Draft with assistant is offered on
       the study rather than as a floating page button.
     source:

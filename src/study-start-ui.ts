@@ -86,7 +86,7 @@ export const STUDY_START_CSS = String.raw`
 .create-row{appearance:none;display:flex;align-items:center;gap:10px;width:100%;min-height:52px;padding:0 20px;border:0;background:transparent;color:var(--muted);font:inherit;font-size:14px;font-weight:600;text-align:left;cursor:pointer}
 .create-row:hover{background:var(--hover);color:var(--ink)}.create-row .ui-icon{width:16px;height:16px}
 .create-row:focus-visible{outline:2px solid var(--focus,var(--blue));outline-offset:-2px}
-.pool-create{min-height:160px;justify-content:center;border:2px dashed var(--line);border-radius:var(--radius-panel,10px)}
+
 .study-title{grid-area:title;display:flex;align-items:center;gap:6px;min-width:0}
 .study-title h1{min-width:0}
 .study-title-edit{flex:none;background:transparent;border-color:transparent;color:var(--muted)}.study-title-edit:hover{color:var(--ink)}

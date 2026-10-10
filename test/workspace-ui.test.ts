@@ -986,7 +986,7 @@ test('workspace opens at projects and keeps another project out of cohort, pipel
   assert.equal(S.projectId, null);
   assert.match(browser.element('app').innerHTML, /<h1 tabindex="-1">Projects<\/h1>/);
   assert.match(browser.element('app').innerHTML, /Existing research/);
-  assert.match(browser.element('app').innerHTML, /<button type="button" class="project-card" data-act="open-project"/);assert.doesNotMatch(browser.element('app').innerHTML,/>Open project<|<article class="project-card"/);
+  assert.match(browser.element('app').innerHTML, /<button type="button" class="listrow list-open" data-act="open-project"/);assert.doesNotMatch(browser.element('app').innerHTML,/>Open project<|<article class="project-card"/);
   assert.doesNotMatch(browser.element('app').innerHTML, /Who should be in this cohort/);
   S.doc.projects.push({ id: 'second', name: 'Second research', description: 'Other decision', cohortIds: ['second-cohort'], pipelineIds: ['second-pipeline'] });
   S.doc.cohorts.push({ ...structuredClone(S.doc.cohorts[0]), id: 'second-cohort', name: 'Other audience' });
@@ -2396,7 +2396,7 @@ test('study navigation has clear scope, a reachable single-study library and con
   assert.match(browser.element('app').innerHTML,/Keep typed detail/);
   act(null,{dataset:{act:'back-studies'}});assert.equal(S.pipelineId,null);render();html=browser.element('app').innerHTML;
   assert.match(html,/<h1 tabindex="-1">Studies<\/h1>/);assert.match(html,/<nav class="app-sidebar"/);assert.doesNotMatch(html,/data-act="new-study"|data-form="new-pipeline"/);
-  assert.match(html,/<button type="button" class="listrow study-list-row" data-act="open-pipeline" data-id="study" aria-label="Open study: /);assert.doesNotMatch(html,/>Open study<|<div class="listrow">/);
+  assert.match(html,/<button type="button" class="listrow list-open" data-act="open-pipeline" data-id="study" aria-label="Open study: /);assert.doesNotMatch(html,/>Open study<|<div class="listrow">/);
   S.studyComposer=true;render();assert.doesNotMatch(browser.element('app').innerHTML,/data-form="new-pipeline"/);
   act(null,{dataset:{act:'new-study'}});assert.equal(S.studyComposer,false);assert.doesNotMatch(browser.element('app').innerHTML,/data-form="new-pipeline"/);
   act(null,{dataset:{act:'cancel-study'}});assert.doesNotMatch(browser.element('app').innerHTML,/data-form="new-pipeline"/);
@@ -2603,7 +2603,7 @@ test('project deletion confirms scope, preserves cancel, and removes only owned 
   browser.storage.set('jev-local-job:http://127.0.0.1:4180:existing-research','completed-job');
   browser.storage.set('jev-local-job:http://127.0.0.1:4180:keep-project','keep-job');
   const before=JSON.stringify(S.doc);render();
-  assert.match(browser.element('app').innerHTML,/class="project-list-row"><button[^>]*data-act="open-project"/);
+  assert.match(browser.element('app').innerHTML,/class="list-item project-list-row"><button[^>]*data-act="open-project"/);
   assert.match(browser.element('app').innerHTML,/<\/button><button[^>]*data-act="delete-project" data-id="existing-research"/);
   act(null,{dataset:{act:'delete-project',id:'existing-research'}});
   assert.equal(browser.element('deleteProjectDialog').open,true);assert.match(browser.element('deleteProjectDescription').textContent,/Existing research.*1 cohort.*1 study/);
@@ -2623,7 +2623,7 @@ test('study rows have a quick delete that confirms before removing only that stu
   const target=S.doc.pipelines[0],cohorts=JSON.stringify(S.doc.cohorts);
   S.tab='studies';S.pipelineId=null;render();
   const html=browser.element('app').innerHTML;
-  assert.match(html,/class="study-list-item"><button[^>]*data-act="open-pipeline" data-id="[^"]+"[\s\S]*?<\/button><button[^>]*data-act="delete-study" data-id="/);
+  assert.match(html,/class="list-item study-list-item"><button[^>]*data-act="open-pipeline" data-id="[^"]+"[\s\S]*?<\/button><button[^>]*data-act="delete-study" data-id="/);
   assert.match(html,/aria-label="Delete study: [^"]+"/);
   const before=JSON.stringify(S.doc);
   S.snap.activeRun={pipelineId:target.id};assert.throws(()=>act(null,{dataset:{act:'delete-study',id:target.id}}),/run to finish/);
@@ -2845,7 +2845,7 @@ test('an automatically opened active arena stays visible when the run completes'
 test('cohort rows open through a named native button and keep delete separate',async()=>{
   const browser=browserHarness();await settle();const {S,act,cohortCard}=browser.client;
   const html=cohortCard(S.doc.cohorts[0]);
-  assert.match(html,/class="cohort-open" data-act="open-cohort" data-id="cohort" aria-label="Open cohort: Original cohort"/);
+  assert.match(html,/class="listrow list-open cohort-open" data-act="open-cohort" data-id="cohort" aria-label="Open cohort: Original cohort"/);
   assert.doesNotMatch(html,/Configure cohort/);
   assert.equal((html.match(/<button/g)||[]).length,2);
   act(null,{dataset:{act:'open-cohort',id:'cohort'}});
@@ -3002,7 +3002,9 @@ test('an empty cohort list is one click target and a full one ends with a create
   const { S, act, render } = browser.client;
   const html = () => browser.element('app').innerHTML;
   act(null, { dataset: { act: 'tab', tab: 'cohorts' } });
-  assert.match(html(), /class="create-row pool-create" data-act="new-cohort"/);
+  // One create affordance: the title-line button, matching the Studies list.
+  assert.match(html(), /<button class="button primary" data-act="new-cohort">[\s\S]*?New cohort<\/button>/);
+  assert.doesNotMatch(html(), /create-row|Generate cohort/);
   S.doc.projects.find((p: any) => p.id === S.projectId).cohortIds = []; render();
   assert.match(html(), /<button type="button" class="empty-create" data-act="new-cohort">[\s\S]*?<strong>New cohort<\/strong>/);
   assert.doesNotMatch(html(), /data-tab="agents"/);
