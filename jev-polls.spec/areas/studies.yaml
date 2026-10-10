@@ -2,7 +2,7 @@ id: studies
 name: Study flow
 prose: >-
   A study is an acyclic flow of steps. The workspace opens it on a canvas; the selected step's
-  Question, Answers, Inputs, and Cohort are tabs in a panel over the canvas
+  Question, Answers, Inputs, Cohort, and Settings are tabs in a panel over the canvas
   (study-journey.round-panel). Named inputs pass typed outputs from earlier steps.
 behaviors:
   - id: create-study

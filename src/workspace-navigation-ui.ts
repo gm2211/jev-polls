@@ -13,7 +13,6 @@ function workspaceBreadcrumbItems(){
       const s=selectedStage();
       items.push({label:studyQuestion(study),action:'breadcrumb-study'});
       if(reviewPage())items.push({label:'Review run'});
-      else if(s&&S.sections.pipeline==='advanced')items.push({label:stepSettingsTitle(study,s)});
       else if(S.sections.pipeline==='context')items.push({label:'Study settings'});
     }
   }else if(S.tab==='cohorts'){
@@ -58,7 +57,7 @@ function revealSectionField(field){
   }
 }
 function navigationAction(a,el){
-  if(a==='breadcrumb-study'){const fromStep=S.sections.pipeline==='advanced';S.plan=null;S.sections.pipeline='flow';S.flowSettingsReturn=false;S.flowPanel=fromStep;render();(fromStep?root.querySelector('.flow-inspector h2'):root.querySelector('h1'))?.focus();return true}
+  if(a==='breadcrumb-study'){S.plan=null;S.sections.pipeline='flow';S.flowPanel=false;render();root.querySelector('h1')?.focus();return true}
   if(a==='breadcrumb-cohort'){S.cohortComposer=false;S.personaOpen=false;render();root.querySelector('h1')?.focus();return true}
   if(a==='section-view'){if(S.targetDraft)readTargetForm();S.sections[el.dataset.sectionKey]=el.dataset.sectionId;render();root.querySelectorAll('[data-act=section-view]').forEach(b=>{if(b.dataset.sectionKey===el.dataset.sectionKey&&b.dataset.sectionId===el.dataset.sectionId)b.focus()});drawStageEdges();return true}
   if(a==='page-action'){if(S.targetDraft)readTargetForm();S.listPages[el.dataset.pageKey]=Math.max(0,Number(el.dataset.page));const shares=el.closest?.('[data-form=segment-shares]');if(shares){const page=pageItems(cohort().segments,'segments',viewportPageSize(4,3));shares.querySelectorAll('.segment-weight-row').forEach((row,i)=>row.hidden=i<page.start||i>=page.end);const pager=shares.querySelector('.pagination');if(pager)pager.outerHTML=page.controls;shares.querySelector('.page-select')?.focus();return true}render();root.querySelector('h1')?.focus();return true}

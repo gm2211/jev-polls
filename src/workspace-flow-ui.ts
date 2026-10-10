@@ -159,6 +159,7 @@ function flowRoundTabs(p,s){
   if(s.kind!=='poll')return [['question','Result',false],['connections','Inputs',false]];
   const tabs=flowGuidedStops(s).map(key=>[key,FLOW_STOP_LABEL[key],!flowStopDone(p,s,key),flowStopDone(p,s,key)]);
   if(p.stages.length>1||flowInputs(p,s).length)tabs.push(['connections','Inputs',false,false]);
+  tabs.push(['settings','Settings',false,false]);
   return tabs;
 }
 function flowTabContent(label,todo,done){return label+(todo?'<span class="round-tab-dot" aria-label="needs attention"></span>':done?'<span class="round-tab-check" aria-label="done">'+icon('check')+'</span>':'')}
@@ -172,10 +173,10 @@ function flowInspector(p,s){
   if(!s||S.flowPanel===false)return '';
   const tabs=flowRoundTabs(p,s),requested=S.sections['flow-inspector']==='answer'?'answers':S.sections['flow-inspector']||'question',tab=tabs.some(([key])=>key===requested)?requested:'question';
   const kind=s.kind==='poll'?'Ask cohort · '+answerName(Object.values(s.questions||{})[0]?.type):s.kind==='aggregate'?'Combine answers':'Final result';
-  const body=tab==='connections'?flowConnections(p,s):tab==='cohort'?flowSampleNotice(p,s)+flowCohortMap(p,s):s.kind==='poll'?stageForm(p,s,tab):stageForm(p,s,true);
+  const body=tab==='settings'?advancedStageForm(p,s):tab==='connections'?flowConnections(p,s):tab==='cohort'?flowSampleNotice(p,s)+flowCohortMap(p,s):s.kind==='poll'?stageForm(p,s,tab):stageForm(p,s,true);
   const error=S.sections['flow-inspector-error']?'<p class="setup-wizard-error" role="alert" tabindex="-1">'+esc(S.sections['flow-inspector-error'])+'</p>':'';
   const footer=inlineCohortTarget(p,s)&&tab==='cohort'?'':flowGuidedFooter(p,s,tab);
-  return '<aside class="flow-inspector round-panel" aria-label="Selected step editor" data-inspector-tab="'+attr(tab)+'"><div class="flow-inspector-head"><div class="round-panel-title"><h2 tabindex="-1">'+esc(stepTitle(p,s))+'</h2><span class="round-panel-kind">'+esc(kind)+'</span></div><div class="row"><button class="button small icon-button" data-act="flow-settings" aria-label="Step settings" title="Step settings">'+icon('settings')+'</button><button class="button small icon-button" data-act="flow-panel-close" aria-label="Close step panel" title="Close (Esc)">'+icon('close')+'</button></div></div><nav class="round-tabs" role="tablist" aria-label="Selected step sections">'+tabs.map(([key,label,todo,done])=>'<button type="button" role="tab" class="round-tab" data-act="flow-inspector" data-section="'+key+'" aria-selected="'+(tab===key)+'"'+(todo?' data-todo="true"':'')+(done?' data-done="true"':'')+'>'+flowTabContent(label,todo,done)+'</button>').join('')+'</nav><div class="flow-inspector-body" role="tabpanel">'+body+error+'</div>'+footer+'</aside>';
+  return '<aside class="flow-inspector round-panel" aria-label="Selected step editor" data-inspector-tab="'+attr(tab)+'"><div class="flow-inspector-head"><div class="round-panel-title"><h2 tabindex="-1">'+esc(stepTitle(p,s))+'</h2><span class="round-panel-kind">'+esc(kind)+'</span></div><div class="row"><button class="button small icon-button" data-act="flow-panel-close" aria-label="Close step panel" title="Close (Esc)">'+icon('close')+'</button></div></div><nav class="round-tabs" role="tablist" aria-label="Selected step sections">'+tabs.map(([key,label,todo,done])=>'<button type="button" role="tab" class="round-tab" data-act="flow-inspector" data-section="'+key+'" aria-selected="'+(tab===key)+'"'+(todo?' data-todo="true"':'')+(done?' data-done="true"':'')+'>'+flowTabContent(label,todo,done)+'</button>').join('')+'</nav><div class="flow-inspector-body" role="tabpanel">'+body+error+'</div>'+footer+'</aside>';
 }
 function flowWorkspace(p,s){
   const pending=S.flowSource?.pipelineId===p.id?S.flowSource:null,add=p.stages.find(x=>x.id===S.flowAdd),first=add&&phaseOutput(p,add)[0];
@@ -212,8 +213,6 @@ function flowAction(a,el){
   if(a==='flow-create-open'){const v=root.querySelector('.flow-viewport');if(!v)return flowAction('flow-add',{dataset:{kind:'independent'}});const scale=flowScaleApplied||1,left=v.scrollLeft+Math.max(0,v.clientWidth-340),top=v.scrollTop+16;flowOpenCreate(p,left/scale,top/scale,left,top);return true}
   if(a==='flow-fix'){const todo=flowTodo(p)[0];if(!todo){S.flowPanel=true;render();return true}S.sections.pipeline='flow';S.stageId=todo.stageId;S.sections['flow-inspector']=todo.tab;S.flowPanel=true;S.flowCohortPick=!!todo.pick;render();root.querySelector('.round-tab[aria-selected=true]')?.focus();say('Finish this step, then review the run.');return true}
   if(a==='flow-panel-close'){if(S.reviewPanel){S.reviewPanel=false;S.plan=null}S.flowPanel=false;render();root.querySelector('[data-flow-node="'+S.stageId+'"] [data-act=flow-select]')?.focus({preventScroll:true});return true}
-  if(a==='flow-settings'){S.flowSettingsReturn=true;S.sections.pipeline='advanced';render();return true}
-  if(a==='flow-settings-back'){S.flowSettingsReturn=false;S.sections.pipeline='flow';render();return true}
   if(a==='flow-cancel'){S.flowSource=null;render();return true}
   if(a==='flow-add-menu'){S.flowAdd=S.flowAdd===el.dataset.id?null:el.dataset.id;render();return true}
   if(a==='flow-add-close'){S.flowAdd=null;render();return true}

@@ -14,7 +14,7 @@ function createStudy(){
 }
 function openStudy(studyId){
   S.tab='studies';S.studyLibrary=false;S.studyComposer=false;S.plan=null;S.pipelineId=studyId;S.stageId=pipeline()?.stages[0]?.id||null;
-  S.sections.pipeline='flow';S.flowSettingsReturn=false;S.flowPanel=false;render();
+  S.sections.pipeline='flow';S.flowPanel=false;render();
 }
 /** Where a project opens: a new or study-less project goes straight to a fresh canvas, a one-study project to that study; the Studies list is the landing page only from two studies on. */
 function landOnProject(projectId){

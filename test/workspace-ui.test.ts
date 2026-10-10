@@ -330,7 +330,7 @@ test('phase editor keeps question and cohort together with advanced controls in 
 test('simple step settings preserve advanced execution contracts when switching modes', async () => {
   const browser = browserHarness(); await settle();
   const { S, advancedStageForm, applyStage } = browser.client;
-  S.tab = 'studies'; S.pipelineId = 'study'; S.stageId = 'panel'; S.sections.pipeline = 'advanced';
+  S.tab = 'studies'; S.pipelineId = 'study'; S.stageId = 'panel'; S.sections.pipeline = 'flow'; S.flowPanel = true; S.sections['flow-inspector'] = 'settings';
   const p = S.doc.pipelines[0], step = p.stages[0];
   Object.assign(step, { repeats: 4, context: { product: 'Game' }, join: 'any', dependsOn: ['earlier'], inputs: { result: { stage: 'earlier', question: 'answer', select: 'summary' } }, when: { stage: 'earlier', question: 'answer', metric: 'winner', op: 'eq', value: 'a' } });
   const original = JSON.parse(JSON.stringify(step));
@@ -2037,7 +2037,7 @@ test('simple study setup preserves hidden contracts, stable option keys, and oth
   assert.deepEqual(JSON.parse(JSON.stringify(s.questions.answer.criteria)), { a: {label:'Project Dawn',description:''}, b: {label:'Afterlight',description:''} });
   setupAction('setup-cohort', { dataset: { id: 'cohort' } });
   assert.equal(p.cohorts[s.cohort], 'cohort');
-  S.sections.pipeline = 'advanced'; S.sections['step-settings-'+p.id+'-'+s.id]='advanced'; html = stageForm(p, s);
+  S.sections['step-settings-'+p.id+'-'+s.id]='advanced'; html = browser.client.advancedStageForm(p, s);
   assert.match(html, /name="questionInstructions"/);
   assert.doesNotMatch(html, /data-form="study-setup"/, 'only one editor can submit changes for a phase');
 });
@@ -2060,8 +2060,8 @@ test('earlier context stays beside follow-up questions without an empty setup ta
   assert.equal((next as any).inputs, undefined, 'legacy summary bindings remain implicit');
   (next as any).inputs = {};
   assert.equal(setupContextSummary(p, next), '', 'ordering alone does not imply receiving results');
-  S.sections.pipeline = 'advanced'; S.sections['step-settings-study-review']='advanced'; S.sections['phase-review'] = 'inputs';
-  assert.match(stageForm(p, next), /Connect output/);
+  S.sections['step-settings-study-review']='advanced'; S.sections['phase-review'] = 'inputs';
+  assert.match(browser.client.advancedStageForm(p, next), /Connect output/);
 });
 
 test('review saves pending setup before planning and stops on save failure or empty answer options', async () => {
@@ -2215,7 +2215,7 @@ test('step navigation uses numbered questions consistently without rewriting sav
   p.stages.push(next);
   const before = JSON.stringify(p);
   assert.doesNotMatch(stageForm(p,first),/name="phasePicker"/);
-  for (const html of [browser.client.studyQuestionList(p), advancedStageForm(p, first), stageMap(p)]) {
+  for (const html of [browser.client.studyQuestionList(p), stageMap(p)]) {
     assert.match(html, /Which option fits\?/);
     assert.match(html, /Untitled question|Follow-up 1/);
     assert.doesNotMatch(html, />First question<|>Next question</);
@@ -2284,7 +2284,7 @@ test('choosing the kind of answer comes first in the step editor and step settin
   }
   setupAction('setup-type',{dataset:{type:'noul'}});
   assert.match(stageForm(p,s,'question'),/data-type="noul" aria-pressed="true"/);
-  S.sections.pipeline='advanced';render();const settings=browser.element('app').innerHTML;
+  S.sections.pipeline='flow';S.flowPanel=true;S.sections['flow-inspector']='settings';render();const settings=browser.element('app').innerHTML;
   assert.ok(settings.indexOf('What kind of answer?')>=0&&settings.indexOf('What kind of answer?')<settings.indexOf('Step name'),'step settings lead with the answer kind');
 });
 
@@ -2333,16 +2333,15 @@ test('breadcrumbs step down one level at a time and opening a study lands on its
   const crumbs=()=>[...browser.element('app').innerHTML.match(/<nav class="workspace-breadcrumbs"[\s\S]*?<\/nav>/)![0].matchAll(/(?:<button[^>]*>|<span[^>]*aria-current="page">)([^<]*)<\/(?:button|span)>/g)].map(m=>m[1]).join(' / ');
   act(null,{dataset:{act:'open-project',id:'existing-research'}});assert.equal(crumbs(),'Projects / Existing research / Studies / Original study');
   act(null,{dataset:{act:'project-overview'}});assert.equal(crumbs(),'Projects / Existing research / Studies');
-  S.sections.pipeline='advanced';S.flowSettingsReturn=true;
+  S.sections.pipeline='context';
   act(null,{dataset:{act:'open-pipeline',id:'study'}});
   assert.equal(S.sections.pipeline,'flow','a study opens on its canvas, not on a step');assert.equal(S.flowPanel,false);
   assert.equal(crumbs(),'Projects / Existing research / Studies / Original study');
   const h1=()=>browser.element('app').innerHTML.match(/<h1[^>]*>([^<]*)<\/h1>/)![1];
   assert.equal(h1(),'Original study','the heading names the last crumb');
   act(null,{dataset:{act:'stage',id:'panel'}});assert.equal(crumbs(),'Projects / Existing research / Studies / Original study','the step panel is an overlay, not a page');
-  act(null,{dataset:{act:'flow-settings'}});assert.equal(crumbs(),'Projects / Existing research / Studies / Original study / Step 1 settings');assert.equal(h1(),'Step 1 settings');
-  act(null,{dataset:{act:'breadcrumb-study'}});assert.equal(S.sections.pipeline,'flow');assert.equal(S.flowPanel,true,'returning from step settings reopens that step');
-  assert.equal(crumbs(),'Projects / Existing research / Studies / Original study');assert.equal(h1(),'Original study');
+  S.flowPanel=true;act(null,{dataset:{act:'flow-inspector',section:'settings'}});assert.equal(crumbs(),'Projects / Existing research / Studies / Original study','step settings are a panel tab, not a page');assert.equal(h1(),'Original study');
+  assert.match(browser.element('app').innerHTML,/data-settings-mode="simple"/);
   act(null,{dataset:{act:'breadcrumb-study'}});assert.equal(S.flowPanel,false);
   act(null,{dataset:{act:'section-view',sectionKey:'pipeline',sectionId:'context'}});assert.equal(crumbs(),'Projects / Existing research / Studies / Original study / Study settings');assert.equal(h1(),'Study settings');
   act(null,{dataset:{act:'breadcrumb-study'}});assert.equal(S.sections.pipeline,'flow');assert.equal(h1(),'Original study');
@@ -2394,16 +2393,16 @@ test('study navigation has clear scope, a reachable single-study library and con
   S.tab='studies';S.pipelineId='study';S.stageId='panel';S.dirty=true;
   S.doc.pipelines[0].stages[0].questions.answer.criteria.a={label:'Draft name',description:'Keep typed detail'};
   const before=JSON.stringify(S.doc);render();let html=browser.element('app').innerHTML;
-  assert.doesNotMatch(html,/aria-label="Workspace views"|>Advanced<|Apply phase/);const location=html.match(/<nav class="workspace-breadcrumbs"[\s\S]*?<\/nav>/)![0];assert.equal((location.match(/<button/g)||[]).length,3);assert.match(location,/<span aria-current="page">Original study<\/span>/);assert.equal((location.match(/aria-current="page"/g)||[]).length,1);assert.match(location,/class="breadcrumb-link" data-act="projects"/);assert.match(location,/data-act="back-studies">Studies/);assert.doesNotMatch(html,/← Studies|← Projects/);assert.doesNotMatch(html,/>Pipeline<|aria-label="Study sections"/,'no tab row on the study page');assert.match(html,/data-section-id="context" aria-label="Study settings"/);assert.match(html,/aria-label="Step settings" title="Step settings"/);
-  act(null,{dataset:{act:'section-view',sectionKey:'pipeline',sectionId:'advanced'}});html=browser.element('app').innerHTML;
-  assert.doesNotMatch(html,/Back to question|Back to flow|study-step-settings/,'the trail replaces ad-hoc back buttons');
-  assert.match(html,/data-act="breadcrumb-study">Original study<\/button>.*<span aria-current="page">Step 1 settings<\/span>/);assert.match(html,/<h1 tabindex="-1">Step 1 settings<\/h1>/);
-  assert.doesNotMatch(html,/aria-label="Study sections"|Apply phase/);
-  assert.match(html,/data-settings-mode="simple"/);
+  assert.doesNotMatch(html,/aria-label="Workspace views"|>Advanced<|Apply phase/);const location=html.match(/<nav class="workspace-breadcrumbs"[\s\S]*?<\/nav>/)![0];assert.equal((location.match(/<button/g)||[]).length,3);assert.match(location,/<span aria-current="page">Original study<\/span>/);assert.equal((location.match(/aria-current="page"/g)||[]).length,1);assert.match(location,/class="breadcrumb-link" data-act="projects"/);assert.match(location,/data-act="back-studies">Studies/);assert.doesNotMatch(html,/← Studies|← Projects/);assert.doesNotMatch(html,/>Pipeline<|aria-label="Study sections"/,'no tab row on the study page');assert.match(html,/data-section-id="context" aria-label="Study settings"/);assert.doesNotMatch(html,/aria-label="Step settings" title="Step settings"/,'no separate step settings button; settings are a panel tab');
+  S.sections.pipeline='flow';S.flowPanel=true;act(null,{dataset:{act:'flow-inspector',section:'settings'}});html=browser.element('app').innerHTML;
+  assert.doesNotMatch(html,/Back to question|Back to flow|study-step-settings|Step 1 settings|data-act="flow-settings"/,'step settings live on a panel tab with no page of their own');
+  assert.match(html,/<span aria-current="page">Original study<\/span>/,'the study stays the current crumb');
+  assert.doesNotMatch(html,/aria-label="Study sections"|Apply phase|name="phasePicker"/);
+  assert.match(html,/data-inspector-tab="settings"/,'the Settings tab is open');assert.match(html,/data-settings-mode="simple"/,'Simple mode leads');
   act(null,{dataset:{act:'section-view',sectionKey:'step-settings-study-panel',sectionId:'advanced'}});html=browser.element('app').innerHTML;
-  for(const field of ['questionInstructions','criteria','stageContext','repeats'])assert.match(html,new RegExp('name="'+field+'"'));
+  for(const field of ['questionInstructions','criteria','stageContext','repeats'])assert.match(html,new RegExp('name="'+field+'"'),'Advanced shows '+field);
   act(null,{dataset:{act:'section-view',sectionKey:'pipeline',sectionId:'phase'}});
-  assert.match(browser.element('app').innerHTML,/Keep typed detail/);
+  assert.match(browser.element('app').innerHTML,/Keep typed detail/,'the phase editor keeps typed detail');
   act(null,{dataset:{act:'back-studies'}});assert.equal(S.pipelineId,null);render();html=browser.element('app').innerHTML;
   assert.match(html,/<h1 tabindex="-1">Studies<\/h1>/);assert.match(html,/<nav class="app-sidebar"/);assert.doesNotMatch(html,/data-act="new-study"|data-form="new-pipeline"/);
   assert.match(html,/<button type="button" class="listrow list-open" data-act="open-pipeline" data-id="study" aria-label="Open study: /);assert.doesNotMatch(html,/>Open study<|<div class="listrow">/);
@@ -2593,12 +2592,10 @@ test('outline reaches result steps and validation returns from outline to missin
 });
 
 
-test('advanced settings selector retains stage switching without adding a dropdown to question setup',async()=>{
+test('step settings belong to the selected step and never add a step dropdown',async()=>{
   const browser=browserHarness();await settle();const {S,stageForm,advancedStageForm}=browser.client;
   S.pipelineId='study';S.stageId='panel';const p=S.doc.pipelines[0],first=p.stages[0],next={...structuredClone(first),id:'second'};p.stages.push(next);
-  S.sections.pipeline='advanced';assert.match(advancedStageForm(p,first),/name="phasePicker"/);
-  await browser.listeners.get('change')!({target:{name:'phasePicker',value:'second'}});
-  assert.equal(S.stageId,'second');assert.equal(S.sections.pipeline,'advanced');S.sections.pipeline='phase';
+  assert.doesNotMatch(advancedStageForm(p,first),/name="phasePicker"|Selected step/);
   assert.doesNotMatch(stageForm(p,next),/name="phasePicker"/);
 });
 
@@ -3054,7 +3051,7 @@ test('a selected step opens a closable panel with one row of tabs marking unfini
   S.tab = 'studies'; S.pipelineId = 'study'; S.stageId = 'panel'; S.sections['flow-inspector'] = 'question'; render();
   const tabs = () => [...html().matchAll(/<button type="button" role="tab" class="round-tab" data-act="flow-inspector" data-section="([a-z]+)"[^>]*>/g)].map(m => m[1]);
   assert.match(html(), /<aside class="flow-inspector round-panel"/);
-  assert.deepEqual(tabs(), ['question', 'answers', 'cohort'], 'a lone step shows the three guided stops; Inputs appears once there is something to connect');
+  assert.deepEqual(tabs(), ['question', 'answers', 'cohort', 'settings'], 'a lone step shows the three guided stops and Settings; Inputs appears once there is something to connect');
   assert.match(html(), /data-act="flow-panel-close" aria-label="Close step panel"/);
   act(null, { dataset: { act: 'flow-inspector', section: 'answers' } });
   assert.match(html(), /data-inspector-tab="answers"/);

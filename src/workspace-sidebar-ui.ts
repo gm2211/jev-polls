@@ -22,7 +22,7 @@ function workspaceSidebar(){
 function sidebarAction(a,el){
   if(a!=='side-study')return false;
   if(!projectPipelines().some(p=>p.id===el.dataset.id))return true;
-  S.tab='studies';S.plan=null;S.studyComposer=false;S.pipelineId=el.dataset.id;S.stageId=pipeline()?.stages[0]?.id||null;S.sections.pipeline='flow';S.flowSettingsReturn=false;S.flowPanel=false;
+  S.tab='studies';S.plan=null;S.studyComposer=false;S.pipelineId=el.dataset.id;S.stageId=pipeline()?.stages[0]?.id||null;S.sections.pipeline='flow';S.flowPanel=false;
   render();root.querySelector('h1')?.focus();return true;
 }
 `;
