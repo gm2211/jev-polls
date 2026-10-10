@@ -24,6 +24,10 @@ export interface LocalAgentProgress {
   /** Timings of accepted batches only, including generation and batch checks. */
   batchDurationsMs?: number[]; completedBatchSizes?: number[]; lastBatchChecks?: string[];
   latestAccepted?: Array<Pick<Persona, 'id' | 'label' | 'age' | 'segment'>>;
+  /** Batch numbers being generated right now, and the most batches the job runs at once. */
+  activeBatches?: number[]; maxConcurrentBatches?: number;
+  /** Failed batch attempts so far, and the batch currently being tried again. */
+  retries?: number; retry?: { batch: number; attempt: number; maxAttempts: number };
   validation?: { scope: 'batch' | 'final' | 'persona' | 'workspace'; status: 'checking' | 'passed'; checks: string[]; checkedPersonas: number };
 }
 export interface LocalAgentJob {
@@ -53,6 +57,10 @@ const OUTPUT_BYTES = 1_000_000;
 const TIMEOUT_MS = 240_000;
 const MAX_JOBS = 20;
 const PERSONAS_PER_BATCH = 25;
+/** Batches after the first run this many provider calls at once. */
+const CONCURRENT_BATCHES = 6;
+/** A failed batch is retried this many more times before the whole generation fails. */
+const BATCH_RETRIES = 2;
 const MAX_BATCH_TIMINGS = 20;
 interface ProviderProgress { phase: 'starting' | 'generating' | 'receiving'; outputChars: number; outputTokens?: number }
 const outputSchema = { type: 'object', properties: { documentJson: { type: 'string' }, explanation: { type: 'string' } }, required: ['documentJson', 'explanation'], additionalProperties: false };
@@ -117,8 +125,13 @@ function optionQuestion(document: WorkspaceDocument, request: NonNullable<LocalA
 }
 
 interface ProcessResult { code: number | null; stdout: string; stderr: string; missing: boolean; limited: boolean }
-interface Entry { public: LocalAgentJob; child?: ChildProcessWithoutNullStreams; work?: Promise<void>; abort?: () => void; cancelled: boolean; settled: boolean }
+interface ProviderSlot { chars: number; tokens?: number }
+interface Entry { public: LocalAgentJob; work?: Promise<void>; aborts: Set<() => void>; slots: Map<number, ProviderSlot>; cancelled: boolean; settled: boolean }
 class DraftFailure extends Error {}
+/** A failure that another attempt cannot fix, so the batch is not retried. */
+class FatalDraftFailure extends DraftFailure {}
+/** Raised inside a batch when the job was cancelled or another batch already failed it. */
+class StopBatch extends Error {}
 
 /** Context size is independent of cohort size, including regeneration of a saved large panel. */
 function personaContext(cohort: Cohort, personaId: string) {
@@ -278,7 +291,7 @@ export class LocalAgentService {
     const startedAt = new Date().toISOString();
     const progress: LocalAgentProgress = { phase: 'checking', ...(parsed.cohort ? { completedPersonas: 0, totalPersonas: parsed.cohort.size, completedBatches: 0, totalBatches: Math.ceil(parsed.cohort.size / PERSONAS_PER_BATCH) } : parsed.persona ? { completedPersonas: 0, totalPersonas: 1 } : {}) };
     const job: LocalAgentJob = { ...(parsed.projectId ? { projectId: parsed.projectId } : {}), id: randomUUID(), engine: parsed.engine, revision: parsed.revision, status: 'running', message: 'Checking your AI connection…', startedAt, updatedAt: startedAt, progress, ...(parsed.engine === 'chatgpt' ? { model: parsed.model } : {}), ...(parsed.options ? { options: { pipelineId: parsed.options.pipelineId, stageId: parsed.options.stageId, questionId: parsed.options.questionId } } : {}), ...(parsed.persona ? { persona: parsed.persona } : {}), ...(parsed.cohort ? { cohort: { ...parsed.cohort, prompt: parsed.prompt } } : {}) };
-    const entry: Entry = { public: job, cancelled: false, settled: false };
+    const entry: Entry = { public: job, aborts: new Set(), slots: new Map(), cancelled: false, settled: false };
     this.jobs.set(job.id, entry);
     entry.work = this.generate(entry, parsed);
     return structuredClone(job);
@@ -288,7 +301,7 @@ export class LocalAgentService {
   cancel(id: string): LocalAgentJob | undefined {
     const entry = this.jobs.get(id);
     if (!entry) return;
-    if (entry.public.status === 'running') { entry.cancelled = true; this.updateProgress(entry, 'cancelled', 'Draft cancelled. Workspace unchanged.'); entry.abort?.(); }
+    if (entry.public.status === 'running') { entry.cancelled = true; this.updateProgress(entry, 'cancelled', 'Draft cancelled. Workspace unchanged.'); for (const abort of [...entry.aborts]) abort(); }
     return this.get(id);
   }
   async close(): Promise<void> {
@@ -311,29 +324,34 @@ export class LocalAgentService {
     }
   }
 
-  private recordActivity(entry: Entry, activity: ProviderProgress, outputSource: 'response' | 'cli-stdout'): void {
+  private recordActivity(entry: Entry, activity: ProviderProgress, outputSource: 'response' | 'cli-stdout', slot = 0): void {
     if (entry.cancelled || entry.public.status !== 'running' || entry.public.progress?.phase !== 'generating') return;
     if (!['starting', 'generating', 'receiving'].includes(activity.phase) || !Number.isSafeInteger(activity.outputChars) || activity.outputChars < 0) return;
-    const outputChars = Math.max(entry.public.progress.outputChars ?? 0, activity.outputChars);
+    const current = entry.slots.get(slot) ?? { chars: 0 };
     const tokens = activity.outputTokens;
-    this.updateProgress(entry, 'generating', entry.public.message, {
-      activity: activity.phase, lastActivityAt: new Date().toISOString(), outputChars, outputSource,
-      ...(tokens !== undefined && Number.isSafeInteger(tokens) && tokens >= 0 ? { outputTokens: tokens } : {}),
-    });
+    entry.slots.set(slot, { chars: Math.max(current.chars, activity.outputChars), ...(tokens !== undefined && Number.isSafeInteger(tokens) && tokens >= 0 ? { tokens } : current.tokens !== undefined ? { tokens: current.tokens } : {}) });
+    this.updateProgress(entry, 'generating', entry.public.message, { activity: activity.phase, lastActivityAt: new Date().toISOString(), outputSource, ...this.providerTotals(entry) });
   }
 
-  private command(engine: LocalAgentEngine, args: string[], cwd: string | undefined, input: string, timeoutMs: number, maxBytes: number, entry?: Entry, captureStderr = false): Promise<ProcessResult> {
+  /** Output received across all provider calls running at once. */
+  private providerTotals(entry: Entry): { outputChars: number; outputTokens?: number } {
+    const slots = [...entry.slots.values()];
+    const tokens = slots.filter(slot => slot.tokens !== undefined);
+    return { outputChars: slots.reduce((sum, slot) => sum + slot.chars, 0), outputTokens: tokens.length ? tokens.reduce((sum, slot) => sum + slot.tokens!, 0) : undefined };
+  }
+
+  private command(engine: LocalAgentEngine, args: string[], cwd: string | undefined, input: string, timeoutMs: number, maxBytes: number, entry?: Entry, captureStderr = false, slot = 0): Promise<ProcessResult> {
     return new Promise(resolve => {
       let child: ChildProcessWithoutNullStreams;
       try { child = this.spawn(engine, args, { cwd, env: childEnvironment(), detached: process.platform !== 'win32', windowsHide: true }); }
       catch { resolve({ code: null, stdout: '', stderr: '', missing: true, limited: false }); return; }
-      this.children.add(child); if (entry) entry.child = child;
+      this.children.add(child);
       const stdout: Buffer[] = []; const stdoutDecoder = new StringDecoder('utf8'); const stderr: Buffer[] = []; let bytes = 0; let outputChars = 0; let limited = false; let done = false; let killTimer: NodeJS.Timeout | undefined;
       const stop = () => { if (done) return; limited = true; terminate(child); killTimer ??= setTimeout(() => { terminate(child, 'SIGKILL'); finish(null, false); }, 1000); killTimer.unref(); };
       const timer = setTimeout(stop, timeoutMs); timer.unref();
-      const finish = (code: number | null, missing: boolean) => { if (done) return; done = true; clearTimeout(timer); if (killTimer) clearTimeout(killTimer); this.children.delete(child); if (entry?.child === child) { entry.child = undefined; entry.abort = undefined; } resolve({ code, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8'), missing, limited }); };
-      if (entry) entry.abort = stop;
-      child.stdout.on('data', (data: Buffer) => { bytes += data.length; if (bytes > maxBytes) { stop(); return; } stdout.push(Buffer.from(data)); if (entry && !done && !entry.cancelled) { outputChars += stdoutDecoder.write(data).length; this.recordActivity(entry, { phase: 'receiving', outputChars }, 'cli-stdout'); } });
+      const finish = (code: number | null, missing: boolean) => { if (done) return; done = true; clearTimeout(timer); if (killTimer) clearTimeout(killTimer); this.children.delete(child); entry?.aborts.delete(stop); resolve({ code, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8'), missing, limited }); };
+      entry?.aborts.add(stop);
+      child.stdout.on('data', (data: Buffer) => { bytes += data.length; if (bytes > maxBytes) { stop(); return; } stdout.push(Buffer.from(data)); if (entry && !done && !entry.cancelled) { outputChars += stdoutDecoder.write(data).length; this.recordActivity(entry, { phase: 'receiving', outputChars }, 'cli-stdout', slot); } });
       child.stderr.on('data', (data: Buffer) => { bytes += data.length; if (bytes > maxBytes) { stop(); return; } if (captureStderr) stderr.push(Buffer.from(data)); });
       child.once('error', error => finish(null, (error as NodeJS.ErrnoException).code === 'ENOENT'));
       child.once('close', code => finish(code, false));
@@ -525,55 +543,119 @@ export class LocalAgentService {
       }
     }
 
-    const personas: Cohort['personas'] = [];
+    // Batches are accepted in any order but stored by index, so persona IDs and order never depend on completion order.
+    const results: Cohort['personas'][] = [];
     const segmentCounts = new Map<string, number>();
+    const recent: Cohort['personas'] = [];
+    const running = new Map<number, { firstStartedAt: string; attempt: number }>();
+    const retrying = new Map<number, number>();
+    let acceptedPersonas = 0;
+    let acceptedBatches = 0;
+    let retries = 0;
     let serializedPersonaBytes = 2;
+    let emptyGeneratedBytes = 0;
     let firstExplanation = '';
+    let stopped = false;
+    let nextBatch = 1;
     const batches = Math.ceil(request.size / PERSONAS_PER_BATCH);
     const baseDocument = original
       ? { ...input.document, cohorts: input.document.cohorts.map(cohort => cohort.id === request.id ? { ...cohort, personas: [] } : cohort) }
       : input.document;
     const originalPlaceholderBytes = original ? Buffer.byteLength(JSON.stringify({ ...original, personas: [] })) : 0;
     const unchangedBytes = Buffer.byteLength(JSON.stringify(baseDocument)) - originalPlaceholderBytes + (original ? 0 : (baseDocument.cohorts.length ? 1 : 0));
-    for (let batchIndex = 0; batchIndex < batches; batchIndex++) {
-      if (entry.cancelled) throw Error();
+    const batchSizeOf = (batchIndex: number) => Math.min(PERSONAS_PER_BATCH, request.size - batchIndex * PERSONAS_PER_BATCH);
+    const batchList = (numbers: number[]) => numbers.length < 2 ? `batch ${numbers[0]}` : `batches ${numbers.slice(0, -1).join(', ')} and ${numbers[numbers.length - 1]}`;
+
+    // Reports the batches in flight. Counts of accepted personas only change when a batch passes its checks.
+    const publishRunning = (extra: Omit<Partial<LocalAgentProgress>, 'phase'> = {}) => {
+      const active = [...running.entries()].sort((a, b) => a[0] - b[0]);
+      if (!active.length) return;
+      const numbers = active.map(([index]) => index + 1);
+      const oldest = active.map(([, state]) => state.firstStartedAt).sort()[0]!;
+      const latestRetry = [...retrying.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0];
+      this.updateProgress(entry, 'generating', `Generating ${batchList(numbers)} of ${batches} (${acceptedPersonas}/${request.size} personas checked)…`, {
+        batch: numbers[0], batchSize: batchSizeOf(active[0]![0]), batchStartedAt: oldest, activeBatches: numbers, maxConcurrentBatches: CONCURRENT_BATCHES, retries,
+        retry: latestRetry ? { batch: latestRetry[0] + 1, attempt: latestRetry[1], maxAttempts: 1 + BATCH_RETRIES } : undefined, ...extra,
+      });
+    };
+
+    const attemptBatch = async (batchIndex: number): Promise<void> => {
       const offset = batchIndex * PERSONAS_PER_BATCH;
-      const batchSize = Math.min(PERSONAS_PER_BATCH, request.size - offset);
-      const recentExamples = personas.slice(-10).map(({ label, background, segment }) => ({ label: label.slice(0, 80), background: background.slice(0, 240), segment }));
+      const batchSize = batchSizeOf(batchIndex);
+      // Retries reuse these exact inputs.
+      const recentExamples = recent.slice(-10).map(({ label, background, segment }) => ({ label: label.slice(0, 80), background: background.slice(0, 240), segment }));
       const requestData = { request: input.prompt, selectedProject: projectBrief(input.document, input.projectId), cohortId: request.id, totalPersonas: request.size, batch: { number: batchIndex + 1, total: batches, firstPosition: offset + 1, lastPosition: offset + batchSize, size: batchSize }, originalCohortMetadata: batchIndex === 0 ? originalMetadata : metadata, generatedSegmentCounts: Object.fromEntries(segmentCounts), recentExamples, distributionAssignments: targetAssignments.slice(offset, offset + batchSize).map((assignments, index) => ({ position: offset + index + 1, assignments: assignments.map((bucketIndex, targetIndex) => ({ field: targets[targetIndex]!.field, kind: targets[targetIndex]!.kind, bucket: targets[targetIndex]!.buckets[bucketIndex]! })) })) };
-      if (Buffer.byteLength(JSON.stringify(requestData)) > MAX_DOCUMENT_BYTES) throw new DraftFailure('Cohort context is too large to prepare safely. Reduce its source and segment details and try again.');
+      if (Buffer.byteLength(JSON.stringify(requestData)) > MAX_DOCUMENT_BYTES) throw new FatalDraftFailure('Cohort context is too large to prepare safely. Reduce its source and segment details and try again.');
       const cohortGuidance = guidance.replace('documentJson is a string containing the COMPLETE workspace document;', 'documentJson is a string containing the COMPLETE target cohort object;');
       const prompt = `${cohortGuidance} Prepare one bounded batch for cohort ${request.id}. Return documentJson as one cohort object matching the cohort schema, not a workspace. This is batch ${batchIndex + 1} of ${batches}, covering final positions ${offset + 1}–${offset + batchSize} of ${request.size}; return exactly ${batchSize} new personas. Keep every persona an adult and question-independent. Make this batch distinct from the listed recent examples while remaining plausible for the same population. ${original ? 'Copy originalCohortMetadata exactly, preserving sources, assumptions, segments, weights, weight provenance and distributionTargets.' : 'The first batch establishes cohort metadata, sources, assumptions, segments and weights. Later batches must copy that metadata exactly.'} Add only new personas. Include at least one persona for every positive-weight segment in the final complete cohort. Obey each distributionAssignments slot in the exact returned persona order. Numeric buckets include min and exclude max; categorical buckets require the exact value. Targets control unweighted synthetic persona counts, never study weights. Do not approximate quotas or invent missing evidence. No unrelated workspace data is provided or needed.\n\nCohort schema:\n${JSON.stringify(jsonSchema('cohort'))}\n\nRequest data:\n${JSON.stringify(requestData)}`;
-      this.updateProgress(entry, 'generating', `Generating batch ${batchIndex + 1} of ${batches} (${personas.length}/${request.size} personas checked)…`, { batch: batchIndex + 1, batchSize, batchStartedAt: new Date().toISOString(), validation: undefined });
-      const output = await this.requestDraft(entry, input, prompt);
-      if (entry.cancelled) throw Error();
-      this.updateProgress(entry, 'validating', `Checking batch ${batchIndex + 1} of ${batches} (${personas.length}/${request.size} personas checked)…`, { validation: { scope: 'batch', status: 'checking', checks: [], checkedPersonas: 0 } });
-      const candidate = cohortSchema.parse(JSON.parse(output.documentJson)) as Cohort;
-      if (candidate.id !== request.id || candidate.personas.length !== batchSize) throw Error();
-      const candidateMetadata = Object.fromEntries(Object.entries(candidate).filter(([key]) => key !== 'personas' && key !== 'generationPrompt'));
-      if (!isDeepStrictEqual(candidateMetadata, metadata ?? originalMetadata ?? candidateMetadata)) throw new DraftFailure('The regenerated cohort changed saved metadata or provenance. Try again. Workspace unchanged.');
-      for (const [index, persona] of candidate.personas.entries()) {
-        for (const [targetIndex, target] of targets.entries()) {
-          const bucket = target.buckets[targetAssignments[offset + index]![targetIndex]!]!;
-          if (!matchesDistributionBucket(getPersonaFieldValue(persona, target.field), bucket, target.kind)) throw new DraftFailure(`The generated cohort did not meet the assigned distribution target for ${target.field} at persona ${offset + index + 1}. Try again. Workspace unchanged.`);
+      const firstStartedAt = new Date().toISOString();
+      for (let attempt = 1; ; attempt++) {
+        if (entry.cancelled || stopped) throw new StopBatch();
+        running.set(batchIndex, { firstStartedAt, attempt });
+        publishRunning({ validation: undefined });
+        try {
+          const output = await this.requestDraft(entry, input, prompt, batchIndex);
+          if (entry.cancelled || stopped) throw new StopBatch();
+          this.updateProgress(entry, entry.public.progress?.phase ?? 'generating', entry.public.message, { validation: { scope: 'batch', status: 'checking', checks: [], checkedPersonas: 0 } });
+          const candidate = cohortSchema.parse(JSON.parse(output.documentJson)) as Cohort;
+          if (candidate.id !== request.id || candidate.personas.length !== batchSize) throw Error();
+          const candidateMetadata = Object.fromEntries(Object.entries(candidate).filter(([key]) => key !== 'personas' && key !== 'generationPrompt'));
+          if (!isDeepStrictEqual(candidateMetadata, metadata ?? originalMetadata ?? candidateMetadata)) throw new DraftFailure('The regenerated cohort changed saved metadata or provenance. Try again. Workspace unchanged.');
+          for (const [index, persona] of candidate.personas.entries()) {
+            for (const [targetIndex, target] of targets.entries()) {
+              const bucket = target.buckets[targetAssignments[offset + index]![targetIndex]!]!;
+              if (!matchesDistributionBucket(getPersonaFieldValue(persona, target.field), bucket, target.kind)) throw new DraftFailure(`The generated cohort did not meet the assigned distribution target for ${target.field} at persona ${offset + index + 1}. Try again. Workspace unchanged.`);
+            }
+          }
+          // Acceptance is synchronous, so batches finishing together cannot interleave.
+          if (!metadata) { metadata = candidateMetadata; emptyGeneratedBytes = Buffer.byteLength(JSON.stringify({ ...metadata, generationPrompt: input.prompt, personas: [] })); }
+          if (batchIndex === 0) firstExplanation = output.explanation;
+          const accepted: Cohort['personas'] = [];
+          for (const persona of candidate.personas) {
+            const indexed = { ...persona, id: `persona-${String(offset + accepted.length + 1).padStart(5, '0')}` };
+            serializedPersonaBytes += (acceptedPersonas + accepted.length ? 1 : 0) + Buffer.byteLength(JSON.stringify(indexed));
+            accepted.push(indexed);
+            if (unchangedBytes + emptyGeneratedBytes - 2 + serializedPersonaBytes > MAX_WORKSPACE_BYTES) throw new FatalDraftFailure('The completed cohort would exceed the workspace size limit. Use a smaller persona count or reduce saved workspace data.');
+          }
+          const durationMs = Math.max(0, Date.now() - Date.parse(firstStartedAt));
+          results[batchIndex] = accepted;
+          for (const persona of accepted) segmentCounts.set(persona.segment, (segmentCounts.get(persona.segment) ?? 0) + 1);
+          recent.push(...accepted);
+          acceptedPersonas += accepted.length; acceptedBatches++;
+          running.delete(batchIndex); retrying.delete(batchIndex);
+          const validation: NonNullable<LocalAgentProgress['validation']> = { scope: 'batch', status: 'passed', checks: ['Required fields and adult ages', 'Expected cohort ID and batch size', ...(originalMetadata || batchIndex > 0 ? ['Saved cohort details unchanged'] : []), ...(targets.length ? ['Requested distribution targets'] : []), 'Workspace size limit'], checkedPersonas: batchSize };
+          const done = {
+            completedPersonas: acceptedPersonas, completedBatches: acceptedBatches,
+            batchDurationsMs: [...(entry.public.progress?.batchDurationsMs ?? []), durationMs].slice(-MAX_BATCH_TIMINGS),
+            completedBatchSizes: [...(entry.public.progress?.completedBatchSizes ?? []), batchSize].slice(-MAX_BATCH_TIMINGS),
+            latestAccepted: recent.slice(-3).map(({ id, label, age, segment }) => ({ id, label, age, segment })), validation, lastBatchChecks: [...validation.checks],
+          };
+          if (running.size) publishRunning(done);
+          else this.updateProgress(entry, 'validating', `Checked batch ${batchIndex + 1} of ${batches} (${acceptedPersonas}/${request.size} personas)…`, { ...done, activeBatches: [], retries, retry: undefined });
+          return;
+        } catch (error) {
+          if (entry.cancelled || stopped || error instanceof StopBatch || error instanceof FatalDraftFailure || attempt > BATCH_RETRIES) { running.delete(batchIndex); retrying.delete(batchIndex); throw error; }
+          retries++; retrying.set(batchIndex, attempt + 1);
         }
       }
-      metadata ??= candidateMetadata;
-      if (batchIndex === 0) firstExplanation = output.explanation;
-      const emptyGenerated = { ...metadata, generationPrompt: input.prompt, personas: [] };
-      const emptyGeneratedBytes = Buffer.byteLength(JSON.stringify(emptyGenerated));
-      for (const persona of candidate.personas) {
-        const indexed = { ...persona, id: `persona-${String(personas.length + 1).padStart(5, '0')}` };
-        serializedPersonaBytes += (personas.length ? 1 : 0) + Buffer.byteLength(JSON.stringify(indexed));
-        personas.push(indexed);
-        segmentCounts.set(indexed.segment, (segmentCounts.get(indexed.segment) ?? 0) + 1);
-        const projectedBytes = unchangedBytes + emptyGeneratedBytes - 2 + serializedPersonaBytes;
-        if (projectedBytes > MAX_WORKSPACE_BYTES) throw new DraftFailure('The completed cohort would exceed the workspace size limit. Use a smaller persona count or reduce saved workspace data.');
+    };
+
+    // The first batch establishes the cohort metadata every later batch must copy, so it runs alone.
+    await attemptBatch(0);
+    let failure: { error: unknown } | undefined;
+    const worker = async () => {
+      while (!stopped && !entry.cancelled && nextBatch < batches) {
+        try { await attemptBatch(nextBatch++); }
+        catch (error) {
+          if (!stopped) { stopped = true; failure = { error }; for (const abort of [...entry.aborts]) abort(); }
+          return;
+        }
       }
-      this.updateProgress(entry, 'validating', `Checked batch ${batchIndex + 1} of ${batches} (${personas.length}/${request.size} personas)…`, { completedPersonas: personas.length, completedBatches: batchIndex + 1, batchDurationsMs: [...(entry.public.progress?.batchDurationsMs ?? []), Math.max(0, Date.now() - Date.parse(entry.public.progress!.batchStartedAt!))].slice(-MAX_BATCH_TIMINGS), completedBatchSizes: [...(entry.public.progress?.completedBatchSizes ?? []), batchSize].slice(-MAX_BATCH_TIMINGS), latestAccepted: personas.slice(-3).map(({ id, label, age, segment }) => ({ id, label, age, segment })), validation: { scope: 'batch', status: 'passed', checks: ['Required fields and adult ages', 'Expected cohort ID and batch size', ...(originalMetadata || batchIndex > 0 ? ['Saved cohort details unchanged'] : []), ...(targets.length ? ['Requested distribution targets'] : []), 'Workspace size limit'], checkedPersonas: batchSize } });
-      entry.public.progress!.lastBatchChecks = [...entry.public.progress!.validation!.checks];
-    }
-    if (entry.cancelled || !metadata || personas.length !== request.size) throw Error();
+    };
+    await Promise.all(Array.from({ length: Math.min(CONCURRENT_BATCHES, batches - 1) }, worker));
+    if (failure) throw (failure as { error: unknown }).error;
+    const personas = results.flat();
+    if (entry.cancelled || !metadata || personas.length !== request.size || acceptedBatches !== batches) throw Error();
     this.updateProgress(entry, 'validating', `Checking the complete cohort and workspace (${personas.length}/${request.size} personas)…`, { validation: { scope: 'final', status: 'checking', checks: [], checkedPersonas: 0 } });
 
     const uncoveredSegment = (metadata.segments as Cohort['segments']).find(segment => segment.weight > 0 && !segmentCounts.get(segment.id));
@@ -592,31 +674,32 @@ export class LocalAgentService {
     return { document, explanation: `Prepared ${request.size} synthetic personas in ${batches} batches. ${targets.length ? 'Saved distribution targets matched deterministic whole-person quotas (largest remainder rounding); these are synthetic counts, not observed population data. ' : ''}${firstExplanation}`.slice(0, 5000) };
   }
 
-  private async requestDraft(entry: Entry, input: LocalAgentInput, prompt: string): Promise<{ documentJson: string; explanation: string }> {
+  private async requestDraft(entry: Entry, input: LocalAgentInput, prompt: string, slot = 0): Promise<{ documentJson: string; explanation: string }> {
     let directory: string | undefined;
     const startedAt = new Date().toISOString();
-    this.updateProgress(entry, 'generating', entry.public.message, { generationStartedAt: startedAt, activity: 'starting', lastActivityAt: startedAt, outputChars: 0, outputTokens: undefined, outputSource: input.engine === 'chatgpt' ? 'response' : 'cli-stdout' });
+    entry.slots.set(slot, { chars: 0 });
+    this.updateProgress(entry, 'generating', entry.public.message, { generationStartedAt: startedAt, activity: 'starting', lastActivityAt: startedAt, ...this.providerTotals(entry), outputSource: input.engine === 'chatgpt' ? 'response' : 'cli-stdout' });
     try {
       let payload: unknown;
       if (input.engine === 'chatgpt') {
         if (!this.chatgpt || !input.model) throw Error();
-        const controller = new AbortController(); entry.abort = () => controller.abort();
+        const controller = new AbortController(); const abort = () => controller.abort(); entry.aborts.add(abort);
         const timer = setTimeout(() => controller.abort(), this.timeoutMs); timer.unref();
         let active = true;
         try {
           const request = { model: input.model, input: prompt, instructions: 'Return a JSON object with exactly documentJson (a JSON string) and explanation (a string). No markdown fences. No tools.', signal: controller.signal,
-            onProgress: (progress: ProviderProgress) => { if (active && !controller.signal.aborted) this.recordActivity(entry, progress, 'response'); },
+            onProgress: (progress: ProviderProgress) => { if (active && !controller.signal.aborted) this.recordActivity(entry, progress, 'response', slot); },
           };
           const result = await this.chatgpt.generate(request);
           if (controller.signal.aborted || entry.cancelled) throw Error();
           if (Buffer.byteLength(result.text) > this.maxOutputBytes) throw new DraftFailure('Agent reached its time or output limit. Try a smaller drafting request.');
-          this.recordActivity(entry, { phase: 'receiving', outputChars: result.text.length }, 'response');
+          this.recordActivity(entry, { phase: 'receiving', outputChars: result.text.length }, 'response', slot);
           payload = JSON.parse(result.text);
         } catch (error) {
           if (error instanceof DraftFailure) throw error;
           if (entry.cancelled) throw error;
           throw new DraftFailure(chatGptMessage(error));
-        } finally { active = false; clearTimeout(timer); entry.abort = undefined; }
+        } finally { active = false; clearTimeout(timer); entry.aborts.delete(abort); }
       } else {
         directory = await mkdtemp(join(this.temporaryRoot, 'jev-agent-')); await chmod(directory, 0o700);
         const schemaPath = join(directory, 'response-schema.json'); const resultPath = join(directory, 'response.json');
@@ -630,7 +713,7 @@ export class LocalAgentService {
           args = ['--print', '--safe-mode', '--restricted', '--tools', '', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--permission-mode', 'dontAsk', '--no-session-persistence', '--output-format', 'json', '--json-schema', JSON.stringify(outputSchema)];
         }
         if (entry.cancelled) throw Error();
-        const outcome = await this.command(input.engine, args, directory, prompt, this.timeoutMs, this.maxOutputBytes, entry);
+        const outcome = await this.command(input.engine, args, directory, prompt, this.timeoutMs, this.maxOutputBytes, entry, false, slot);
         if (entry.cancelled) throw Error();
         if (outcome.limited) throw new DraftFailure('Agent reached its time or output limit. Try a smaller drafting request.');
         if (outcome.code !== 0) throw new DraftFailure('Agent could not finish. Check your CLI login and subscription availability, then try again. Workspace unchanged.');
@@ -648,6 +731,9 @@ export class LocalAgentService {
       if (error instanceof DraftFailure) throw error;
       if (entry.cancelled) throw error;
       throw new DraftFailure('Agent did not return a valid workspace draft. Try a smaller or more specific request. Workspace unchanged.');
-    } finally { if (directory) await rm(directory, { recursive: true, force: true }).catch(() => undefined); }
+    } finally {
+      entry.slots.delete(slot);
+      if (directory) await rm(directory, { recursive: true, force: true }).catch(() => undefined);
+    }
   }
 }

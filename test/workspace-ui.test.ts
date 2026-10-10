@@ -3027,3 +3027,16 @@ test('Review run counts unfinished steps and opens the first one on the tab that
   act(null, { dataset: { act: 'flow-create-open' } });
   assert.equal(p.stages.length, before + 1, 'without a rendered canvas, Create adds a question step directly');
 });
+
+test('concurrent batch progress names the running batches, the retry, and divides the estimate by parallelism', async () => {
+  const browser=browserHarness(); await settle(); const {draftProgress,draftEstimate,S}=browser.client;
+  const job={id:'p',engine:'chatgpt',model:'m',status:'running',startedAt:new Date().toISOString(),cohort:{id:'new',size:1000},progress:{phase:'generating',batch:2,batchSize:25,batchStartedAt:new Date(Date.now()-5000).toISOString(),activeBatches:[2,3,4],maxConcurrentBatches:6,totalBatches:40,completedBatches:1,completedPersonas:25,totalPersonas:1000,retries:1,retry:{batch:3,attempt:2,maxAttempts:3},outputChars:0}};
+  S.localJob=job;
+  const html=draftProgress(job);
+  assert.match(html,/Generating batches 2, 3 and 4 of 40/); assert.match(html,/3 batches running at once/);
+  assert.match(html,/Batch 3 did not pass its checks and is being tried again \(attempt 2 of 3\)/);
+  const base={totalPersonas:1000,completedPersonas:50,totalBatches:40,completedBatches:2,batchDurationsMs:[60000,60000],completedBatchSizes:[25,25]};
+  assert.match(draftEstimate(base),/~30–46 min remaining/);
+  assert.match(draftEstimate({...base,maxConcurrentBatches:6}),/~5–8 min remaining.*6 at a time/);
+  assert.match(html.replace(/retries/,''),/Generating/);
+});
