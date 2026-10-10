@@ -71,8 +71,12 @@ export class ProviderError extends Error {
   }
 }
 
-/** Allowed drift from 1 in a returned distribution before it is treated as invalid. */
-export const PROBABILITY_SUM_TOLERANCE = 1e-3;
+/** Hosted Jev reports each probability rounded to two decimals, so each option can be off by up to half a hundredth. */
+export const PROBABILITY_ROUNDING_STEP = 0.005;
+/** Allowed drift from 1 for a distribution of `options` rounded probabilities before it is treated as invalid. */
+export function probabilitySumTolerance(options: number): number {
+  return Math.max(1e-3, options * PROBABILITY_ROUNDING_STEP + 1e-9);
+}
 
 function stableJson(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'undefined';
@@ -139,8 +143,8 @@ function validateAnswer(question: Question, value: unknown, id: string): Answer 
     assertProbability(probabilities[key], `${id}.${key}`);
     sum += probabilities[key];
   }
-  // Hosted Jev rounds each probability, so long option lists can drift slightly from 1; renormalize small drift, reject real errors.
-  if (Math.abs(sum - 1) > PROBABILITY_SUM_TOLERANCE) throw invalidResponse('probability_total', `TypeSafe returned an unnormalized probability distribution for ${id}.`);
+  // Hosted Jev rounds each probability to two decimals, so long option lists drift from 1; renormalize rounding drift, reject real errors.
+  if (Math.abs(sum - 1) > probabilitySumTolerance(expected.length)) throw invalidResponse('probability_total', `TypeSafe returned an unnormalized probability distribution for ${id}.`);
   if (Math.abs(sum - 1) > 1e-9) for (const key of expected) probabilities[key] = (probabilities[key] as number) / sum;
   assertProbability(answer.confidence, `${id}.confidence`);
 
