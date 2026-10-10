@@ -1,10 +1,21 @@
 id: navigation
 name: Navigation and search
 prose: >-
-  The open view is kept in the URL hash, so reloading the page returns to it. Open proposal (not
-  yet accepted): Back and Forward stepping through views (today navigation replaces the URL
-  instead of adding history entries, docs/ux-review §1).
+  The open view is kept in the URL hash, so reloading the page returns to it, and every move
+  between views adds a history entry, so the browser's Back and Forward buttons step through them.
 behaviors:
+  - id: history-navigation
+    description: >-
+      Opening a project, tab, study, step, cohort, persona, run, or the Projects list adds a browser
+      history entry; Back and Forward restore those views without leaving the workspace, and
+      editing the hash in the address bar opens that view.
+    details: >-
+      Restoring a view flushes open forms first (an invalid form shows its error and keeps the
+      view), clears any item the hash no longer names (closed cohort, persona, run, or composer),
+      and the first paint and restores replace the entry rather than adding one.
+    source:
+      text: fix everything (from the UI audit: three clicks in, Back leaves the site)
+      reference: jev-polls project thread "UI audit in headless browser", Giulio, 2026-10-10
   - id: reload-keeps-view
     description: >-
       Reloading the page reopens the same project and tab, plus the open study and step, cohort and
