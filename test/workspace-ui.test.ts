@@ -87,7 +87,7 @@ test('evaluation provider is global, persists, and invalidates only its reviewed
   browser.respond('/api/plan', { pipelineId: 'study', provider: 'gliner', model: 'fastino/GLiNER2.5-Decide', maxRequests: 1, stages: [], warnings: [], revision: 1, planToken: 'test' }, 'POST');
   await reviewPlan();
   assert.equal((browser.bodies.at(-1)!.body as any).provider, 'gliner');
-  assert.match(browser.element('app').innerHTML, /Runs locally with GLiNER/);
+  assert.match(browser.element('app').innerHTML, /runs locally with GLiNER/i);
   assert.doesNotMatch(browser.element('app').innerHTML, /uses your account balance/);
   const before = JSON.stringify(S.doc);
   await browser.listeners.get('change')!({ target: { name: 'evaluationProvider', value: 'typesafe' } });
@@ -150,10 +150,10 @@ test('review settings survive tab switches and request plans paginate for deskto
   assert.match(html, /name="seed"[^>]*value="saved-seed"/);
   assert.match(html, /name="concurrency"[^>]*value="3"/);
   assert.match(html, /name="maxRequests"[^>]*value="17"/);
-  assert.match(html, /1–2 of 7/); assert.doesNotMatch(html, />Step 4 /);
+  assert.doesNotMatch(html, /of 7/, 'seven steps fit on one desktop page'); assert.match(html, /<h3>Step 7<\/h3>/);
   (browser.window as any).innerWidth = 390;
   const narrow = review();
-  assert.match(narrow, /1–1 of 7/); assert.doesNotMatch(narrow, />Step 2 /);
+  assert.match(narrow, /1–4 of 7/); assert.doesNotMatch(narrow, /<h3>Step 5<\/h3>/);
   assert.equal(S.plan.planToken, 'reviewed-plan'); assert.equal(S.dirty, false);
   assert.equal(browser.requests.filter(path => path === '/api/run').length, 0);
 });
@@ -2919,15 +2919,16 @@ test('run review explains real questions, data flow, conditions and cohort termi
   pipeline.stages[0].when = { stage: 'panel', question: 'answer', metric: 'margin', op: 'lt', value: 0.1 };
   S.plan = { ...runReviewPlan(), stages: [{ id: 'panel', label: 'First question', kind: 'poll', dependsOn: [], cohort: 'audience', profiles: 24, repeats: 2, requests: 48 }] };
   const html = review();
-  for (const text of ['Original cohort', '24 cohort members', '2 evaluations each', 'Inputs', 'Outputs', 'Which option fits?', 'Choose an option.', 'weighted distribution', 'lead margin less than 0.1', '&lt;unsafe&gt; game brief']) assert.ok(html.includes(text), text);
-  assert.doesNotMatch(html, /24 profiles|<unsafe>/);
+  for (const text of ['Ask cohort', 'Starts first', 'Original cohort · 24 personas × 2', '<strong>48</strong> requests', 'What this step asks and reads', 'Which option fits?', 'Choose an option.', 'a weighted share for each option', 'lead margin less than 0.1', '&lt;unsafe&gt; game brief']) assert.ok(html.includes(text), text);
+  assert.doesNotMatch(html, /24 profiles|<unsafe>|data-section-panel/);
+  assert.equal(html.replace(/<p class="review-rule">.*?<\/p>/, '').match(/Which option fits\?/g)!.length, 1, 'the question text appears once per step');
   pipeline.stages.push({ id: 'combined', label: 'Combine', kind: 'aggregate', dependsOn: ['panel'], inputs: [{ stage: 'panel', question: 'answer', weight: 2 }], outputQuestion: 'combined_answer' });
   S.plan.stages = [{ id: 'combined', label: 'Combine', kind: 'aggregate', dependsOn: ['panel'], requests: 0 }];
-  assert.match(review(), /First question → Which option fits\?/);
-  assert.match(review(), /weight 2/);
-  assert.match(review(), /Combined weighted result: combined_answer \(requires all inputs\)/);
+  assert.match(review(), /<span class="review-kind">Combine<\/span><span>After step 1<\/span>/);
+  assert.match(review(), /Step 1 · weight 2/);
+  assert.match(review(), /Needs every input/);
   pipeline.stages[1].join = 'any';
-  assert.match(review(), /available inputs only/);
+  assert.match(review(), /Uses whichever inputs finish/);
   assert.equal(browser.requests.filter(path => path === '/api/run').length, 0);
 });
 
