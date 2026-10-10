@@ -2,7 +2,7 @@
 export const SIDEBAR_CLIENT = String.raw`
 const SIDEBAR_STUDY_LIMIT=8;
 function sidebarLink(label,act,current,extra='',count=null,sub=false){
-  return '<button type="button" class="side-link'+(sub?' side-sub':'')+'" data-act="'+act+'"'+extra+(current?' aria-current="page"':'')+'><span class="side-label">'+esc(label)+'</span>'+(count===null?'':'<span class="side-count">'+count+'</span>')+'</button>';
+  return '<button type="button" class="side-link'+(sub?' side-sub':'')+'" data-act="'+act+'"'+extra+(current?' aria-current="page"':'')+(sub?' title="'+attr(label)+'"':'')+'><span class="side-label">'+esc(label)+'</span>'+(count===null?'':'<span class="side-count">'+count+'</span>')+'</button>';
 }
 function workspaceSidebar(){
   const p=project();if(!p)return '';
@@ -34,8 +34,9 @@ export const SIDEBAR_CSS = String.raw`
 .side-back{appearance:none;display:flex;align-items:center;gap:6px;min-height:36px;padding:0 10px;border:0;border-radius:var(--radius-control,6px);background:transparent;color:var(--muted);font:inherit;font-size:12px;font-weight:600;cursor:pointer;text-align:left}
 .side-back:hover{color:var(--ink);background:var(--hover)}.side-back .ui-icon{width:14px;height:14px}
 .side-project{margin:10px 10px 8px;font:600 15px/1.3 var(--display);letter-spacing:-.01em;color:var(--ink);overflow-wrap:anywhere}
-.side-group{display:grid;gap:2px}.side-children{display:grid;gap:1px;margin:0 0 4px}
-.side-link{appearance:none;display:flex;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:40px;padding:0 10px;border:0;border-radius:var(--radius-control,6px);background:transparent;color:var(--muted);font:inherit;font-size:13px;font-weight:600;text-align:left;cursor:pointer}
+/* minmax(0,1fr) stops a long nowrap label from widening the track past the sidebar, so the label can ellipsize. */
+.side-group{display:grid;grid-template-columns:minmax(0,1fr);gap:2px}.side-children{display:grid;grid-template-columns:minmax(0,1fr);gap:1px;margin:0 0 4px}
+.side-link{appearance:none;display:flex;min-width:0;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:40px;padding:0 10px;border:0;border-radius:var(--radius-control,6px);background:transparent;color:var(--muted);font:inherit;font-size:13px;font-weight:600;text-align:left;cursor:pointer}
 .side-link:hover{background:var(--hover);color:var(--ink)}
 .side-link[aria-current=page]{background:var(--surface);color:var(--ink);box-shadow:inset 3px 0 0 var(--blue)}
 .side-link.side-sub{min-height:34px;padding-left:22px;font-size:12px;font-weight:500}
