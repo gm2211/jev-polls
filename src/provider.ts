@@ -11,6 +11,7 @@ import {
   type Question as ApiQuestion,
 } from '@typesafe-ai/sdk';
 import { readApiKey } from './auth.js';
+import { CHOICE_WINNER_TOLERANCE } from './engine-utils.js';
 import { createGlinerProvider, type GlinerConfig } from './gliner-provider.js';
 export { GLINER_MODEL, glinerStatus } from './gliner-provider.js';
 import type { Answer, Evaluation, EvaluationRequest, Provider, Question } from './types.js';
@@ -153,7 +154,7 @@ function validateAnswer(question: Question, value: unknown, id: string): Answer 
       throw invalidResponse('choice_value', `TypeSafe selected an unknown option for ${id}.`);
     }
     const values = expected.map((key) => probabilities[key] as number);
-    if ((probabilities[answer.choice] as number) < Math.max(...values) - 1e-8) {
+    if ((probabilities[answer.choice] as number) < Math.max(...values) - CHOICE_WINNER_TOLERANCE) {
       throw invalidResponse('choice_winner', `TypeSafe selected a non-leading option for ${id}.`);
     }
     return { type: 'choice', choice: answer.choice, probabilities: probabilities as Record<string, number>, confidence: answer.confidence };

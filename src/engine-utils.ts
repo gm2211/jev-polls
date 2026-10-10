@@ -55,3 +55,6 @@ export function resolveQuestion(stages: Stage[], stageId: string, questionId: st
   }
   return undefined;
 }
+
+/** Jev rounds probabilities to two decimals, so its chosen option can trail the reported maximum by up to one rounding step (plus renormalization). */
+export const CHOICE_WINNER_TOLERANCE = 0.011;

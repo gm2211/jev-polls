@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { readJson } from './io.js';
 import { outputQuestions, parseCohort, parsePipeline } from './schema.js';
-import { hashValue } from './engine-utils.js';
+import { CHOICE_WINNER_TOLERANCE, hashValue } from './engine-utils.js';
 import { GLINER_MODEL, GLINER_REVISION, validateClassifierAnswer } from './gliner-provider.js';
 import type { Answer, Question, RunRecord, SummaryBase } from './types.js';
 const probability = z.number().finite().min(0).max(1);
@@ -44,7 +44,7 @@ function validateAnswerForQuestion(answer: Answer, question: Question, where: st
     const options = Object.keys(question.criteria);
     validateDistribution(answer.probabilities, options, where);
     const maximum = Math.max(...Object.values(answer.probabilities));
-    if (!options.includes(answer.choice) || answer.probabilities[answer.choice]! < maximum - 1e-8) {
+    if (!options.includes(answer.choice) || answer.probabilities[answer.choice]! < maximum - CHOICE_WINNER_TOLERANCE) {
       throw new Error(`Saved run choice is not a most likely option at ${where}`);
     }
     return;

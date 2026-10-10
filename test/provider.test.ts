@@ -156,6 +156,17 @@ test('TypeSafe accepts two-decimal rounding across 14 options (sum 0.99) and ren
   assert(Math.abs(Object.values(pick.probabilities).reduce((sum, value) => sum + value, 0) - 1) < 1e-12);
 });
 
+test('TypeSafe accepts a choice that trails the rounded maximum by one rounding step only', async () => {
+  const respond = (beta: number) => async (): Promise<Response> => Response.json({
+    model: 'jev-test',
+    answers: { choice: { type: 'choice', choice: 'alpha', confidence: 0.5, probabilities: { alpha: 0.45, beta, gamma: 0.55 - beta } }, likely: { type: 'noul', noul: 0.5 }, fit: { type: 'score', score: 1, confidence: 0.5, legend: { '0': 'Poor fit', '1': 'Mixed fit', '2': 'Strong fit' }, probabilities: { '0': 0, '1': 1, '2': 0 } } },
+    usage: { input_tokens: 1, output_tokens: 1 },
+  });
+  const result = await createProvider('typesafe', { apiKey: 'fake-test-key', fetch: respond(0.46) }).evaluate(request);
+  assert.equal((result.answers.choice as { choice: string }).choice, 'alpha');
+  await assert.rejects(createProvider('typesafe', { apiKey: 'fake-test-key', fetch: respond(0.5) }).evaluate(request), (error: unknown) => error instanceof ProviderError && error.responseIssue === 'choice_winner');
+});
+
 test('mock choice distributions remain normalized at the 255-option schema limit', async () => {
   const criteria = Object.fromEntries(Array.from({ length: 255 }, (_, index) => [`option-${index}`, `Option ${index}`]));
   const broadRequest: EvaluationRequest = {

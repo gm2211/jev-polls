@@ -9,7 +9,7 @@ import { summarizeVotes } from './analysis.js';
 import { ProviderError, type ProviderResponseIssue } from './provider.js';
 import { validateClassifierAnswer } from './gliner-provider.js';
 import { inputSelectCompatible } from './schema.js';
-import { errorMessage, hashValue, isFiniteProbability, resolveQuestion, seededRandom, stableStringify } from './engine-utils.js';
+import { CHOICE_WINNER_TOLERANCE, errorMessage, hashValue, isFiniteProbability, resolveQuestion, seededRandom, stableStringify } from './engine-utils.js';
 import { buildPollState, planBatching, requestSizeProblem } from './request-budget.js';
 import { batchedBinding, chunk, describeBatching, COMBINE_GUIDE, mapInput, MAP_GUIDE, reduceInput, type Verdict } from './batching.js';
 
@@ -73,7 +73,7 @@ export function validateEvaluation(evaluation: Evaluation, questions: Record<str
       validateDistribution(id, answer.probabilities);
       if (!keys.includes(answer.choice)) throw new Error(`provider answer '${id}' selected an unknown choice`);
       const max = Math.max(...Object.values(answer.probabilities));
-      if (answer.probabilities[answer.choice]! < max - 1e-8) throw new Error(`provider answer '${id}' choice is not a most likely option`);
+      if (answer.probabilities[answer.choice]! < max - CHOICE_WINNER_TOLERANCE) throw new Error(`provider answer '${id}' choice is not a most likely option`);
       if (!answer.classifier && (typeof answer.confidence !== 'number' || !isFiniteProbability(answer.confidence))) throw new Error(`provider answer '${id}' has invalid confidence`);
     } else if (question.type === 'score' && answer.type === 'score') {
       const size = question.criteria.length;
