@@ -1,0 +1,3 @@
+Adult gamers (18+) who could comfortably buy a $20 game, spread across countries, ethnicities, ages and incomes. Keep each persona short: a two-sentence backstory focused on gaming habits.
+Structured attributes for every persona: annualIncomeUsd (number), country, ethnicity, favoriteFranchises (2-3 real series, e.g. Doom, StarCraft, Age of Empires, Halo, Crysis, Civilization, Factorio, Stellaris, Call of Duty, Minecraft, Kerbal Space Program, Command & Conquer), hoursPlayedLastYear (number), seriesLoyalty (how many entries of their favorite series they bought, e.g. "bought AoE I-IV" or "only the first"), preferredGenres, platform.
+Mix strategy/4X, shooter, sim/builder and casual players. Segments by play style.
