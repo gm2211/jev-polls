@@ -8,8 +8,9 @@ export const THEME_CONTROL = `<button type="button" id="themeToggle" class="butt
 export const THEME_INIT = String.raw`(()=>{
   const key='jev-workspace-theme',root=document.documentElement;
   const normalize=value=>value==='dark'||value==='sepia'?'dark':'light';
-  let theme='light';
-  try{const saved=localStorage.getItem(key);theme=normalize(saved);if(saved==='sepia')localStorage.setItem(key,theme)}catch{}
+  const system=()=>{try{return typeof matchMedia==='function'&&matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light'}catch{return 'light'}};
+  let theme=system();
+  try{const saved=localStorage.getItem(key);if(saved)theme=normalize(saved);if(saved==='sepia')localStorage.setItem(key,theme)}catch{}
   function apply(){
     root.dataset.theme=theme;
     const button=document.getElementById('themeToggle');
@@ -26,7 +27,7 @@ export const THEME_INIT = String.raw`(()=>{
     });
   },{once:true});
   window.addEventListener('storage',event=>{
-    if(event.key===key||event.key===null){theme=normalize(event.newValue);apply()}
+    if(event.key===key||event.key===null){theme=event.newValue?normalize(event.newValue):system();apply()}
   });
 })();`;
 
@@ -50,15 +51,16 @@ export const WORKSPACE_PALETTES = {
   },
 } as const;
 
-function paletteCSS(palette: Record<string, string>): string {
+export function paletteCSS(palette: Record<string, string>): string {
   return Object.entries(palette).map(([key, value]) => `--${key}:${value}`).join(';');
 }
 
 // Embedded open-source fonts keep the local workspace usable without a CDN.
 const fontData = (name: string) => readFileSync(new URL('../assets/fonts/' + name + '-latin.woff2', import.meta.url)).toString('base64');
+export const WORKSPACE_FONT_CSS = `@font-face{font-family:Jev Display;src:url(data:font/woff2;base64,${fontData('space-grotesk')}) format('woff2');font-style:normal;font-weight:400 700;font-display:swap}
+@font-face{font-family:Jev Sans;src:url(data:font/woff2;base64,${fontData('ibm-plex-sans')}) format('woff2');font-style:normal;font-weight:400 700;font-display:swap}`;
 export const THEME_CSS = `
-@font-face{font-family:Jev Display;src:url(data:font/woff2;base64,${fontData('space-grotesk')}) format('woff2');font-style:normal;font-weight:400 700;font-display:swap}
-@font-face{font-family:Jev Sans;src:url(data:font/woff2;base64,${fontData('ibm-plex-sans')}) format('woff2');font-style:normal;font-weight:400 700;font-display:swap}
+${WORKSPACE_FONT_CSS}
 :root{${paletteCSS(WORKSPACE_PALETTES.light)};--shadow:none;--radius-control:6px;--radius-panel:10px;--space-field:12px;--control-height:36px;--button-height:32px;--display:'Jev Display',Arial,sans-serif;--body:'Jev Sans',Arial,sans-serif;--numeric:'Jev Display',ui-monospace,monospace}
 :root[data-theme=dark]{color-scheme:dark;${paletteCSS(WORKSPACE_PALETTES.dark)}}
 /* IDE-style hierarchy: dark chassis, task surfaces, lighter editable controls. */
