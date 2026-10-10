@@ -41,3 +41,12 @@ behaviors:
     description: >-
       Drafts name a study with a short question of at most 80 characters, and no poll's sample
       size exceeds its cohort's persona count.
+  - id: drafting-job-recovery
+    description: >-
+      A running or finished-but-unapplied drafting job stays reachable after a reload or in a new
+      tab: opening the project lists its jobs from the server and reattaches to the progress or
+      proposal review, and the Cohorts list shows "Generating N personas" or "Ready to review"
+      instead of the empty state. Applying or discarding in one tab ends the offer in others, and a
+      second apply gets a clear "already applied" message.
+    source:
+      text: A running 1000-persona generation is invisible in a new tab and its finished proposal is unreachable.

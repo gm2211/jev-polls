@@ -106,3 +106,47 @@ test('persona regeneration HTTP proposals retain saved data and cannot replace a
   assert.equal((await applied.json()).document.cohorts[0].personas[0].label, 'Jordan');
   assert.equal(calls, 2); assert.equal(inference, 0);
 });
+
+test('drafting jobs can be listed per project, and a second tab is told when a proposal was already applied', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'jev-recover-http-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const jobs = new Map<string, LocalAgentJob>(); const settled = new Map<string, 'applied' | 'discarded'>();
+  const add = (job: Partial<LocalAgentJob>) => { const full = { id: randomUUID(), engine: 'codex', revision: 0, status: 'running', message: 'Working', ...job } as LocalAgentJob; jobs.set(full.id, full); return full; };
+  const localAgents: NonNullable<WorkspaceServerOptions['localAgents']> = {
+    availability: async () => ({ engines: [] }),
+    start: () => { throw Error('not used'); },
+    get: id => jobs.get(id),
+    cancel: id => jobs.get(id),
+    list: projectId => [...jobs.values()].filter(job => settled.get(job.id) === undefined && (projectId === undefined || job.projectId === projectId)),
+    settle: (id, how) => { settled.set(id, how); return jobs.get(id); },
+    disposition: id => settled.get(id),
+    close: async () => {},
+  };
+  const server = await startWorkspaceServer({ directory, localAgents, getAuthStatus: async () => ({ configured: false, source: 'none' }) });
+  t.after(() => server.close());
+  const csrf = (await (await fetch(server.url)).text()).match(/<meta name="jev-csrf" content="([a-f0-9]+)"/)![1]!;
+  const post = (path: string, value: unknown) => fetch(new URL(path, server.url), { method: 'POST', headers: { origin: new URL(server.url).origin, 'content-type': 'application/json', 'x-jev-csrf': csrf }, body: JSON.stringify(value) });
+  const list = async (query: string) => (await fetch(new URL('/api/agent/jobs' + query, server.url))).json();
+  const running = add({ projectId: 'mine', status: 'running', cohort: { id: 'panel', size: 1000, prompt: 'Gamers' }, progress: { phase: 'generating', completedPersonas: 375, totalPersonas: 1000 } });
+  const other = add({ projectId: 'other', status: 'running' });
+  const stale = add({ projectId: 'mine', status: 'completed', revision: 7, proposal: { document: emptyWorkspaceDocument(), explanation: 'Old' } });
+  assert.deepEqual((await list('?projectId=mine')).jobs.map((job: LocalAgentJob) => job.id), [running.id], 'scoped to the project and omits proposals for an older revision');
+  assert.deepEqual((await list('?projectId=other')).jobs.map((job: LocalAgentJob) => job.id), [other.id]);
+  assert.equal((await list('?projectId=mine')).jobs[0].progress.completedPersonas, 375);
+  assert.equal((await fetch(new URL('/api/agent/jobs?projectId=..%2Fx', server.url))).status, 400);
+  jobs.delete(stale.id);
+  const ready = add({ projectId: 'mine', status: 'completed', revision: 0, proposal: { document: emptyWorkspaceDocument(), explanation: 'Fresh' } });
+  assert.ok((await list('?projectId=mine')).jobs.some((job: LocalAgentJob) => job.id === ready.id), 'a completed proposal at the saved revision is offered');
+  const first = await post(`/api/agent/jobs/${ready.id}/apply`, { revision: 0 });
+  assert.equal(first.status, 200);
+  assert.equal(settled.get(ready.id), 'applied');
+  const second = await post(`/api/agent/jobs/${ready.id}/apply`, { revision: 0 });
+  assert.equal(second.status, 409);
+  const error = (await second.json()).error;
+  assert.equal(error.code, 'AGENT_PROPOSAL_APPLIED');
+  assert.match(error.message, /already applied.*another tab/);
+  assert.ok(!(await list('?projectId=mine')).jobs.some((job: LocalAgentJob) => job.id === ready.id));
+  const discarded = add({ projectId: 'mine', status: 'completed', revision: 1, proposal: { document: emptyWorkspaceDocument(), explanation: 'Fresh' } });
+  assert.equal((await post(`/api/agent/jobs/${discarded.id}/discard`, {})).status, 200);
+  assert.equal(settled.get(discarded.id), 'discarded');
+});
