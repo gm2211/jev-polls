@@ -9,6 +9,13 @@ behaviors:
     source:
       text: Prefer focused tabs and pagination over long pages or stacked editors.
       reference: AGENTS.md
+  - id: pagination-in-flow
+    description: >-
+      A list's pager sits in the document flow after its rows and never floats over them; page
+      sizes fill a desktop viewport (personas show 12 per page on desktop, 6 on phone widths).
+    source:
+      text: fix everything (from the UI audit: the sticky pager covered the Review run step cards on phone and clipped the third persona row)
+      reference: jev-polls project thread "UI audit in headless browser", Giulio, 2026-10-10
   - id: no-controls-in-disclosures
     description: Buttons and editable controls never sit inside collapsible disclosures.
     source:

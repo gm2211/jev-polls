@@ -42,7 +42,7 @@ function personasExplorer(c){
   const fields=insights.discoverFields(c),weights=insights.effectiveWeights(c);
   let people=c.personas;if(S.personaFilter)people=people.filter(p=>insights.matchesBucket(p,S.personaFilter.field,S.personaFilter.bucket));
   const group=S.personaGroup||'';if(group)people=[...people].sort((a,b)=>valueText(personaValue(a,group)).localeCompare(valueText(personaValue(b,group)),undefined,{numeric:true}));
-  const page=pageItems(people,'personas',3);S.personaPage=page.index;
+  const page=pageItems(people,'personas',viewportPageSize(12,6));S.personaPage=page.index;
   const groups=new Map();for(const p of page.items){let key=group?valueText(personaValue(p,group)):'';if(group==='segment')key=c.segments.find(s=>s.id===p.segment)?.label||key;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(p)}
   const controls='<div class="explorer-controls">'+select('personaGroup',[{value:'',label:'No grouping'},...fields.map(f=>({value:f.field,label:cohortFieldLabel(f.field)}))],group,'Group personas by')+'<button class="button" data-act="new-persona">＋ Add persona</button></div>';
   const filter=S.personaFilter?'<p class="notice">Showing '+esc(cohortFieldLabel(S.personaFilter.field))+': '+esc(S.personaFilter.bucket.label)+' <button class="button small" data-act="persona-clear-filter">Show all personas</button></p>':'';
