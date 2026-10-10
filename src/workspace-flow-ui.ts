@@ -85,16 +85,37 @@ function flowNodeTitle(p,s){
   return named?{title:custom,sub:asked?asked+(more>0?' (+'+more+' more)':''):'Add the question'}:{title:asked||'Untitled question',sub:more>0?'+'+more+' more '+(more===1?'question':'questions'):''};
 }
 function flowOutputUsed(p,s,q){return p.stages.some(x=>x.id!==s.id&&flowInputs(p,x).some(([,input])=>input.stage===s.id&&(!input.question||input.question===q.id)))}
-function flowNode(p,s){
+/** Phones (700px and narrower) get a vertical list of full-width steps in run order instead of the graph canvas. */
+function flowListMode(){try{return typeof matchMedia==='function'&&matchMedia('(max-width:700px)').matches}catch{return false}}
+function flowProjectionLabel(p,source,q,select){
+  const base=q?flowOutputLabel(p,source,q):'Result';
+  return {summary:'Answer summary',winner:'Leading option',mean:'Mean score',responses:'Individual answers',probabilities:base}[select||'summary']||base;
+}
+/** Everything a step reads, one entry per connection: source step number, and what it takes from it. */
+function flowReads(p,s){
+  return flowInputs(p,s).map(([key,input])=>{
+    const source=p.stages.find(x=>x.id===input.stage);if(!source)return null;
+    const q=phaseOutput(p,source).find(x=>x.id===input.question);
+    return {key,input,source,q,n:p.stages.indexOf(source)+1,label:s.kind==='poll'?flowProjectionLabel(p,source,q,input.select):q?flowOutputLabel(p,source,q):'Missing output'};
+  }).filter(Boolean);
+}
+function flowReadsText(reads){return reads.map(r=>r.label+' from step '+r.n).join('; ')}
+function flowNodeInputs(p,s,list){
+  const reads=flowReads(p,s);if(!reads.length)return '';
+  const sources=[...new Set(reads.map(r=>r.n))].sort((a,b)=>a-b),first=reads[0];
+  const attrs='data-act="flow-inputs" data-id="'+attr(s.id)+'"';
+  if(list)return '<div class="flow-node-inputs flow-reads" role="group" aria-label="What this step reads">'+reads.map(r=>'<button type="button" class="flow-read" '+attrs+' data-flow-source="'+attr(r.source.id)+'" data-flow-question="'+attr(r.input.question||'')+'">'+icon('right')+'<span>Reads step '+r.n+' <small>'+esc(r.label)+'</small></span></button>').join('')+'</div>';
+  return '<div class="flow-node-inputs"><button '+attrs+' data-flow-source="'+attr(first.source.id)+'" data-flow-question="'+attr(first.input.question||'')+'" aria-label="Inputs: '+attr(flowReadsText(reads))+'" aria-describedby="flowWireTip">'+icon('right')+'<span>Uses '+(sources.length===1?'step ':'steps ')+sources.join(', ')+'</span></button></div>';
+}
+function flowNode(p,s,list){
   const pool=poolForPhase(p,s),outputs=phaseOutput(p,s),status=flowReadiness(p,s),pending=S.flowSource?.pipelineId===p.id?S.flowSource:null;
   const targetable=pending&&flowCanConnect(p,pending.stage,pending.question,s)&&!flowAlreadyConnected(p,s,pending.stage,pending.question);
-  const {title,sub}=flowNodeTitle(p,s),kind=s.kind==='poll'?'Ask cohort':s.kind==='aggregate'?'Combine':'Final result',inputs=flowInputs(p,s);
-  const sources=[...new Set(inputs.map(([,input])=>input.stage))].map(id=>p.stages.findIndex(x=>x.id===id)+1).filter(n=>n>0).sort((a,b)=>a-b);
+  const {title,sub}=flowNodeTitle(p,s),kind=s.kind==='poll'?'Ask cohort':s.kind==='aggregate'?'Combine':'Final result';
   const downstream=p.stages.some(x=>x.dependsOn.includes(s.id)),short=s.kind==='poll'&&flowSampleShort(p,s);
   const who=s.kind!=='poll'?'':pool?.personas.length?'<button class="flow-who" data-act="flow-cohort-map" data-id="'+attr(s.id)+'" aria-label="Explore '+attr(pool.name)+' ('+flowPlural(pool.personas.length,'member')+')" title="Explore the cohort"><span class="flow-host-dots" aria-hidden="true">'+pool.personas.slice(0,8).map(()=>'<i></i>').join('')+'</span><span class="flow-who-text"><strong>'+esc(pool.name)+'</strong><span>'+(short?'<span class="flow-sample-short">'+short.asks.toLocaleString('en-US')+' of '+flowPlural(short.have,'persona')+'</span>':flowPlural(s.size??pool.personas.length,'persona'))+'</span></span></button>':'';
   return '<article class="flow-node" data-flow-node="'+attr(s.id)+'" data-stage-index="'+p.stages.indexOf(s)+'" data-selected="'+(S.stageId===s.id)+'" data-targetable="'+!!targetable+'" aria-label="'+attr(stepTitle(p,s))+'">'+
     '<div class="flow-node-header"><span class="flow-number">'+(p.stages.indexOf(s)+1)+'</span><span class="flow-kind">'+kind+'</span><span class="flow-status" data-ready="'+(status==='Ready')+'">'+esc(status)+'</span></div>'+
-    (inputs.length?'<div class="flow-node-inputs"><button data-act="flow-inputs" data-id="'+attr(s.id)+'" data-flow-source="'+attr(inputs[0][1].stage)+'" data-flow-question="'+attr(inputs[0][1].question||'')+'" aria-label="Inputs: results from '+(sources.length===1?'step ':'steps ')+sources.join(', ')+'">'+icon('right')+'<span>Uses '+(sources.length===1?'step ':'steps ')+sources.join(', ')+'</span></button></div>':'')+
+    flowNodeInputs(p,s,list)+
     '<button class="flow-select" data-act="flow-select" data-id="'+attr(s.id)+'" aria-pressed="'+(S.stageId===s.id)+'" aria-label="'+(targetable?'Connect to ':'Edit ')+attr(stepTitle(p,s))+'"><strong>'+esc(title)+'</strong>'+(sub?'<span>'+esc(sub)+'</span>':'')+'</button>'+
     who+
     (targetable?'<button class="flow-destination" data-act="flow-connect" data-id="'+attr(s.id)+'" aria-label="Connect here: '+attr(stepTitle(p,s))+'">'+icon('plus')+' Connect here</button>':'')+
@@ -111,8 +132,19 @@ function flowEmptyCanvas(){
     '<button type="button" class="flow-empty-target" data-act="draft-panel-open"><span class="flow-empty-icon" aria-hidden="true">'+icon('edit')+'</span><strong>Describe the study in words</strong><span>Tell the assistant what you want to learn, then review its draft.</span></button>'+
     '</div><p class="flow-empty-hint">Click anywhere on the canvas to add a question.</p></div>';
 }
+/** Steps in the order they run: each after everything it reads, otherwise in step-number order. */
+function flowRunOrder(p){
+  const done=new Set(),left=[...p.stages],out=[];
+  while(left.length){const i=left.findIndex(s=>s.dependsOn.every(id=>done.has(id)||!p.stages.some(x=>x.id===id)));const [s]=left.splice(i<0?0:i,1);done.add(s.id);out.push(s)}
+  return out;
+}
+/** Phone layout: full-width step cards in run order; "Reads step N" lines stand in for wires. Nothing here can be dragged. */
+function flowList(p){
+  return '<div class="flow-list-view" role="region" aria-label="Study steps in run order"><ol class="flow-list">'+flowRunOrder(p).map(s=>'<li class="flow-list-item">'+flowNode(p,s,true)+(S.flowAdd===s.id?flowAddBar(p,s):'')+'</li>').join('')+'</ol>'+flowCreateMenu(p)+'</div>';
+}
 function flowCanvas(p){
   if(!p.stages.length)return flowEmptyCanvas();
+  if(flowListMode())return flowList(p);
   const depths=flowDepths(p),levels=[...new Set(depths.values())].sort((a,b)=>a-b);
   return '<div class="flow-viewport" tabindex="0" role="region" aria-label="Study flow canvas. Drag steps to arrange them; click empty canvas or press Enter to add a step." aria-keyshortcuts="Enter"><div class="flow-space"><div class="flow-map">'+levels.map(level=>'<div class="flow-column">'+p.stages.filter(s=>depths.get(s.id)===level).map(s=>flowNode(p,s)).join('')+'</div>').join('')+'</div>'+flowCreateMenu(p)+'</div></div>';
 }
@@ -178,10 +210,14 @@ function flowInspector(p,s){
   const footer=inlineCohortTarget(p,s)&&tab==='cohort'?'':flowGuidedFooter(p,s,tab);
   return '<aside class="flow-inspector round-panel" aria-label="Selected step editor" data-inspector-tab="'+attr(tab)+'"><div class="flow-inspector-head"><div class="round-panel-title"><h2 tabindex="-1">'+esc(stepTitle(p,s))+'</h2><span class="round-panel-kind">'+esc(kind)+'</span></div><div class="row"><button class="button small icon-button" data-act="flow-panel-close" aria-label="Close step panel" title="Close (Esc)">'+icon('close')+'</button></div></div><nav class="round-tabs" role="tablist" aria-label="Selected step sections">'+tabs.map(([key,label,todo,done])=>'<button type="button" role="tab" class="round-tab" data-act="flow-inspector" data-section="'+key+'" aria-selected="'+(tab===key)+'"'+(todo?' data-todo="true"':'')+(done?' data-done="true"':'')+'>'+flowTabContent(label,todo,done)+'</button>').join('')+'</nav><div class="flow-inspector-body" role="tabpanel">'+body+error+'</div>'+footer+'</aside>';
 }
+function flowAddBar(p,add){
+  const first=phaseOutput(p,add)[0];
+  return '<div class="flow-action-bar" aria-label="Add after selected step"><span>After '+esc(stepTitle(p,add))+'</span><div class="row"><button class="button small" data-act="flow-add" data-id="'+attr(add.id)+'" data-kind="poll">Follow-up / branch</button><button class="button small" data-act="flow-add" data-id="'+attr(add.id)+'" data-kind="aggregate">Combine answers</button><button class="button small" data-act="flow-add" data-id="'+attr(add.id)+'" data-kind="decision" '+(first?.type!=='choice'?'disabled':'')+'>Final result</button><button class="button small icon-button" data-act="flow-add-close" aria-label="Close add step actions">'+icon('close')+'</button></div></div>';
+}
 function flowWorkspace(p,s){
-  const pending=S.flowSource?.pipelineId===p.id?S.flowSource:null,add=p.stages.find(x=>x.id===S.flowAdd),first=add&&phaseOutput(p,add)[0];
-  return '<div class="flow-workspace"><section class="flow-board" aria-label="Study flow"><div class="flow-toolbar"><h2>Study flow <span>'+flowPlural(p.stages.length,'step')+'</span></h2><div class="row"><button class="button small primary" data-act="flow-create-open" aria-haspopup="dialog">'+icon('plus')+' Add step</button><button class="button small icon-button" data-act="flow-fit" aria-label="Fit flow to view" title="Fit flow to view">'+icon('fit')+'</button><button class="button small" data-act="flow-reset" aria-label="Actual size" title="Actual size">100%</button></div></div>'+
-    (add?'<div class="flow-action-bar" aria-label="Add after selected step"><span>After '+esc(stepTitle(p,add))+'</span><div class="row"><button class="button small" data-act="flow-add" data-id="'+attr(add.id)+'" data-kind="poll">Follow-up / branch</button><button class="button small" data-act="flow-add" data-id="'+attr(add.id)+'" data-kind="aggregate">Combine answers</button><button class="button small" data-act="flow-add" data-id="'+attr(add.id)+'" data-kind="decision" '+(first?.type!=='choice'?'disabled':'')+'>Final result</button><button class="button small icon-button" data-act="flow-add-close" aria-label="Close add step actions">'+icon('close')+'</button></div></div>':'')+
+  const pending=S.flowSource?.pipelineId===p.id?S.flowSource:null,add=p.stages.find(x=>x.id===S.flowAdd),list=flowListMode();
+  return '<div class="flow-workspace"><section class="flow-board" aria-label="Study flow"><div class="flow-toolbar"><h2>Study flow <span>'+flowPlural(p.stages.length,'step')+'</span></h2><div class="row"><button class="button small primary" data-act="flow-create-open" aria-haspopup="dialog">'+icon('plus')+' Add step</button>'+(list?'':'<button class="button small icon-button" data-act="flow-fit" aria-label="Fit flow to view" title="Fit flow to view">'+icon('fit')+'</button><button class="button small" data-act="flow-reset" aria-label="Actual size" title="Actual size">100%</button>')+'</div></div>'+
+    (add&&!list?flowAddBar(p,add):'')+
     (pending?'<div class="flow-hint" role="status">'+'<span><strong>Choose where it goes</strong><br>'+esc(inputTitle(p,{stage:pending.stage,question:pending.question}))+' → Click <strong>Connect here</strong> on a highlighted step.</span><button class="button small" data-act="flow-cancel">Cancel connection</button>'+'</div>':'')+flowCanvas(p)+'</section>'+(studyReviewPanel(p)||flowInspector(p,s))+'</div>';
 }
 function flowAction(a,el){
@@ -210,15 +246,15 @@ function flowAction(a,el){
     return true;
   }
   if(a==='flow-inspector'){delete S.sections['flow-inspector-error'];S.sections['flow-inspector']=el.dataset.section;render();root.querySelector('[data-act=flow-inspector][data-section="'+el.dataset.section+'"]')?.focus();return true}
-  if(a==='flow-create-open'){const v=root.querySelector('.flow-viewport');if(!v)return flowAction('flow-add',{dataset:{kind:'independent'}});const scale=flowScaleApplied||1,left=v.scrollLeft+Math.max(0,v.clientWidth-340),top=v.scrollTop+16;flowOpenCreate(p,left/scale,top/scale,left,top);return true}
+  if(a==='flow-create-open'){if(flowListMode()&&p.stages.length){flowOpenCreate(p,0,0,0,0);return true}const v=root.querySelector('.flow-viewport');if(!v)return flowAction('flow-add',{dataset:{kind:'independent'}});const scale=flowScaleApplied||1,left=v.scrollLeft+Math.max(0,v.clientWidth-340),top=v.scrollTop+16;flowOpenCreate(p,left/scale,top/scale,left,top);return true}
   if(a==='flow-fix'){const todo=flowTodo(p)[0];if(!todo){S.flowPanel=true;render();return true}S.sections.pipeline='flow';S.stageId=todo.stageId;S.sections['flow-inspector']=todo.tab;S.flowPanel=true;S.flowCohortPick=!!todo.pick;render();root.querySelector('.round-tab[aria-selected=true]')?.focus();say('Finish this step, then review the run.');return true}
   if(a==='flow-panel-close'){if(S.reviewPanel){S.reviewPanel=false;S.plan=null}S.flowPanel=false;render();root.querySelector('[data-flow-node="'+S.stageId+'"] [data-act=flow-select]')?.focus({preventScroll:true});return true}
   if(a==='flow-cancel'){S.flowSource=null;render();return true}
-  if(a==='flow-add-menu'){S.flowAdd=S.flowAdd===el.dataset.id?null:el.dataset.id;render();return true}
+  if(a==='flow-add-menu'){S.flowAdd=S.flowAdd===el.dataset.id?null:el.dataset.id;render();if(S.flowAdd&&flowListMode())root.querySelector('.flow-action-bar button')?.focus();return true}
   if(a==='flow-add-close'){S.flowAdd=null;render();return true}
   if(a==='flow-create'){
     const m=S.flowCreate;if(m?.pipelineId!==p.id||!FLOW_KINDS.some(k=>k.kind===el.dataset.kind))return true;
-    flowFreezeLayout(p);const stage=flowNewStage(p,el.dataset.kind,null);p.stages.push(stage);p.layout[stage.id]={x:Math.max(0,Math.round(m.x)),y:Math.max(0,Math.round(m.y))};
+    const stage=flowNewStage(p,el.dataset.kind,null);if(!flowListMode()){flowFreezeLayout(p);p.layout[stage.id]={x:Math.max(0,Math.round(m.x)),y:Math.max(0,Math.round(m.y))}}p.stages.push(stage);
     S.stageId=stage.id;S.flowPanel=true;S.flowAdd=null;S.flowSource=null;S.flowCreate=null;S.flowCohortPick=false;S.sections['flow-inspector']='question';delete S.sections['flow-inspector-error'];
     S.dirty=true;S.plan=null;render();return true;
   }
@@ -242,9 +278,35 @@ function flowAction(a,el){
   }else return true;
   S.dirty=true;S.plan=null;render();return true;
 }
+/** One tooltip serves every wire: it names a connection only while the pointer or keyboard is on it, and stays clear of the slide-over. */
+function flowTipHide(){root.querySelector('.flow-wire-tip')?.remove();root.querySelectorAll('.flow-wire[data-active]').forEach(w=>w.removeAttribute('data-active'))}
+function flowTipShow(viewport,lines,anchor){
+  const board=viewport.closest('.flow-board');if(!board)return;
+  let tip=board.querySelector('.flow-wire-tip');
+  if(!tip){tip=document.createElement('div');tip.className='flow-wire-tip';tip.id='flowWireTip';tip.setAttribute('role','tooltip');board.append(tip)}
+  tip.replaceChildren(...lines.map((line,i)=>{const row=document.createElement(i?'span':'strong');row.textContent=line;return row}));
+  const view=viewport.getBoundingClientRect(),panel=root.querySelector('.round-panel')?.getBoundingClientRect();
+  let right=view.left+viewport.clientWidth;const bottom=view.top+viewport.clientHeight;
+  if(panel&&panel.width>0&&panel.left<right&&panel.right>view.left&&panel.top<bottom&&panel.bottom>view.top)right=Math.min(right,panel.left);
+  tip.style.left='0px';tip.style.top='0px';
+  const w=tip.offsetWidth,h=tip.offsetHeight;
+  tip.style.left=Math.round(Math.max(view.left+4,Math.min(anchor.x-w/2,right-w-4)))+'px';
+  tip.style.top=Math.round(Math.max(view.top+4,Math.min(anchor.y-h-14,bottom-h-4)))+'px';
+}
+/** Names every connection into a step (hover or keyboard focus on its "Uses steps" button) and lights those wires. */
+function flowShowReads(button){
+  const node=button.closest('[data-flow-node]'),viewport=button.closest('.flow-viewport'),p=pipeline(),s=node&&p?.stages.find(x=>x.id===node.dataset.flowNode);if(!s||!viewport)return;
+  const reads=flowReads(p,s);if(!reads.length)return;
+  root.querySelectorAll('.flow-wire[data-active]').forEach(w=>w.removeAttribute('data-active'));
+  root.querySelectorAll('.flow-wire').forEach(w=>{if(w.dataset.to===s.id)w.setAttribute('data-active','')});
+  const box=button.getBoundingClientRect();
+  flowTipShow(viewport,['Reads '+(reads.length===1?'1 result':reads.length+' results')].concat(reads.map(r=>'Step '+r.n+' · '+r.label)),{x:box.left+box.width/2,y:box.top});
+}
 function drawFlowEdges(){
+  const sheet=root.querySelector('.flow-list-view');
+  if(sheet){flowPlaceMenu(sheet,sheet,true);return true}
   const map=root.querySelector('.flow-map');if(!map)return false;
-  map.querySelector('.flow-links')?.remove();map.style.transform='';
+  flowTipHide();map.querySelector('.flow-links')?.remove();map.style.transform='';
   const viewport=map.closest('.flow-viewport'),space=map.closest('.flow-space'),p=pipeline(),nodes=[...map.querySelectorAll('[data-flow-node]')],columns=[...map.querySelectorAll('.flow-column')],edges=[];
   const free=flowApplyLayout(p,map,nodes);
   let lanes=0;
@@ -256,7 +318,7 @@ function drawFlowEdges(){
         const inlet=[...to.querySelectorAll('[data-act=flow-inputs]')].find(n=>n.dataset.flowSource===dep&&n.dataset.flowQuestion===input?.question)||to.querySelector('[data-act=flow-inputs]');
         const source=p.stages.find(s=>s.id===dep),q=input&&phaseOutput(p,source).find(q=>q.id===input.question);
         const skip=!free&&columns.indexOf(to.closest('.flow-column'))>columns.indexOf(from.closest('.flow-column'))+1;
-        edges.push({focus:[dep,target.id].includes(S.stageId)&&S.flowPanel!==false,from,to,output,inlet,lane:skip?lanes++:-1,label:input?({summary:'Answer summary',winner:'Leading option',mean:'Mean score',probabilities:q?flowOutputLabel(p,source,q):'Distribution',responses:'Each answer'}[input.select]||(q?flowOutputLabel(p,source,q):'Result')):'Dependency'});
+        edges.push({related:[dep,target.id].includes(S.stageId)&&S.flowPanel!==false,from,to,output,inlet,lane:skip?lanes++:-1,source,target,label:input?(target.kind==='poll'?flowProjectionLabel(p,source,q,input.select):q?flowOutputLabel(p,source,q):'Result'):'Dependency'});
       }
     }
   }
@@ -265,8 +327,10 @@ function drawFlowEdges(){
   for(const edge of edges){
     const from=edge.from.getBoundingClientRect(),to=edge.to.getBoundingClientRect(),out=(edge.output||edge.from).getBoundingClientRect(),inlet=(edge.inlet||edge.to).getBoundingClientRect();
     const a={...from,right:from.right,left:from.left,top:out.top,width:from.width,height:out.height,bottom:out.bottom},b={...to,right:to.right,left:to.left,top:inlet.top,width:to.width,height:inlet.height,bottom:inlet.bottom};
-    const path=document.createElementNS('http://www.w3.org/2000/svg','path');path.setAttribute('d',free?flowEdgePath(a,b,box):graphEdgePath(a,b,box,edge.lane));path.setAttribute('class','flow-wire');svg.append(path);
-    if(!edge.focus)continue;const text=document.createElementNS('http://www.w3.org/2000/svg','text');text.textContent=edge.label;text.setAttribute('x',String((from.right+to.left)/2-box.left));text.setAttribute('y',String(edge.lane>=0?8+edge.lane*14:(out.top+out.height/2+inlet.top+inlet.height/2)/2-box.top-8));text.setAttribute('class','flow-wire-label');svg.append(text);
+    const path=document.createElementNS('http://www.w3.org/2000/svg','path');path.setAttribute('d',free?flowEdgePath(a,b,box):graphEdgePath(a,b,box,edge.lane));path.setAttribute('class','flow-wire');path.dataset.from=edge.source.id;path.dataset.to=edge.target.id;if(edge.related)path.setAttribute('data-related','');svg.append(path);
+    const hit=document.createElementNS('http://www.w3.org/2000/svg','path');hit.setAttribute('d',path.getAttribute('d'));hit.setAttribute('class','flow-wire-hit');svg.append(hit);
+    const lines=[edge.label,'Step '+(p.stages.indexOf(edge.source)+1)+' to step '+(p.stages.indexOf(edge.target)+1)],show=e=>{root.querySelectorAll('.flow-wire[data-active]').forEach(w=>w.removeAttribute('data-active'));path.setAttribute('data-active','');flowTipShow(viewport,lines,{x:e.clientX,y:e.clientY})};
+    hit.addEventListener('pointerenter',show);hit.addEventListener('pointermove',show);hit.addEventListener('pointerleave',flowTipHide);
   }
   map.prepend(svg);const fitted=Math.max(.1,Math.min(1,(viewport.clientWidth-32)/box.width,(viewport.clientHeight-48)/box.height)),scale=flowDrag?.scale??(S.flowScale==='fit'?fitted:S.flowScale??fitted);flowScaleApplied=scale;map.style.transform='scale('+scale+')';space.style.width=Math.ceil(box.width*scale)+'px';space.style.height=Math.ceil(box.height*scale)+'px';
   if(S.flowScroll?.pipelineId===p.id){viewport.scrollLeft=S.flowScroll.left;viewport.scrollTop=S.flowScroll.top}
@@ -291,10 +355,10 @@ function flowCreateMenu(p){
 }
 function flowOpenCreate(p,x,y,left,top){S.flowCreate={pipelineId:p.id,x,y,left,top,query:'',index:0,focus:true};S.flowAdd=null;render()}
 function flowCloseCreate(){if(!S.flowCreate)return;S.flowCreate=null;root.querySelector('.flow-create-menu')?.remove();root.querySelector('.flow-viewport')?.focus({preventScroll:true})}
-function flowPlaceMenu(viewport,space){
+function flowPlaceMenu(viewport,space,sheet){
   const menu=space.querySelector('.flow-create-menu'),m=S.flowCreate;if(!menu||!m)return;
-  const maxLeft=viewport.scrollLeft+viewport.clientWidth-menu.offsetWidth-24,maxTop=viewport.scrollTop+viewport.clientHeight-menu.offsetHeight-32;
-  menu.style.left=Math.max(0,Math.min(m.left,maxLeft))+'px';menu.style.top=Math.max(0,Math.min(m.top,maxTop))+'px';
+  if(!sheet){const maxLeft=viewport.scrollLeft+viewport.clientWidth-menu.offsetWidth-24,maxTop=viewport.scrollTop+viewport.clientHeight-menu.offsetHeight-32;
+  menu.style.left=Math.max(0,Math.min(m.left,maxLeft))+'px';menu.style.top=Math.max(0,Math.min(m.top,maxTop))+'px'}
   const input=menu.querySelector('input'),list=menu.querySelector('.flow-create-list');
   const sync=()=>{list.innerHTML=flowCreateItems(m);const active=list.querySelector('[aria-selected=true]');if(active)input.setAttribute('aria-activedescendant',active.id);else input.removeAttribute('aria-activedescendant')};
   sync();
@@ -346,7 +410,7 @@ document.addEventListener('pointerdown',e=>{
   if(!viewport||e.target.closest('.flow-create-menu,input,select,textarea,a'))return;
   const box=viewport.getBoundingClientRect();if(e.clientX>=box.left+viewport.clientLeft+viewport.clientWidth||e.clientY>=box.top+viewport.clientTop+viewport.clientHeight)return;
   const node=e.target.closest('[data-flow-node]');
-  flowDrag={pointerId:e.pointerId,type:e.pointerType,x:e.clientX,y:e.clientY,node,viewport,moved:false,scrollLeft:viewport.scrollLeft,scrollTop:viewport.scrollTop,menuOpen:!!S.flowCreate};
+  flowDrag={pointerId:e.pointerId,type:e.pointerType,x:e.clientX,y:e.clientY,node,onWire:!!e.target.closest('.flow-wire-hit'),viewport,moved:false,scrollLeft:viewport.scrollLeft,scrollTop:viewport.scrollTop,menuOpen:!!S.flowCreate};
 });
 document.addEventListener('pointermove',e=>{
   const d=flowDrag;if(!d||e.pointerId!==d.pointerId)return;
@@ -369,7 +433,7 @@ function flowPointerEnd(e,cancelled){
     if(d.node){S.flowScale=d.scale;S.dirty=true;S.plan=null;render()}
     return;
   }
-  if(cancelled||d.node||d.menuOpen)return;
+  if(cancelled||d.node||d.menuOpen||d.onWire)return;
   const p=pipeline(),map=d.viewport.querySelector('.flow-map'),space=d.viewport.querySelector('.flow-space');if(!p||!map||!space)return;
   flowSuppressClick=true;setTimeout(()=>{flowSuppressClick=false},0);
   if(S.flowSource){S.flowSource=null;render();return}
@@ -389,6 +453,13 @@ root.addEventListener('keydown',e=>{
   const scale=flowScaleApplied||1,left=v.scrollLeft+Math.max(0,v.clientWidth/2-160),top=v.scrollTop+24;
   flowOpenCreate(p,left/scale,top/scale,left,top);
 });
+const readsButton=e=>e.target?.closest?.('.flow-map .flow-node-inputs [data-act=flow-inputs]');
+root.addEventListener('focusin',e=>{const b=readsButton(e);if(b)flowShowReads(b)});
+root.addEventListener('focusout',e=>{if(readsButton(e))flowTipHide()});
+root.addEventListener('pointerover',e=>{const b=e.pointerType!=='touch'&&readsButton(e);if(b)flowShowReads(b)});
+root.addEventListener('pointerout',e=>{if(readsButton(e)&&document.activeElement!==e.target.closest('button'))flowTipHide()});
+root.addEventListener('keydown',e=>{if(e.key==='Escape'&&root.querySelector('.flow-wire-tip')){flowTipHide()}});
+try{matchMedia('(max-width:700px)').addEventListener('change',()=>{if(root.querySelector('.flow-board')&&pipeline())render()})}catch{}
 root.addEventListener('keydown',e=>{
   if(e.key!=='Escape'||e.defaultPrevented||S.flowCreate)return;
   const panel=root.querySelector('.round-panel');if(!panel)return;
@@ -399,7 +470,7 @@ root.addEventListener('keydown',e=>{
 
 `;
 
-export const WORKSPACE_FLOW_CSS = `
+const FLOW_BASE_CSS = `
 .flow-empty{display:grid;justify-items:center;align-content:center;gap:16px;min-height:360px;padding:32px 16px;background:var(--raised);border-top:1px solid var(--line);cursor:pointer}
 .flow-empty-targets{display:flex;flex-wrap:wrap;justify-content:center;gap:16px;width:100%}
 .flow-empty-target{appearance:none;display:grid;justify-items:center;align-content:center;gap:8px;flex:1 1 240px;max-width:340px;min-height:180px;padding:24px 20px;border:2px dashed var(--control-line);border-radius:var(--radius-panel,10px);background:var(--surface);color:var(--ink);font:inherit;text-align:center;cursor:pointer;transition:border-color 140ms ease-out,background 140ms ease-out}
@@ -425,7 +496,8 @@ export const WORKSPACE_FLOW_CSS = `
 .flow-who{display:flex;align-items:center;gap:10px;width:100%;padding:8px 12px;border:0;border-top:1px solid var(--line);background:transparent;color:var(--ink);font:inherit;text-align:left;cursor:pointer}.flow-who:hover{background:var(--hover)}.flow-who .flow-host-dots{display:grid;grid-template-columns:repeat(4,6px);gap:3px;flex:none}.flow-who .flow-host-dots i{width:6px;height:6px;border-radius:2px;background:var(--blue);opacity:.55}.flow-who-text{display:grid;gap:1px;min-width:0}.flow-who-text strong{font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.flow-who-text>span{font-size:11px;color:var(--muted)}
 .flow-output[data-used=true]{color:var(--muted)}.flow-output[data-used=true] .flow-output-text>span{color:var(--muted);font-size:11px}.flow-output[data-used=true] .flow-socket{background:var(--blue)}
 .flow-next{display:flex;align-items:center;gap:6px;width:100%;padding:8px 12px;border:0;border-top:1px dashed var(--line);background:transparent;color:var(--blue);font:inherit;font-size:12px;font-weight:600;cursor:pointer}.flow-next:hover{background:var(--selection)}.flow-next .ui-icon{width:14px;height:14px}
-.flow-links{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}.flow-wire{fill:none;stroke:var(--control-line);stroke-width:1.5}.flow-wire-label{font:10px var(--body);fill:var(--muted);text-anchor:middle;paint-order:stroke;stroke:var(--raised);stroke-width:5px;stroke-linejoin:round}
+.flow-links{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}.flow-wire{fill:none;stroke:var(--control-line);stroke-width:1.5}.flow-wire[data-related]{stroke:var(--blue);stroke-opacity:.45}.flow-wire[data-active]{stroke:var(--blue);stroke-opacity:1;stroke-width:2.5}.flow-wire-hit{fill:none;stroke:transparent;stroke-width:16px;pointer-events:stroke}
+.flow-wire-tip{position:fixed;z-index:5;display:grid;gap:2px;max-width:min(280px,calc(100vw - 32px));padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);box-shadow:0 8px 22px rgba(15,35,55,.2);font-size:12px;line-height:1.4;pointer-events:none}.flow-wire-tip span{color:var(--muted)}
 .flow-action-bar{padding:10px 16px;border-bottom:1px solid var(--line);background:var(--selection);font-size:12px}.flow-action-bar>span{display:block;margin-bottom:8px;overflow-wrap:anywhere}
 .flow-member-navigation{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}.flow-member-navigation .row{gap:4px;font-size:10px}.flow-member-focus .host-member-detail{margin-top:10px;padding-top:10px}.flow-inspector .setup-connections .setup-choice{display:grid;gap:5px}.flow-inspector .setup-connections .setup-choice span{font-size:11px}
 .flow-inspector-head{display:flex;align-items:start;justify-content:space-between;gap:12px;padding:14px 16px 8px}.flow-inspector-head h2{font-size:14px;margin:0;overflow-wrap:anywhere;line-height:1.4}.flow-inspector-head .button{flex:none}.flow-inspector>.section-tabs{margin:0 12px;border-bottom:1px solid var(--line);gap:0}.flow-inspector>.section-tabs .button{padding-inline:10px;font-size:11px}.flow-inspector-body{padding:16px;max-height:calc(100dvh - 400px);overflow:auto;min-height:260px}
@@ -452,6 +524,24 @@ export const WORKSPACE_FLOW_CSS = `
 .flow-create-empty{margin:0;padding:10px;font-size:12px;color:var(--muted)}.flow-create-foot{margin:4px 0 0;padding:6px 10px 4px;border-top:1px solid var(--line);font-size:10px;color:var(--muted)}.flow-create-foot kbd{font:inherit;font-size:10px;padding:0 4px;border:1px solid var(--line);border-radius:4px;margin-right:2px}
 `;
 
+/* Phone layout (700px and narrower): the study is a list of full-width step cards in run order, and "Reads step N" lines replace the wires. */
+const FLOW_LIST_CSS = `
+.flow-list-view{position:relative;padding:12px;background:var(--raised);border-top:1px solid var(--line)}
+.flow-list{list-style:none;margin:0;padding:0;display:grid;gap:12px}.flow-list-item{display:grid;gap:8px;min-width:0}
+.flow-list .flow-node{width:auto;cursor:default;touch-action:auto}
+.flow-list .flow-node-header{padding:10px 12px 0}.flow-list .flow-kind,.flow-list .flow-status{font-size:12px}
+.flow-list .flow-select{padding:10px 12px 14px;gap:6px}.flow-list .flow-select strong{font-size:16px;-webkit-line-clamp:4}.flow-list .flow-select span{font-size:13px;-webkit-line-clamp:3}
+.flow-list .flow-reads{display:grid;gap:0;padding:2px 12px}.flow-list .flow-read{min-height:40px;padding:6px 0;font-size:13px;color:var(--ink);align-items:center}.flow-list .flow-read+.flow-read{border-top:1px solid var(--line)}.flow-list .flow-read span{white-space:normal;overflow:visible}.flow-list .flow-read small{display:block;color:var(--muted);font-size:12px}.flow-list .flow-read .ui-icon{width:14px;height:14px}
+.flow-list .flow-who{min-height:48px}.flow-list .flow-who-text strong{font-size:14px}.flow-list .flow-who-text>span{font-size:12px}
+.flow-list .flow-output{min-height:52px;padding:8px 12px;font-size:13px}.flow-list .flow-output-text strong{font-size:13px}.flow-list .flow-output .flow-output-text>span{font-size:12px;white-space:normal;max-width:none;overflow:visible}
+.flow-list .flow-next{min-height:48px;font-size:14px}.flow-list .flow-destination{min-height:44px;font-size:14px}
+.flow-list .flow-action-bar{border:1px solid var(--line);border-radius:10px}
+.flow-list-view .flow-create-menu{position:fixed;z-index:20;left:12px;right:12px;top:auto;bottom:12px;width:auto;max-width:none}
+.flow-board:has(.flow-list-view){overflow:visible}.flow-board:has(.flow-list-view) .flow-hint{position:sticky;top:0;z-index:4;background:var(--surface);border-bottom:1px solid var(--line)}
+`;
+
+export const WORKSPACE_FLOW_CSS = FLOW_BASE_CSS + FLOW_LIST_CSS;
+
 /* Railway-style step panel: slides over the right of the canvas with one row of tabs. Loaded last. */
 export const ROUND_PANEL_CSS = `
 .flow-workspace{position:relative;grid-template-columns:minmax(0,1fr)}
@@ -472,4 +562,5 @@ export const ROUND_PANEL_CSS = `
 .round-panel .flow-inspector-body{flex:1;min-height:0;overflow:auto;padding:16px 18px}
 .round-outputs{margin-top:16px;padding-top:12px;border-top:1px solid var(--line)}.round-outputs h3{margin:0 0 4px;font-size:13px}
 @media(max-width:760px){.round-panel{position:static;width:auto;box-shadow:none;animation:none}}
+@media(max-width:700px){.round-panel{position:fixed;inset:0;z-index:40;width:auto;border:0;border-radius:0;animation:none}body:has(.flow-workspace .round-panel){overflow:hidden}}
 `;
