@@ -117,6 +117,36 @@ behaviors:
     source:
       text: should be able to click on canvas to create node with dropdown - look at railway.com or hex.com for inspiration
       reference: jev-polls project thread, 2026-10-09
+  - id: edge-labels-on-hover
+    description: >-
+      A wire is named only while the pointer is on it, or while keyboard focus is on its step's
+      "Uses steps" button: a small tooltip says what it carries (Answer summary, Individual answers,
+      Leading option, Mean score or the distribution) and between which steps. No label is drawn on
+      wires otherwise, and a selected step's wires are only highlighted.
+    details: >-
+      The tooltip is clamped to the visible canvas and never sits under the slide-over; Esc dismisses
+      it. Wires that run under the slide-over are clipped by the canvas scroll box, not drawn over the
+      panel. The full list of what a step reads is on its card (the Uses steps button names every
+      connection to assistive tech) and in the panel's Inputs tab. Replaces always-on labels on every
+      wire touching the selected step, which landed on top of cards and were cut by the slide-over.
+    source:
+      text: "Edge labels bleed under the side panel (UI audit item handed to the canvas work: label only the hovered or focused wire)"
+      reference: jev-polls project thread "UI audit in a headless browser", Giulio, 2026-10-10
+  - id: phone-flow-list
+    description: >-
+      At 700px and narrower the study flow is a vertical list of full-width step cards in run order,
+      with "Reads step N" lines (naming what is read) in place of wires; Add step, Add next step and
+      Connect output / Connect here work as on the canvas, and the step panel fills the screen.
+    details: >-
+      Wider screens keep the graph canvas. Run order puts each step after everything it reads and
+      otherwise follows step numbers, so a newly added unconnected step lands last. Dragging,
+      panning, fit and zoom are off in list mode, and adding a step there saves no canvas position,
+      so the wide layout is untouched. A pending connection's hint sticks to the top of the list.
+      Crossing 700px re-renders between list and canvas without losing the selection or unsaved
+      fields.
+    source:
+      text: "Phone canvas unreadable at 390px: fit-to-view shrinks cards to thumbnails (UI audit item handed to the canvas work)"
+      reference: jev-polls project thread "UI audit in a headless browser", Giulio, 2026-10-10
   - id: prune-dangling-aliases
     description: >-
       Choosing a cohort for a step removes study cohort aliases that no step uses and that point to

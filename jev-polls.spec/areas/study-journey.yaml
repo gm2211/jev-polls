@@ -312,7 +312,7 @@ behaviors:
       last step of a branch, Add next step.
     details: >-
       Outputs already sent to a later step show only their label with a filled socket; only unused
-      outputs say Connect output. Wire labels show only for wires touching the selected step. A
+      outputs say Connect output. Wires are named only on hover or keyboard focus (studies.edge-labels-on-hover). A
       final result at the end of a branch is the study's answer, not an unfinished connection. The
       canvas toolbar button reads Add step.
     source:
