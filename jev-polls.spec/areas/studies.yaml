@@ -90,6 +90,12 @@ behaviors:
     description: Different steps can consult different cohorts.
   - id: structured-context
     description: Step and shared context can be edited without writing raw JSON.
+  - id: settings-in-plain-words
+    description: >-
+      Study settings use the researcher's words: the research question is a multi-line field,
+      the JSON block is labeled Background facts with a sentence saying what it is for, and
+      cohort aliases read as "Cohorts this study can ask" with Short name and Cohort columns.
+    details: Renamed from "Shared context · JSON" and "Cohort alias → cohort" on 2026-10-10 from the UI audit (item 16).
   - id: canvas-drag-nodes
     description: >-
       Steps can be dragged anywhere on the study canvas; connections follow the moved step, and the

@@ -17,3 +17,11 @@ behaviors:
     description: Open report opens a separate tab so unsaved workspace edits stay intact.
   - id: consistent-style
     description: Reports share the workspace's visual language and vocabulary.
+    details: >-
+      The report embeds the workspace fonts and light and dark palettes, stacks the jev wordmark
+      over a "Study report" caption like the workspace brand bar, and opens in the theme the
+      workspace saved (else the OS preference). Hex colors and serif or monospace faces are not
+      used. Decided 2026-10-10 from the UI audit ("the report looks like a different product").
+    source:
+      text: fix everything (audit item 12, report styling)
+      reference: jev-polls project thread "UI audit in headless browser", Giulio, 2026-10-10

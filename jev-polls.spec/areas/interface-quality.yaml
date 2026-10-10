@@ -33,6 +33,24 @@ behaviors:
     description: >-
       Primary actions use orange and successful progress uses steel blue; light and dark modes stay
       readable, and the initial theme follows the OS preference.
+    details: >-
+      With no saved choice the workspace reads prefers-color-scheme at boot and again when the
+      saved choice is cleared; the toggle shows its text label on phone widths too. Fixed on
+      2026-10-10 from the UI audit (the app always opened light).
+  - id: delete-dialogs-one-sentence
+    description: >-
+      Every delete confirmation (project, study, cohort) uses the same shape: one sentence of
+      impact, a Cancel button and a Delete <thing> button.
+    details: >-
+      Replaced "Delete from draft" and the three-line Data / Reload saved workspace copy on
+      2026-10-10 from the UI audit.
+    source:
+      text: fix everything (audit item 17, delete dialogs)
+      reference: jev-polls project thread "UI audit in headless browser", Giulio, 2026-10-10
+  - id: status-probes-return-200
+    description: >-
+      Status probes the page runs on load (such as the ChatGPT sign-in status) answer 200 with a
+      state, including unavailable, so a missing keychain never logs an error in the console.
   - id: errors-in-context
     description: Errors appear in the dialog or field that raised them.
   - id: destructive-actions-recoverable

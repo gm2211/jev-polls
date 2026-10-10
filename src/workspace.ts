@@ -181,7 +181,7 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
     response.setHeader('Referrer-Policy', 'no-referrer');
     response.setHeader('Cross-Origin-Resource-Policy', 'same-origin');
     response.setHeader('Content-Security-Policy', report
-      ? "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; connect-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+      ? "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; base-uri 'none'; frame-ancestors 'none'"
       : `default-src 'none'; script-src 'nonce-${nonce}'; style-src 'nonce-${nonce}'; style-src-attr 'unsafe-inline'; connect-src 'self'; img-src data:; font-src data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'`);
   }
   function send(response: ServerResponse, status: number, value: unknown, html = false, report = false) {
@@ -272,7 +272,11 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
     if (method === 'GET' && pathname === '/api/agent-config') { send(response, 200, agentConnectionConfig(origin + '/')); return; }
     if (pathname.startsWith('/api/chatgpt/')) {
       try {
-        if (method === 'GET' && pathname === '/api/chatgpt/status') { send(response, 200, await chatgpt.snapshot()); return; }
+        if (method === 'GET' && pathname === '/api/chatgpt/status') {
+          try { send(response, 200, await chatgpt.snapshot()); }
+          catch (error) { send(response, 200, { connected: false, planEnabled: false, accounts: [], signingIn: false, unavailable: true, message: chatGptMessage(error) }); }
+          return;
+        }
         if (method === 'GET' && pathname === '/api/chatgpt/models') {
           const models = await chatgpt.client.listModels();
           send(response, 200, { models: models.map(model => ({ id: model.id, name: model.name })) }); return;
