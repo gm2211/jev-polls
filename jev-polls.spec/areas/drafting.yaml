@@ -2,7 +2,12 @@ id: drafting
 name: Drafting assistants
 prose: >-
   The drafting assistant uses the user's ChatGPT subscription or an installed, authenticated Codex
-  or Claude CLI to propose cohorts and studies. It cannot browse for evidence.
+  or Claude CLI to propose cohorts and studies. It cannot browse for evidence. Proposal (not yet
+  decided, from the 2026-10-09 game-name demo request): connecting the user's own AI could become
+  the main experience, with chat as the primary way to author a study, each request landing on the
+  study canvas where steps can then be reconnected and edited by hand. Giulio: "maybe the main
+  authoring experience should just be like I keep asking things in the chat and they get added to
+  the pipeline canvas ... I'm not sure this is all up to you".
 behaviors:
   - id: provider-choice
     description: >-
