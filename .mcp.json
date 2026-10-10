@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "jev-polls": {
+      "command": "node",
+      "args": ["--import", "tsx", "src/cli.ts", "mcp", "--workspace-url", "http://127.0.0.1:4181/"]
+    }
+  }
+}

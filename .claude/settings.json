@@ -1,0 +1,21 @@
+{
+  "enabledMcpjsonServers": ["jev-polls"],
+  "permissions": {
+    "allow": [
+      "mcp__jev-polls__get_workspace",
+      "mcp__jev-polls__get_guide",
+      "mcp__jev-polls__get_schema",
+      "mcp__jev-polls__get_run",
+      "mcp__jev-polls__get_run_record",
+      "mcp__jev-polls__save_project",
+      "mcp__jev-polls__save_cohort",
+      "mcp__jev-polls__save_pipeline",
+      "mcp__jev-polls__delete_project",
+      "mcp__jev-polls__delete_cohort",
+      "mcp__jev-polls__delete_study",
+      "mcp__jev-polls__review_study",
+      "mcp__jev-polls__workspace_server"
+    ],
+    "ask": ["mcp__jev-polls__run_study"]
+  }
+}

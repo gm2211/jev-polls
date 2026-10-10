@@ -107,7 +107,7 @@ The drafting assistant has no research tools. Treat new personas, weights, and t
 
 ## Connecting an existing agent
 
-Open Advanced MCP settings in the workspace's AI settings or run `jev-polls mcp-config --workspace-url http://127.0.0.1:4180/` for client settings. The workspace URL must point to the running loopback server. MCP uses that server's validation, persistence, and execution controls; it does not open a second workspace. No API key belongs in MCP settings. The browser owns the saved TypeSafe connection.
+Open Advanced MCP settings in the workspace's AI settings or run `jev-polls mcp-config --workspace-url http://127.0.0.1:4181/` for client settings. Claude Code sessions in this repository load the server from `.mcp.json` automatically. The workspace URL must point to the running loopback server; if it is not running, call `workspace_server` with `start` (or `update` to pull the latest code and restart). MCP uses that server's validation, persistence, and execution controls; it does not open a second workspace. No API key belongs in MCP settings. The browser owns the saved TypeSafe connection.
 
 1. Call `get_guide`, `get_schema`, and `get_workspace` to read current contracts and the saved revision. Workspace pipeline aliases refer to cohort IDs, not filesystem paths.
 2. Use your host agent's research capabilities to prepare sourced, question-independent adult profiles. Preserve evidence gaps, synthetic fields, assumptions, and weight provenance.

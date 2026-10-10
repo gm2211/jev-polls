@@ -61,15 +61,17 @@ Every input source is an explicit graph dependency; cycles and incompatible proj
 
 The assistant uses your ChatGPT subscription or installed Codex or Claude CLI with its existing login. Manage providers, models, accounts, TypeSafe, and external-agent connections from the shared **AI** pill. Generation validates and saves current edits before starting; failed saves or conflicting revisions leave the draft intact and prevent generation. Cohort generation accepts a brief and up to 20,000 personas per cohort (the workspace storage limit), generates larger cohorts in batches, validates only the selected cohort can change, and opens an editable draft after review. Other cohorts and studies stay intact. The Assistant tab can propose broader workspace changes for explicit application. Generated proposals stay separate until review and adoption. Generation never starts a TypeSafe study. If the saved workspace changes meanwhile, the proposal must be regenerated against the new revision. The assistant cannot browse for evidence: supplied sources and synthetic assumptions remain distinct.
 
-Advanced MCP connection settings also support Codex, Claude Code, or another client. Keep the workspace server running. The adapter uses local stdio and the same revision checks and run controls as the browser; it never asks the agent to copy your TypeSafe key. Start a new agent session after registering the server so its tools are loaded.
+Claude Code sessions opened in this repository get the `jev-polls` MCP server automatically from `.mcp.json`, pointed at http://127.0.0.1:4181/, with its tools pre-allowed in `.claude/settings.json` except `run_study`, which still asks because it spends TypeSafe usage. The `workspace_server` tool reports status and can start, stop, restart, or update (fast-forward pull, reinstall changed dependencies, restart) the workspace, so agents don't need shell commands for it.
+
+Advanced MCP connection settings also support Codex, Claude Code, or another client. The adapter uses local stdio and the same revision checks and run controls as the browser; it never asks the agent to copy your TypeSafe key. Start a new agent session after registering the server so its tools are loaded.
 
 Your existing agent supplies research and conversation. It can edit persona backgrounds, attributes, source references, segment weights, questions, and branches through MCP. TypeSafe supplies the live typed judgments for each profile. The workspace can invoke those installed CLIs for drafting; it does not automatically research sources.
 
 ```sh
-node dist/cli.js mcp-config --workspace-url http://127.0.0.1:4180/
+node dist/cli.js mcp-config --workspace-url http://127.0.0.1:4181/
 ```
 
-Use the returned setup command for your client, or add the returned `mcpConfig` to its MCP settings. The server tools include `get_workspace`, `save_cohort`, `save_pipeline`, `review_study`, `run_study`, and `get_run_record`. Reads, edits, and reviews never perform study inference; `run_study` requires the exact reviewed revision, a fresh plan token, and a request budget. The browser picks up saved agent edits automatically when your local draft is clean; unsaved edits are preserved and a conflict notice offers a reload.
+Use the returned setup command for your client, or add the returned `mcpConfig` to its MCP settings. The server tools include `get_workspace`, `save_project`, `save_cohort`, `save_pipeline`, `delete_project`, `delete_cohort`, `delete_study`, `review_study`, `run_study`, `get_run_record`, and `workspace_server`. Deletes match the browser's quick delete and are revision-checked. Reads, edits, and reviews never perform study inference; `run_study` requires the exact reviewed revision, a fresh plan token, and a request budget. The browser picks up saved agent edits automatically when your local draft is clean; unsaved edits are preserved and a conflict notice offers a reload.
 
 Ask your existing agent to read [the workflow guide](docs/agent-guide.md), then run `jev-polls guide`. The schemas are available through `jev-polls schema pipeline` and `jev-polls schema cohort`.
 

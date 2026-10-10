@@ -352,7 +352,7 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
       const [auth, gliner] = await Promise.all([getAuth(), getGliner()]);
       send(response, 200, { ...saved, auth, gliner: { ready: gliner.ready, model: gliner.model, message: gliner.message }, runs: runs.sort((a,b) => b.createdAt.localeCompare(a.createdAt)), activeRun: runs.find(job => job.id === activeRun?.id) ?? null }); return;
     }
-    if (method === 'GET' && pathname === '/status') { send(response, 200, { status: 'workspace', activeRun: ownedRuns((await store.read()).document).find(job => job.id === activeRun?.id) ?? null, configured: (await getAuth()).configured }); return; }
+    if (method === 'GET' && pathname === '/status') { send(response, 200, { status: 'workspace', pid: process.pid, activeRun: ownedRuns((await store.read()).document).find(job => job.id === activeRun?.id) ?? null, configured: (await getAuth()).configured }); return; }
     if (method === 'GET' && pathname.startsWith('/api/run/')) {
       const key = pathname.slice('/api/run/'.length);
       if (key.endsWith('/record')) {
@@ -462,6 +462,9 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
     await execution?.catch(() => undefined);
     await localAgents.close();
     await chatgpt.close();
-    await new Promise<void>((resolveClose, reject) => server.close(error => error ? reject(error) : resolveClose()));
+    const closed = new Promise<void>((resolveClose, reject) => server.close(error => error ? reject(error) : resolveClose()));
+    // Keep-alive clients (agent polls) would otherwise keep a closing server answering on their socket.
+    server.closeAllConnections();
+    await closed;
   })() };
 }
