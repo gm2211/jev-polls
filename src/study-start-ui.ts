@@ -58,6 +58,14 @@ function submitStudyTitle(form){
   const first=p.stages.find(s=>s.kind==='poll'),q=first&&Object.values(first.questions)[0];if(q&&!String(q.label||'').trim())q.label=question;
   S.dirty=true;render();root.querySelector('h1')?.focus();
 }
+/** A study is named by its question; when none was typed, the first written question names it. Returns false when there is nothing to use. */
+function ensureStudyQuestion(p){
+  if(p.description?.trim())return true;
+  const first=p.stages.find(s=>s.kind==='poll'),text=String(first&&Object.values(first.questions||{})[0]?.label||'').trim();
+  if(!text||text==='What should this phase decide?')return false;
+  p.description=text;if(p.context&&typeof p.context==='object'&&!Array.isArray(p.context))p.context.decisionQuestion=text;
+  S.dirty=true;return true;
+}
 function studyStartAction(a,el){
   if(a==='create-study'){createStudy();return true}
   if(a==='study-title-edit'){S.studyTitleEdit=pipeline()?.id||null;render();const input=root.querySelector('[data-form=study-title] [name=question]');input?.focus();input?.select?.();return true}

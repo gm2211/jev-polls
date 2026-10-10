@@ -119,6 +119,7 @@ function applyStudySetup(form){
     if(q.type==='choice'){const old=q.criteria[key],description=row.querySelector('[name=setupDescription]')?.value??optionDescription(old);if(value!==optionName(key,old)||description!==optionDescription(old))q.criteria[key]={...(old&&typeof old==='object'&&!Array.isArray(old)?old:{}),label:value,description}}
     else if(q.type==='score')q.criteria[Number(key)]=value;
   }
+  const study=pipeline();if(study&&study.stages[0]===s)ensureStudyQuestion(study);
   S.dirty=true;S.plan=null;
 }
 function assignSetupCohort(p,s,cid){
