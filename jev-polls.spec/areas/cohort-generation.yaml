@@ -22,6 +22,18 @@ behaviors:
       Cohorts up to 20,000 personas are generated in validated batches; changed metadata, wrong
       counts, quota mismatches, or invented sources reject the whole proposal, and nothing partial
       is published.
+  - id: concurrent-batches
+    description: >-
+      The first batch runs alone to set cohort metadata; later batches run with bounded concurrency
+      (six at a time), and persona IDs and order follow batch position, never completion order.
+  - id: batch-retry
+    description: >-
+      A batch that fails parsing or checks is retried with the same inputs up to two more times
+      before the whole job fails with the workspace unchanged; cancellation never retries.
+  - id: concurrent-progress-truthful
+    description: >-
+      Progress names the batches running, counts only accepted batches, shows retries, and divides
+      the remaining-time range by the batches running at once.
   - id: proposal-then-adopt
     description: >-
       A generated cohort stays a proposal until the user chooses Review and edit cohort; Discard
