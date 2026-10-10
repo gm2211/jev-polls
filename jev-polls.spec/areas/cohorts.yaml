@@ -67,7 +67,7 @@ behaviors:
       three sub-tabs, Regenerate) that split six fields across tabs and hid the edit form behind a
       second tab row. Previous and Next step through the cohort from the header.
     source:
-      text: Persona page: five tabs for six fields (UI audit, item 9)
+      text: "Persona page: five tabs for six fields (UI audit, item 9)"
       reference: jev-polls project thread "UI audit in a headless browser", 2026-10-10
   - id: persona-browsing
     description: >-

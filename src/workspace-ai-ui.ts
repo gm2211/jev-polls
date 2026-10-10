@@ -27,8 +27,16 @@ function updateAIPill(){
   document.getElementById('aiDot').classList.toggle('good',!!draftReady());
   document.getElementById('aiSettingsPill').disabled=S.loading||S.localStarting;
 }
+function draftingProviderOptions(){return (S.localEngines||[]).map(e=>({value:e.id,label:(e.label||e.id)+(e.available?' · ready':' · unavailable')}))}
+/** The drafting AI choice in place, for the audience form: the same select and ready / unavailable labels as the AI button's Drafting section. It shows once no usable provider is selected and stays for the session so choosing one does not make it vanish. */
+function draftProviderChoice(){
+  if(!draftReady())S.draftProviderInline=true;
+  if(!S.draftProviderInline)return '';
+  const options=draftingProviderOptions(),provider=S.localEngines?.find(e=>e.id===S.localEngine),busy=S.localLoading||S.localStarting||S.localJob?.status==='running';
+  return '<fieldset class="draft-provider" data-inline-provider '+(busy?'disabled':'')+'>'+select('localEngine',options.length?options:[{value:S.localEngine,label:'Checking providers…'}],S.localEngine,'Which AI drafts them?','inline')+(S.localEngine==='chatgpt'?chatGptControlsBody():'<p class="subtle ai-status">'+esc(provider?.message||'Uses your existing CLI sign-in.')+'</p>')+'<div class="toolbar"><button type="button" class="button small" data-act="assistant-refresh" '+(S.localLoading?'disabled':'')+'>Refresh connections</button></div></fieldset>';
+}
 function aiSettingsContent(){
-  const options=(S.localEngines||[]).map(e=>({value:e.id,label:(e.label||e.id)+(e.available?' · ready':' · unavailable')}));
+  const options=draftingProviderOptions();
   const provider=S.localEngines?.find(e=>e.id===S.localEngine),busy=S.localLoading||S.localStarting||S.localJob?.status==='running';
   const nav='<nav class="section-tabs" aria-label="AI settings sections">'+[['drafting','Drafting'],['evaluations','Study evaluations'],['external','External agents']].map(([id,label])=>'<button class="button" data-act="ai-section" data-section="'+id+'" aria-pressed="'+(S.aiSection===id)+'">'+label+'</button>').join('')+'</nav>';
   let content;
