@@ -2208,7 +2208,7 @@ test('step navigation uses numbered questions consistently without rewriting sav
     assert.doesNotMatch(html, />First question<|>Next question</);
   }
   assert.doesNotMatch(stageMap(p), /From First question/);
-  assert.match(stageMap(p), /From 1\. Which option fits\?/);
+  assert.match(stageMap(p), /Uses step 1</);
   assert.equal(JSON.stringify(p), before, 'display labels preserve stored identity and execution contracts');
   next.questions.answer.label = 'Which launch date fits?';
   assert.equal(stepTitle(p, next), '2. Which launch date fits?');
@@ -3022,7 +3022,7 @@ test('Review run counts unfinished steps and opens the first one on the tab that
   act(null, { dataset: { act: 'flow-fix' } });
   assert.equal(S.flowPanel, true); assert.equal(S.stageId, 'panel'); assert.equal(S.sections['flow-inspector'], 'question');
   assert.doesNotMatch(html(), /Drag steps to arrange them; click empty canvas to add one\./, 'no standing instructions banner');
-  assert.match(html(), /data-act="flow-create-open"[^>]*>[\s\S]*? Create<\/button>/);
+  assert.match(html(), /data-act="flow-create-open"[^>]*>[\s\S]*? Add step<\/button>/);
   const before = p.stages.length;
   act(null, { dataset: { act: 'flow-create-open' } });
   assert.equal(p.stages.length, before + 1, 'without a rendered canvas, Create adds a question step directly');

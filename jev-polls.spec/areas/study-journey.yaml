@@ -143,3 +143,16 @@ behaviors:
     source:
       text: Stage 'gamer_interest' sample size 100 exceeds 8 distinct positive-weight profiles
       reference: jev-polls demo walkthrough, red banner after Review run, 2026-10-09
+  - id: step-card-anatomy
+    description: >-
+      Each step card reads top to bottom: number, kind and status; which earlier steps it uses; its
+      name and question; who answers (cohort and persona count); what it sends on; and, only on the
+      last step of a branch, Add next step.
+    details: >-
+      Outputs already sent to a later step show only their label with a filled socket; only unused
+      outputs say Connect output. Wire labels show only for wires touching the selected step. A
+      final result at the end of a branch is the study's answer, not an unfinished connection. The
+      canvas toolbar button reads Add step.
+    source:
+      text: actions and flow still unclear
+      reference: jev-polls project chat, Giulio, 2026-10-10, with a screenshot of the 3-step game-name study canvas
