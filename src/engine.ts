@@ -297,7 +297,7 @@ export async function runPipeline(pipeline: Pipeline, cohorts: Record<string, Co
           weight: populationWeight * (persona.weight / selectedWeight) / repeats,
         })));
       });
-      for (const job of jobs) options.onMemberProgress?.({ stage: stage.id, personaId: job.persona.id, label: job.persona.label, segment: job.segmentId, age: job.persona.age, repeat: job.repeat, status: 'queued' });
+      for (const job of jobs) options.onMemberProgress?.({ stage: stage.id, personaId: job.persona.id, label: job.persona.label, segment: job.segmentId, age: job.persona.age, repeat: job.repeat, weight: job.weight, status: 'queued' });
       const votes: Vote[] = [];
       const layerVotes = new Map<string, Vote[]>();
       let done = 0;
@@ -346,8 +346,13 @@ export async function runPipeline(pipeline: Pipeline, cohorts: Record<string, Co
       const workers = Array.from({ length: perStageConcurrency }, async () => {
         while (cursor < jobs.length) {
           const job = jobs[cursor++]!;
-          const member = { stage: stage.id, personaId: job.persona.id, label: job.persona.label, segment: job.segmentId, age: job.persona.age, repeat: job.repeat };
-          options.onMemberProgress?.({ ...member, status: 'running' });
+          const member = { stage: stage.id, personaId: job.persona.id, label: job.persona.label, segment: job.segmentId, age: job.persona.age, repeat: job.repeat, weight: job.weight };
+          // A batched member is several requests: report each finished layer so the browser can fill its tile as they land.
+          const layered = batchPlan !== undefined && chunks.length > 1;
+          const layerTotal = chunks.length + (batchPlan?.reduceRounds ?? 0);
+          let layersDone = 0;
+          const layerDone = (phase: 'map' | 'combine'): void => { layersDone += 1; options.onMemberProgress?.({ ...member, status: 'running', batch: { phase, done: Math.min(layersDone, layerTotal), total: layerTotal } }); };
+          options.onMemberProgress?.({ ...member, status: 'running', ...(layered ? { batch: { phase: 'map' as const, done: 0, total: layerTotal } } : {}) });
           const requestSeed = `${options.seed}:${stage.id}:${job.persona.id}:${job.repeat}`;
           try {
             let final: { evaluation: Evaluation; cacheHit: boolean };
@@ -370,13 +375,14 @@ export async function runPipeline(pipeline: Pipeline, cohorts: Record<string, Co
               const total = responses!.length;
               if (chunks.length === 1) final = await ask('b1', mapInput(1, 1, total, chunks[0]!), MAP_GUIDE);
               else {
-                const mapped = await settle(chunks.map((slice, index) => ask(`b${index + 1}`, mapInput(index + 1, chunks.length, total, slice), MAP_GUIDE)));
+                const mapped = await settle(chunks.map(async (slice, index) => { const result = await ask(`b${index + 1}`, mapInput(index + 1, chunks.length, total, slice), MAP_GUIDE); layerDone('map'); return result; }));
                 mapped.forEach((result, index) => record('map', index + 1, result));
                 let verdicts: Verdict[] = mapped.map((result, index) => ({ batch: index + 1, responses: chunks[index]!.length, answers: result.evaluation.answers }));
                 let allCached = mapped.every((result) => result.cacheHit);
                 for (let round = 1; ; round += 1) {
                   const groups = chunk(verdicts, batchPlan.groupSize);
                   const results = await settle(groups.map((group, index) => ask(`r${round}.${index + 1}`, reduceInput(round, total, group), COMBINE_GUIDE)));
+                  layerDone('combine');
                   allCached = allCached && results.every((result) => result.cacheHit);
                   if (groups.length === 1) { final = { evaluation: results[0]!.evaluation, cacheHit: allCached }; break; }
                   results.forEach((result, index) => record(`reduce:${round}`, index + 1, result));

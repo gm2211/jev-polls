@@ -1,19 +1,115 @@
 id: live-and-replay
-name: Live view and replay
+name: Live voting and voting replay
 behaviors:
-  - id: live-lanes
+  - id: live-in-place
     description: >-
-      Watch voting shows real waiting, thinking, evaluated, and failed member evaluations, and
-      selecting a member shows its returned answers or recorded failure.
+      Run study opens Live voting where the study is, in place of the canvas, with Back to study and,
+      once saved, Open report. Starting, watching and returning never leave the study.
+    details: >-
+      The view is addressable (hash `live=<run id>`), so reload and Back work. A study with runs also
+      offers Live voting (while running) or Voting replay (after) in its header. Opening a run from
+      the Runs list still shows the same view there.
+    source:
+      text: >-
+        you must be able to produce a 1 minute demo that shows very simple, streamlined, almost
+        guided process, without needing to jump between screens and with a compelling live voting view
+      reference: 2026-10-10 jev-polls project thread, Giulio
+  - id: live-host-map
+    description: >-
+      Live voting and Voting replay draw one small tile per persona evaluation (repeats are separate
+      tiles) in a dense map grouped by segment, with group headers and counts. Fit all packs about
+      a thousand tiles into the window; 1:1 and Large keep a fixed size and scroll.
+    details: >-
+      Queued tiles are neutral, thinking tiles pulse, failed tiles are red with a cross, and finished
+      tiles take the colour of the member's top pick (Choice) or a sequential colour for the Score
+      mean or yes-probability. Colour by switches Status, Top pick and Confidence. Group by offers
+      Segment, Age, every categorical attribute the cohort has (arrays group by their one item, or
+      Several) and None. Hovering shows who they are, their segment, status and top pick with its
+      probability; clicking opens the full answer and the synthetic-profile note. Tiles are
+      focusable buttons with labels, and the arrow keys move between them. A step with few members
+      draws large tiles with initials.
+    source:
+      text: >-
+        observing the voting process should be almost like a videogame and using a view a bit like
+        host map https://www.youtube.com/watch?v=SRg5kGSHzVY
+      reference: 2026-10-10 jev-polls project thread, Giulio
+  - id: live-leaderboard
+    description: >-
+      A leaderboard of options as racing horizontal bars shows each option's weighted share among
+      the members evaluated so far, highlights the leader and animates when ranks change; it doubles
+      as the colour legend.
+    details: >-
+      The share is the report's own measure (weighted mean of answer probabilities), so the final
+      leaderboard equals the report. Runs saved before weights were kept count members equally and
+      say so. Score questions show the level distribution and mean; yes/no questions show likelihood
+      of yes.
+    source:
+      text: >-
+        observing the voting process should be almost like a videogame and using a view a bit like
+        host map https://www.youtube.com/watch?v=SRg5kGSHzVY
+      reference: 2026-10-10 jev-polls project thread, Giulio
+  - id: live-status-strip
+    description: >-
+      A strip shows evaluated of total, thinking, failed, evaluations per second over the last 20
+      seconds and time left, and a progress bar. Tiles pop when they finish. Motion stops under
+      prefers-reduced-motion.
+    source:
+      text: >-
+        observing the voting process should be almost like a videogame and using a view a bit like
+        host map https://www.youtube.com/watch?v=SRg5kGSHzVY
+      reference: 2026-10-10 jev-polls project thread, Giulio
+  - id: live-incremental-updates
+    description: >-
+      Each poll patches only the tiles whose status or answer changed, plus counters, the
+      leaderboard and bars, in place; the thousand tiles are not rebuilt and the page's other
+      controls keep focus, selection and scroll. A poll asks only for members that changed.
+    details: >-
+      One update costs a couple of milliseconds of script for a thousand members. Re-rendering the
+      page shell (control changes, a new step, completion) rebuilds the map once.
+    source:
+      text: >-
+        observing the voting process should be almost like a videogame and using a view a bit like
+        host map https://www.youtube.com/watch?v=SRg5kGSHzVY
+      reference: 2026-10-10 jev-polls project thread, Giulio
+  - id: live-batch-progress
+    description: >-
+      A member who reads earlier answers in batches reports each finished batch and combine round,
+      and its tile fills like a segmented ring until the combine round completes it.
+    details: >-
+      Members carry their layers (map batches, then combine rounds) as batch progress. Replay uses
+      the layers recorded in the run to fill the next tile the same way.
+    source:
+      text: >-
+        observing the voting process should be almost like a videogame and using a view a bit like
+        host map https://www.youtube.com/watch?v=SRg5kGSHzVY
+      reference: 2026-10-10 jev-polls project thread, Giulio
+  - id: replay-on-map
+    description: >-
+      Voting replay drives the same map and leaderboard: tiles are revealed in the order their
+      evaluations finished, and a replay never exposes an answer it has not reached.
+    details: >-
+      Runs saved before finishing order was kept replay in saved order and say so.
+    source:
+      text: >-
+        observing the voting process should be almost like a videogame and using a view a bit like
+        host map https://www.youtube.com/watch?v=SRg5kGSHzVY
+      reference: 2026-10-10 jev-polls project thread, Giulio
+  - id: live-narrow-screens
+    description: >-
+      On a phone the map scrolls inside its own box, the leaderboard stacks above it, and every
+      control stays reachable without clipping.
   - id: resilient-polling
     description: Live status survives transient fetch errors with a visible reconnecting notice.
   - id: replay-without-models
     description: >-
-      Replay voting uses saved member order, never calls a model, and states that it does not
-      reflect recorded timing.
+      Replay voting uses saved results, never calls a model, and states that its speed is
+      illustrative rather than recorded timing.
   - id: replay-controls
     description: >-
-      Replay offers play, pause, step, restart, 1×/2×/4× speed, and a position slider that updates
-      while dragging; selecting a member pauses playback.
+      Replay offers play, pause, step, restart, show all, 1×/2×/4×/8× speed, and a position slider
+      that updates while dragging. A whole replay takes four to forty seconds at 1× whatever its
+      size.
   - id: evaluations-not-shares
-    description: Live token counts describe evaluations, not weighted audience shares.
+    description: >-
+      Tiles and counts describe evaluations of synthetic profiles, not audience share, and colours
+      show model output, not observed human behavior.

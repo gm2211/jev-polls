@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import type { Answer, Cohort, Evaluation, EvaluationRequest, Json, Persona, Pipeline, PollInputBinding, PollStage, Provider, Question } from '../src/types.js';
+import type { Answer, Cohort, Evaluation, EvaluationRequest, Json, Persona, Pipeline, PollInputBinding, PollStage, Provider, Question, RunMemberProgress } from '../src/types.js';
 import { runPipeline } from '../src/engine.js';
 import { chunk, compactAnswer } from '../src/batching.js';
 import { estimateBudgets, enforceBudgets, estimateRequestTokens, JEV_STATE_AND_QUESTION_LIMIT } from '../src/request-budget.js';
@@ -189,4 +189,36 @@ test('the engine rejects the same invalid shapes', async () => {
   const cohorts = { crowd: makeCohort('crowd', 4), board: makeCohort('board', 1) };
   await assert.rejects(runPipeline(study(optionCount(2), [responses(10), { ...responses(10), question: 'other' }]), cohorts, { ...options, provider: provider() }), /only one input into batches/);
   await assert.rejects(runPipeline(study(optionCount(2), { stage: 'crowd', question: 'pick', select: 'mean', batch: 'auto' } as PollInputBinding), cohorts, { ...options, provider: provider() }), /incompatible|only when/);
+});
+
+test('a batched member reports each finished layer so its tile can fill: 10 map batches, then the combine round', async () => {
+  const pipeline = study(optionCount(2), responses(100));
+  const cohorts = { crowd: makeCohort('crowd', 1000), board: makeCohort('board', 3) };
+  const events: RunMemberProgress[] = [];
+  await runPipeline(pipeline, cohorts, { ...options, provider: provider(), onMemberProgress: event => events.push(event) });
+  const board = events.filter(event => event.stage === 'board');
+  for (const personaId of ['board-0', 'board-1', 'board-2']) {
+    const own = board.filter(event => event.personaId === personaId);
+    assert.deepEqual(own.map(event => event.status), ['queued', 'running', ...Array(11).fill('running'), 'completed']);
+    const layers = own.filter(event => event.batch).map(event => event.batch!);
+    assert.deepEqual(layers.map(layer => layer.done), Array.from({ length: 12 }, (_, index) => index), 'a start event, then one per finished layer');
+    assert.ok(layers.every(layer => layer.total === 11));
+    assert.deepEqual(layers.map(layer => layer.phase), [...Array(11).fill('map'), 'combine']);
+    assert.equal(own.at(-1)!.batch, undefined);
+    assert.ok(own.at(-1)!.answers);
+  }
+  // The crowd reads nothing in batches and reports no layers; every evaluation carries the audience share it stands for.
+  const crowd = events.filter(event => event.stage === 'crowd');
+  assert.ok(crowd.every(event => event.batch === undefined));
+  assert.ok(events.every(event => typeof event.weight === 'number' && event.weight > 0));
+  const shares = crowd.filter(event => event.status === 'queued').reduce((sum, event) => sum + event.weight!, 0);
+  assert.ok(Math.abs(shares - 1) < 1e-9, `crowd weights add up to the whole audience, got ${shares}`);
+});
+
+test('a board that reads everything in one request has no layers to report', async () => {
+  const pipeline = study(optionCount(2), responses());
+  const cohorts = { crowd: makeCohort('crowd', 20), board: makeCohort('board', 2) };
+  const events: RunMemberProgress[] = [];
+  await runPipeline(pipeline, cohorts, { ...options, provider: provider(), onMemberProgress: event => events.push(event) });
+  assert.ok(events.filter(event => event.stage === 'board').every(event => event.batch === undefined));
 });

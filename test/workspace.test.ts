@@ -120,6 +120,14 @@ test('workspace never runs on connect/save/review and requires a fresh explicit 
   assert.deepEqual(job.stages?.map(stage => [stage.id, stage.status]), [['audience', 'completed'], ['decision', 'completed']]);
   assert.equal(job.liveMembers?.[0]?.status, 'completed');
   assert.ok(job.liveMembers?.[0]?.answers?.choice);
+  // The map weights its tally like the report, replays in finishing order, and polls only for what changed.
+  assert.equal(typeof job.liveMembers?.[0]?.weight, 'number');
+  assert.equal(job.liveMembers?.[0]?.order, 0);
+  assert.ok((job.liveVersion ?? 0) > 0); assert.equal(job.liveTotal, 1);
+  const unchanged = await (await fetch(new URL(`/api/run/${job.id}?since=${job.liveVersion}`, server.url))).json() as WorkspaceRun;
+  assert.equal(unchanged.liveDelta, true); assert.deepEqual(unchanged.liveMembers, []);
+  const everything = await (await fetch(new URL(`/api/run/${job.id}?since=0`, server.url))).json() as WorkspaceRun;
+  assert.equal(everything.liveMembers?.length, 1); assert.equal(everything.liveMembers?.[0]?.status, 'completed');
   assert.doesNotMatch(JSON.stringify(emitted), /Synthetic profile|answers|probabilities/);
   assert.ok(job.reportUrl);
   const report = await fetch(new URL(job.reportUrl, server.url));
@@ -137,7 +145,7 @@ test('workspace never runs on connect/save/review and requires a fresh explicit 
   const historicalIds = { ownerless: randomUUID(), unmatched: randomUUID(), explicit: randomUUID(), interrupted: randomUUID(), pendingOwner: randomUUID(), deletedOwner: randomUUID(), ownerlessPending: randomUUID(), invalidOwnership: randomUUID(), mock: randomUUID() };
   for (const [kind, id] of Object.entries(historicalIds)) {
     const target = join(directory, 'runs', id); await mkdir(target);
-    const metadata: Omit<WorkspaceRun, 'projectId'> & { projectId?: string } = { ...job, id }; delete metadata.projectId;
+    const metadata: Omit<WorkspaceRun, 'projectId'> & { projectId?: string } = { ...job, id }; delete metadata.projectId; delete metadata.liveVersion; delete metadata.liveTotal; // poll-only fields are never saved
     if (kind === 'interrupted' || kind === 'ownerlessPending') {
       await writeFile(join(target, 'pending.json'), JSON.stringify({ ...metadata, ...(kind === 'interrupted' ? { projectId: 'original-project' } : {}), status: 'running' }));
       continue;
