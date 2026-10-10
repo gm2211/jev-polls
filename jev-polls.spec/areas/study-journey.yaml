@@ -56,8 +56,9 @@ behaviors:
       visit to the Cohorts, Studies or Settings pages and, where avoidable, no separate Review page.
     details: >-
       Acceptance bar for the guided flow (project-lands-on-canvas, empty-canvas-entry-points,
-      guided-step-setup, inline-audience-creation, single-next-action). Each guided-flow pull
-      request reports the exact click path and the screens it touches.
+      guided-step-setup, one-step-options, inline-audience-creation, inline-provider-choice,
+      single-next-action, review-in-panel). Each guided-flow pull request reports the exact click
+      path and the screens it touches.
     source:
       text: >-
         you must be able to produce a 1 minute demo that shows very simple, streamlined, almost
@@ -104,18 +105,42 @@ behaviors:
   - id: guided-step-setup
     description: >-
       Adding a step opens its panel as a guided sequence: What to ask (answer format first, then
-      the question), Options (paste, import a file, or draft with your AI; skipped for Yes / no),
-      then Who answers. Each stop ends with Next (Done on the last); Next is held, with a reason,
+      the question), Options (one box, see one-step-options; skipped for Yes / no), then Who
+      answers. Each stop ends with Next (Done on the last); Next is held, with a reason,
       while the stop is unfinished. Tabs show done or to do, and any tab can still be clicked.
     details: >-
       Replaces four equal tabs that opened on Cohort. The guided flow says "audience" and "who
-      answers"; the Cohorts page keeps its name (vocabulary owns that decision).
+      answers"; the Cohorts page keeps its name (vocabulary owns that decision). The guided stops
+      never say Jev drafts or generates people: the user's drafting AI does, and Jev only answers
+      (inline-provider-choice).
     source:
       text: >-
         there is no guided flow - I have to know about cohorts - I had told you I want an experience
         like railway.com. // you must be able to produce a 1 minute demo that shows very simple,
         streamlined, almost guided process, without needing to jump between screens
       reference: jev-polls project thread, Giulio, 2026-10-10 (both quotes)
+  - id: one-step-options
+    description: >-
+      The Options stop is one box: type or paste one option per line, with an optional description
+      after a colon and a space or a tab ("Orbital Empire: an empire, but in orbit"). The compact
+      option list below fills in as you type, with the count ("14 options").
+    details: >-
+      The box is read after a short pause and again when the step is left, saved, or reviewed, so
+      nothing typed is lost. A name that already exists keeps its option ID and custom fields; its
+      description comes from the line, so a line without one clears it. A tab wins
+      over a colon, so a name that contains a colon is written "Name: with colon<tab>description"
+      and the box shows it that way. Blank lines are ignored; duplicate names or more than 255
+      options show the problem and leave the previous list untouched; fewer than two options keep
+      the stop unfinished. A CSV or JSON file dropped on the box replaces its contents, read by the
+      same parsers as the import dialog (name and description headers, names, [name, description]
+      pairs, objects). Import file, Draft with your AI and the Paste dialog (comma-separated or CSV
+      with columns) remain as secondary actions beside the box. Edits made in the list (rename,
+      remove) show in the box. Ordered-scale levels keep their own editor. Part of guided-demo-path.
+    source:
+      text: >-
+        a 1 minute demo that shows very simple, streamlined, almost guided process, without needing
+        to jump between screens
+      reference: jev-polls project thread, Giulio, 2026-10-10 (task brief for the one-step options box)
   - id: inline-audience-creation
     description: >-
       The Who answers stop lists saved audiences and, in the same panel, offers "Create the
@@ -126,12 +151,29 @@ behaviors:
       Reuses the inline cohort generation (inline-cohort-create) without a New cohort button
       click first. The recovered-job path restores the step from the remembered target, so the
       draft is not left on the Cohorts page. A draft started in another session or tab still
-      shows on the Cohorts page notice.
+      shows on the Cohorts page notice. The copy says the user's drafting AI writes the people and
+      Jev only answers as them; nothing is real data and the user reviews them first.
     source:
       text: >-
         needs a cohort assigned that I can create right there and then and navigate back to
         pipeline. // there is no guided flow - I have to know about cohorts
       reference: jev-polls project thread, Giulio, 2026-10-09 and 2026-10-10
+  - id: inline-provider-choice
+    description: >-
+      When no usable drafting AI is selected on reaching "Create the audience", the form shows the
+      choice in place: the same select, with the same ready / unavailable labels, as the AI
+      button's Drafting section. When exactly one provider is ready it is preselected.
+    details: >-
+      Replaces the dead-end hint pointing at AI settings above. The select stays for the rest of the
+      session once it was needed, so choosing a provider does not make it vanish; ChatGPT shows its
+      model controls there too, and an unavailable provider shows its sign-in message and a refresh
+      button. With no provider ready the hint says to sign in to one and refresh. Outside the guided
+      stops (the Cohorts page) the hint still points at the AI button. Part of guided-demo-path.
+    source:
+      text: >-
+        a 1 minute demo that shows very simple, streamlined, almost guided process, without needing
+        to jump between screens
+      reference: jev-polls project thread, Giulio, 2026-10-10 (task brief for the inline provider choice)
   - id: inline-cohort-create
     description: >-
       A round's Who answers stop (the Cohort tab) offers a new audience built inside the panel;
@@ -182,7 +224,8 @@ behaviors:
     details: >-
       Reviewing saves the study and plans the run but never starts inference; only Run study does.
       Selecting a step, Esc or the close control dismisses the panel and drops the plan. Run study
-      then opens the live view of the run. Part of guided-demo-path.
+      then opens the live view of the run. The step wizard's final Review run and the command
+      palette's Review run open this same panel, never the full page. Part of guided-demo-path.
     source:
       text: >-
         you must be able to produce a 1 minute demo that shows very simple, streamlined, almost

@@ -15,6 +15,33 @@ export const ANSWER_LIST_DIALOG = `
 </dialog>`;
 
 export const ANSWER_LIST_CLIENT = parseAnswerCsv.toString() + String.raw`
+/** Reads a CSV or JSON file the way the paste dialog and the options box do: a recognized name header picks the columns, otherwise every value is an option. */
+function answerFileLayout(name,text,type){
+  const isJson=/\.json$/i.test(name)||text.replace(/^﻿/,'').trimStart().startsWith('['),records=isJson?parseAnswerJson(text):null,rows=isJson?[]:parseAnswerCsv(text),headers=(rows[0]||[]).map(value=>value.trim().toLowerCase()),nameColumn=headers.findIndex(value=>['name','option','title','label'].includes(value));
+  const header=rows.length>1&&nameColumn>=0,column=header?nameColumn:rows.length>1&&rows.some(row=>row.length>1)?0:-1;
+  return {isJson,records,rows,header,column,descriptionColumn:header&&type==='choice'?headers.indexOf('description'):-1};
+}
+function answerFileRecords(layout,type){
+  if(layout.records)return type==='score'?layout.records.map(({label})=>({label})):layout.records;
+  const selected=layout.header?layout.rows.slice(1):layout.rows,normalize=value=>value.replace(/\r?\n/g,' ');
+  if(layout.column<0)return selected.flat().filter(value=>value.length>0).map(value=>({label:normalize(value)}));
+  if(selected.some(row=>!row[layout.column]?.length))throw Error('Every CSV row needs a name in the selected column.');
+  return selected.map(row=>({label:normalize(row[layout.column]),...(type==='choice'&&layout.descriptionColumn>=0?{description:row[layout.descriptionColumn]||''}:{})}));
+}
+/** Builds the option map for these labels in order. A label that matches an existing option keeps its ID and any custom fields; descriptions come from the Map. With exact, a label without a description clears the old one. */
+function mergeOptionCriteria(q,labels,descriptions,exact=false){
+  const old=Object.entries(q.criteria),used=new Set(),criteria={},flat=value=>String(value??'').replace(/\s*\r?\n\s*/g,' ').trim();
+  const fresh=()=>{let key;do{key='option_'+id()}while(Object.hasOwn(q.criteria,key)||used.has(key));used.add(key);return key};
+  for(const label of labels){
+    let key=old.find(([key,value])=>!used.has(key)&&optionName(key,value)===label)?.[0];
+    if(key)used.add(key);else key=fresh();
+    const existing=Object.hasOwn(q.criteria,key)?q.criteria[key]:label,description=descriptions.get(label),base=existing&&typeof existing==='object'?existing:{};
+    if(exact){const next=flat(description);criteria[key]=next===flat(optionDescription(existing))?existing:{...base,label,description:next}}
+    else criteria[key]=description!==undefined?{...base,label,description}:existing;
+  }
+  while(exact&&Object.keys(criteria).length<2){const spare=old.find(([key,value])=>!used.has(key)&&!String(optionName(key,value)).trim())?.[0],key=spare&&!used.has(spare)?spare:fresh();used.add(key);criteria[key]=''}
+  return criteria;
+}
 let answerListDraft=null;
 function openAnswerList(importFile=false){
   flushForms();
@@ -105,9 +132,9 @@ async function readAnswerListFile(file){
     if(file.size>256*1024)throw Error('CSV is too large. The maximum size is 256 KiB.');
     const text=await file.text();
     if(answerListDraft!==draft||draft.readVersion!==readVersion||!document.getElementById('answerListDialog').open)return;
-    const isJson=/\.json$/i.test(file.name)||text.replace(/^\uFEFF/,'').trimStart().startsWith('['),records=isJson?parseAnswerJson(text):null,rows=isJson?[]:parseAnswerCsv(text),headers=(rows[0]||[]).map(value=>value.trim().toLowerCase()),nameColumn=headers.findIndex(value=>['name','option','title','label'].includes(value));
+    const layout=answerFileLayout(file.name,text,draft.type);
     if(draft.source==='paste')draft.pasteText=document.getElementById('answerListText').value;
-    draft.file=true;draft.jsonRecords=records;draft.fileText=text;draft.view='preview';draft.source='file';draft.header=rows.length>1&&nameColumn>=0;draft.column=draft.header?nameColumn:rows.length>1&&rows.some(row=>row.length>1)?0:-1;draft.descriptionColumn=draft.header&&draft.type==='choice'?headers.indexOf('description'):-1;draft.page=0;
+    draft.file=true;draft.jsonRecords=layout.records;draft.fileText=text;draft.view='preview';draft.source='file';draft.header=layout.header;draft.column=layout.column;draft.descriptionColumn=layout.descriptionColumn;draft.page=0;
     document.getElementById('answerListText').value=text;document.getElementById('answerListFilename').textContent=file.name;
     document.getElementById('answerListHeader').checked=draft.header;updateAnswerList();
   }catch(e){if(answerListDraft===draft&&draft.readVersion===readVersion&&document.getElementById('answerListDialog').open){const error=document.getElementById('answerListError');error.textContent=e.message;error.hidden=false}}
@@ -116,9 +143,7 @@ function applyAnswerList(append){
   const d=answerListDraft,q=answerListTarget(),records=answerListRecords(),values=answerListResult(q,records.map(record=>record.label),append);
   if(q.type==='score')q.criteria=values;
   else {
-    const old=Object.entries(q.criteria),used=new Set(),criteria={},descriptions=new Map(records.filter(record=>Object.hasOwn(record,'description')).map(record=>[record.label,record.description]));
-    for(const label of values){let key=old.find(([key,value])=>!used.has(key)&&optionName(key,value)===label)?.[0];if(!key){do{key='option_'+id()}while(Object.hasOwn(q.criteria,key)||used.has(key))}used.add(key);const existing=Object.hasOwn(q.criteria,key)?q.criteria[key]:label;criteria[key]=descriptions.has(label)?{...(existing&&typeof existing==='object'?existing:{}),label,description:descriptions.get(label)}:existing}
-    q.criteria=criteria;
+    q.criteria=mergeOptionCriteria(q,values,new Map(records.filter(record=>Object.hasOwn(record,'description')).map(record=>[record.label,record.description])));
   }
   S.sections['setup-wizard-'+d.pipelineId+'-'+d.stageId+'-'+d.questionId]='options';S.sections['setup-input-'+d.pipelineId+'-'+d.stageId+'-'+d.questionId]='manual';S.listPages[S.projectId+':setup-options-'+d.stageId+'-'+d.questionId]=0;S.dirty=true;S.plan=null;
   closeAnswerList();render();say(values.length+' '+(q.type==='score'?'ordered levels':'options')+' ready to edit.');

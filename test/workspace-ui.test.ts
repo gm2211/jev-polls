@@ -2248,8 +2248,8 @@ test('option comparisons preserve descriptions, stable keys and paginated answer
   S.pipelineId='study';S.stageId='panel';const p=S.doc.pipelines[0],s=p.stages[0],q=s.questions.answer;
   q.criteria={a:{label:'Afterlight',description:'A hopeful title about exploration.'},b:{label:'Project Dawn',description:'A bold title about a new beginning.'},c:'None of these',d:'Other',e:{label:'Hidden option',description:'Preserve this off-page description.'}};
   const html=stageForm(p,s);
-  assert.match(html,/aria-label="Add options"/);assert.match(html,/Probability distribution/);assert.doesNotMatch(html,/name="setupOption"|name="setupDescription"|>Rating</);
-  assert.match(html,/A hopeful title/);assert.doesNotMatch(html,/Hidden option/);
+  assert.match(html,/data-options-box/);assert.match(html,/Probability distribution/);assert.doesNotMatch(html,/name="setupOption"|name="setupDescription"|>Rating</);
+  assert.match(html,/A hopeful title/);assert.doesNotMatch(html.slice(html.indexOf('data-options-list')),/Hidden option/,'the compact list pages four at a time; the box holds every option');assert.match(html,/Hidden option: Preserve this off-page description\./);
   const beforeEditing=JSON.stringify(q);setupAction('setup-edit-option',{dataset:{key:'a'}});
   const editor=stageForm(p,s);assert.match(editor,/Option 1 name/);assert.match(editor,/Option 1 description/);assert.doesNotMatch(editor,/Option 2 name/);
   assert.equal(JSON.stringify(q),beforeEditing,'opening an option does not mutate criteria');
@@ -2468,11 +2468,11 @@ test('step settings preserve cohort assignment and structured option contracts w
 });
 
 
-test('empty option setup starts with CSV import and manual add opens only one option',async()=>{
+test('empty option setup starts with the options box and manual add opens only one option',async()=>{
   const browser=browserHarness();await settle();const {S,stageForm,setupAction}=browser.client;
   S.pipelineId='study';S.stageId='panel';const p=S.doc.pipelines[0],s=p.stages[0];s.questions.answer.criteria={a:'',b:''};
   const before=JSON.stringify(s);let html=stageForm(p,s);
-  assert.match(html,/Drop CSV or JSON/);assert.match(html,/data-answer-drop="true" data-act="answer-list-import"/);
+  assert.match(html,/data-options-box/);assert.match(html,/data-act="answer-list-import"/);assert.doesNotMatch(html,/Unnamed option/);
   assert.doesNotMatch(html,/name="setupOption"|name="setupDescription"/);assert.equal(JSON.stringify(s),before);
   setupAction('setup-add-option',{dataset:{}});html=stageForm(p,s);
   assert.equal((html.match(/name="setupOption"/g)||[]).length,1);assert.equal((html.match(/name="setupDescription"/g)||[]).length,1);
@@ -2495,12 +2495,12 @@ test('option input tabs isolate sources and preserve drafts and reachable blank 
   const {S,stageForm,setupAction,applyStudySetup}=browser.client;
   S.pipelineId='study';S.stageId='panel';const p=S.doc.pipelines[0],s=p.stages[0],q=s.questions.answer;
   q.criteria={a:'',b:''};S.dirty=false;const before=JSON.stringify(q);
-  let html=stageForm(p,s);assert.match(html,/data-source="file" aria-pressed="true"/);
+  let html=stageForm(p,s);assert.match(html,/data-options-box/);
   assert.doesNotMatch(html,/data-act="option-agent-open"|data-act="setup-add-option"/);
   setupAction('setup-input',{dataset:{source:'agent'}});html=stageForm(p,s);
   assert.match(html,/id="optionAgentPrompt"/);assert.doesNotMatch(html,/<dialog[^>]*optionAgent/);assert.doesNotMatch(html,/data-answer-drop|data-act="setup-add-option"/);
   setupAction('setup-input',{dataset:{source:'manual'}});html=stageForm(p,s);
-  assert.match(html,/Edit option Unnamed option 1/);assert.match(html,/Edit option Unnamed option 2/);
+  assert.match(html,/data-options-box/);assert.doesNotMatch(html,/Unnamed option/,'blank placeholders are not listed until one is named');
   assert.equal(JSON.stringify(q),before);assert.equal(S.dirty,false,'view changes alone do not edit study');
   setupAction('setup-edit-option',{dataset:{key:'a'}});
   const row={dataset:{setupOption:'a'},querySelector:(selector:string)=>({value:selector==='[name=setupOption]'?'Afterlight':'A hopeful title.'})};
@@ -2509,7 +2509,7 @@ test('option input tabs isolate sources and preserve drafts and reachable blank 
   assert.equal(q.label,'Choose a title');assert.equal(q.criteria.a.description,'A hopeful title.');assert.equal(q.criteria.b,'');
   html=stageForm(p,s);assert.match(html,/Afterlight/);assert.match(html,/Unnamed option 2/);
   const other={...s,id:'other',questions:{answer:{...q,criteria:{a:'',b:''}}}};
-  assert.match(stageForm(p,other),/data-source="file" aria-pressed="true"/,'source selection belongs to one step');
+  setupAction('setup-input',{dataset:{source:'agent'}});assert.doesNotMatch(stageForm(p,other),/optionAgentPrompt/,'source selection belongs to one step');assert.match(stageForm(p,other),/data-options-box/);
 });
 
 
@@ -2542,7 +2542,7 @@ test('review validation returns incomplete question to correct setup task',async
   setupAction('setup-wizard',{dataset:{step:'review',forward:'true'}});assert.match(stageForm(p,s),/Import a list or name every option before continuing/);assert.match(stageForm(p,s),/data-setup-pane="options" >/);
   setupAction('setup-wizard',{dataset:{step:'review'}});
   assert.throws(()=>validateSetupAnswers(p),/text for every answer/);
-  const html=stageForm(p,s);assert.match(html,/data-setup-pane="options" >/);assert.match(html,/data-source="manual" aria-pressed="true"/);
+  const html=stageForm(p,s);assert.match(html,/data-setup-pane="options" >/);assert.match(html,/data-options-box/);
   q.label='';assert.throws(()=>validateSetupAnswers(p),/Add the question/);assert.match(stageForm(p,s),/data-setup-pane="question" >/);
 });
 
