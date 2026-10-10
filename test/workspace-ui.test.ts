@@ -58,7 +58,7 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={plural,recoverDraftingJob,recoverableDraftingJob,loadLocalAgents,cohortJobNotice,cohortJobNoticeVisible,commandState,adoptCohortProposal,commandEntries,commandExecute,inlineCohortJobVisible,inlineCohortTarget,setupCohortPicker,runCaveats,beginRun,commandApplyProposal,commandJobVisible,S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,locationHash,restoreLocation,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,studies,review,say,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,studyQuestionList,validateSetupAnswers,questionParts,upsertQuestion,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={plural,recoverDraftingJob,recoverableDraftingJob,loadLocalAgents,cohortJobNotice,cohortJobNoticeVisible,commandState,adoptCohortProposal,commandEntries,commandExecute,inlineCohortJobVisible,inlineCohortTarget,setupCohortPicker,runCaveats,beginRun,commandApplyProposal,commandJobVisible,S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,locationHash,restoreLocation,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,studies,review,say,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,studyQuestionList,validateSetupAnswers,questionParts,upsertQuestion,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList,studyNextAction,studyReviewPanel,rememberRunSignature,ensureStudyQuestion};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
   if (openExistingProject) (context as any).clientTest.S.projectId = 'existing-research';
@@ -3031,16 +3031,14 @@ test('a selected step opens a closable panel with one row of tabs marking unfini
   assert.match(html(), /round-panel/, 'selecting a step reopens the panel');
 });
 
-test('Review run counts unfinished steps and opens the first one on the tab that fixes it', async () => {
+test('the header names the next unfinished thing and opens the step tab that fixes it', async () => {
   const browser = browserHarness(); await settle();
   const { S, act, render } = browser.client;
   const html = () => browser.element('app').innerHTML;
   S.tab = 'studies'; S.pipelineId = 'study'; S.stageId = 'panel'; render();
   const p = S.doc.pipelines[0], q: any = Object.values(p.stages[0].questions)[0];
-  const ready = /data-act="review">Review run</.test(html());
   q.label = ''; S.flowPanel = false; render();
-  assert.match(html(), /data-act="flow-fix"[^>]*>Review run · \d+ to fix</);
-  if (ready) assert.match(html(), /Review run · 1 to fix/);
+  assert.match(html(), /data-act="flow-fix"[^>]*>Next: write the question</);
   act(null, { dataset: { act: 'flow-fix' } });
   assert.equal(S.flowPanel, true); assert.equal(S.stageId, 'panel'); assert.equal(S.sections['flow-inspector'], 'question');
   assert.doesNotMatch(html(), /Drag steps to arrange them; click empty canvas to add one\./, 'no standing instructions banner');
@@ -3285,4 +3283,83 @@ test('a reload during inline audience generation returns to the step\'s Who answ
   assert.match(html, /data-inspector-tab="cohort"/);
   assert.match(html, /Use this audience/);
   assert.doesNotMatch(html, /cohort-job-notice/);
+});
+
+test('the study header always names one next action, from the first question to results', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, act, render, rememberRunSignature } = browser.client;
+  const html = () => browser.element('app').innerHTML;
+  const study = S.doc.pipelines[0], q: any = Object.values(study.stages[0].questions)[0];
+  const next = () => html().match(/<button type="button" class="button primary study-next" data-act="([a-z-]+)"[^>]*>([^<]*)<\/button>/)!.slice(1, 3).join('|');
+  S.tab = 'studies'; S.pipelineId = 'study'; S.stageId = 'panel'; S.flowPanel = false;
+  const stages = study.stages; study.stages = []; render();
+  assert.equal(next(), 'flow-add|Add your first question', 'an empty study points at the first-question target');
+  study.stages = stages;
+  render(); assert.equal(next(), 'next-review|Review run', 'a finished study offers the review');
+  q.label = ''; render(); assert.equal(next(), 'flow-fix|Next: write the question');
+  q.label = 'Which option fits?'; q.criteria = { a: '', b: '' }; render(); assert.equal(next(), 'flow-fix|Next: add the options');
+  q.criteria = { a: 'A', b: 'B' }; study.cohorts.audience = ''; render(); assert.equal(next(), 'flow-fix|Next: choose who answers');
+  act(null, { dataset: { act: 'flow-fix' } });
+  assert.equal(S.flowPanel, true); assert.equal(S.sections['flow-inspector'], 'cohort', 'the action opens the tab that fixes it');
+  study.cohorts.audience = 'cohort'; S.flowPanel = false;
+  study.stages.push({ ...structuredClone(stages[0]), id: 'second', inputs: {}, dependsOn: [] });
+  render(); assert.equal(next(), 'next-connect|Next: connect step 2 to step 1');
+  assert.match(html(), /<button type="button" class="button" data-act="next-review">Review run<\/button>/, 'independent steps are never blocked from reviewing');
+  act(null, { dataset: { act: 'next-connect', id: 'second' } });
+  assert.equal(S.stageId, 'second'); assert.equal(S.sections['flow-inspector'], 'connections'); assert.equal(S.flowPanel, true);
+  study.stages.pop(); S.flowPanel = false; render();
+  S.snap.runs = [{ id: 'run-1', projectId: 'existing-research', pipelineId: 'study', pipelineName: 'Original study', createdAt: '2026-10-10T10:00:00Z', status: 'running', message: '' }];
+  render(); assert.equal(next(), 'next-results|Watch the run');
+  S.snap.runs[0].status = 'completed'; rememberRunSignature('run-1', study);
+  render(); assert.equal(next(), 'next-results|See results', 'a completed run of this exact study says See results');
+  act(null, { dataset: { act: 'next-results', id: 'run-1' } });
+  assert.equal(S.tab, 'runs'); assert.equal(S.liveRunId, 'run-1');
+  S.tab = 'studies'; S.pipelineId = 'study'; render();
+  q.label = 'Changed after the run'; render();
+  assert.equal(next(), 'next-review|Review run', 'editing the study after a run asks for a new review');
+  study.layout = { panel: { x: 1, y: 2 } }; q.label = 'Which option fits?'; render();
+  assert.equal(next(), 'next-results|See results', 'moving cards never invalidates results');
+});
+
+test('Review run opens as a panel on the canvas with Run study one click away and never starts a run on its own', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, act, render } = browser.client;
+  const html = () => browser.element('app').innerHTML;
+  S.tab = 'studies'; S.pipelineId = 'study'; S.stageId = 'panel'; S.flowPanel = true; render();
+  browser.respond('/api/plan', { pipelineId: 'study', projectId: 'existing-research', revision: 1, planToken: 'token', model: 'jev-model', maxRequests: 24, warnings: [], provider: 'typesafe', stages: [{ id: 'panel', label: 'First question', kind: 'poll', dependsOn: [], cohort: 'cohort', profiles: 8, repeats: 3, requests: 24 }] }, 'POST');
+  act(null, { dataset: { act: 'next-review' } }); await settle();
+  assert.equal(S.reviewPanel, true);
+  assert.match(html(), /<aside class="flow-inspector round-panel review-panel"/, 'the review is a slide-over on the canvas');
+  assert.match(html(), /Up to 24<\/strong><span>model requests/);
+  assert.match(html(), /data-flow-node="panel"/, 'the canvas stays visible');
+  assert.doesNotMatch(html(), /class="run-review"/, 'no separate Review page');
+  assert.match(html(), /class="button primary study-next" data-act="start-run"/, 'the header now offers Run study');
+  assert.match(html(), /Study flow/);
+  assert.deepEqual(browser.bodies.map(b => b.path).filter(path => path === '/api/run'), [], 'reviewing never runs');
+  act(null, { dataset: { act: 'next-review-page' } });
+  assert.match(html(), /class="run-review"/, 'the full page stays one click away for run settings');
+  act(null, { dataset: { act: 'edit-review' } });
+  act(null, { dataset: { act: 'next-review' } }); await settle();
+  act(null, { dataset: { act: 'flow-panel-close' } });
+  assert.equal(S.plan, null); assert.doesNotMatch(html(), /review-panel/);
+  act(null, { dataset: { act: 'next-review' } }); await settle();
+  act(null, { dataset: { act: 'flow-select', id: 'panel' } });
+  assert.equal(S.plan, null, 'opening a step closes the review panel'); assert.match(html(), /Selected step editor/);
+});
+
+test('a study whose question was never typed is named by its first written question', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, ensureStudyQuestion } = browser.client;
+  const study = S.doc.pipelines[0];
+  study.description = ''; study.context = {}; S.dirty = false;
+  assert.equal(ensureStudyQuestion(study), true);
+  assert.equal(study.description, 'Which option fits?', 'the first question names the study');
+  assert.equal(study.context.decisionQuestion, 'Which option fits?');
+  assert.equal(S.dirty, true);
+  study.description = 'Typed study question';
+  study.stages[0].questions.answer.label = 'Something else';
+  assert.equal(ensureStudyQuestion(study), true);
+  assert.equal(study.description, 'Typed study question', 'a typed study question is never overwritten');
+  study.description = ''; study.stages[0].questions.answer.label = '';
+  assert.equal(ensureStudyQuestion(study), false, 'nothing to name the study yet');
 });

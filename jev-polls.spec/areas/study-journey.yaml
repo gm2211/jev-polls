@@ -145,13 +145,49 @@ behaviors:
       reference: jev-polls project thread "Rethink the main user flow", Giulio, 2026-10-09
   - id: review-run-to-fix
     description: >-
-      While steps are unfinished, the study header's primary action reads "Review run · N to fix"
-      and opens the first unfinished step's panel on the tab that fixes it; with nothing left it
-      opens the run review.
-    details: Proposal shown in the "Jev study flow" mockups (step 5); the run review page is described in review-run-page.
+      Superseded by single-next-action: the header no longer counts unfinished steps ("Review run
+      · N to fix") but names the first thing to do, and clicking it opens that step's tab as before.
+    details: >-
+      The ordering is still flowTodo's: canvas order, then the tab that fixes each step. Proposal
+      shown in the "Jev study flow" mockups (step 5); the run review is described in
+      review-run-page and review-in-panel.
     source:
       text: the user flows aren't flowing at the moment
       reference: jev-polls project thread "Rethink the main user flow", Giulio, 2026-10-09
+  - id: single-next-action
+    description: >-
+      The study header always shows one next action in words, in order: "Add your first question",
+      "Next: write the question", "Next: add the options", "Next: choose who answers" (or lower the
+      sample size), "Next: connect step N to step M", "Review run", "Run study", then "Watch the
+      run" while it runs and "See results" once a run of this exact study has completed. Clicking
+      it opens the right step and tab, or the review, or the results.
+    details: >-
+      Steps are named by number when a study has more than one. A step with no wires beside other
+      steps gets the connect suggestion, with Review run kept beside it so independent steps are
+      never blocked. Moving cards never invalidates "See results"; any content edit returns the
+      header to Review run. Typing a study's first question names the study when it has no question
+      of its own.
+    source:
+      text: >-
+        there is no guided flow - I have to know about cohorts - I had told you I want an experience
+        like railway.com. // you must be able to produce a 1 minute demo that shows very simple,
+        streamlined, almost guided process, without needing to jump between screens and with a
+        compelling live voting view
+      reference: jev-polls project thread, Giulio, 2026-10-10 (both quotes)
+  - id: review-in-panel
+    description: >-
+      From the header, Review run opens the run summary as a slide-over on the canvas (steps in run
+      order, request bound, provider and model, the model-estimates caveat) with Run study one click
+      away; the full page stays reachable for run settings.
+    details: >-
+      Reviewing saves the study and plans the run but never starts inference; only Run study does.
+      Selecting a step, Esc or the close control dismisses the panel and drops the plan. Run study
+      then opens the live view of the run. Part of guided-demo-path.
+    source:
+      text: >-
+        you must be able to produce a 1 minute demo that shows very simple, streamlined, almost
+        guided process, without needing to jump between screens
+      reference: jev-polls project thread, Giulio, 2026-10-10
   - id: project-sidebar
     description: >-
       Inside a project, a sidebar holds the way back to all projects, the project name, Studies
@@ -212,7 +248,7 @@ behaviors:
   - id: sample-within-cohort
     description: >-
       A step that asks more distinct people than its cohort's positive-weight personas holds reads
-      "Needs more personas", counts toward "Review run · N to fix", and shows "100 of 8 personas"
+      "Needs more personas", counts toward the next action "Next: lower the sample size", and shows "100 of 8 personas"
       on its card; fixing it opens the Cohort tab, which says so in plain words and offers
       "Use all N" and a way to add personas.
     details: >-
