@@ -223,7 +223,7 @@ export function buildCommandTargets(document: WorkspaceDocument, projectId: stri
       { id: 'studies', label: 'Studies', detail: 'Current project', projectId: selected.id },
       { id: 'new-cohort', label: 'New cohort', detail: 'Create a synthetic audience', projectId: selected.id },
       { id: 'project-settings', label: 'Project settings', detail: 'Name and research brief', projectId: selected.id },
-      { id: 'draft', label: 'Describe a pipeline', detail: 'Create or change steps with natural language', projectId: selected.id },
+      { id: 'draft', label: 'Describe a study', detail: 'Create or change steps with natural language', projectId: selected.id },
       { id: 'cohorts', label: 'Cohorts', detail: 'Current project', projectId: selected.id },
       { id: 'runs', label: 'Live runs and results', detail: 'Current project', projectId: selected.id },
     );

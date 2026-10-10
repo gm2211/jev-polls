@@ -71,7 +71,7 @@ function commandExecute(id){
   else if(row.action==='new-project'){selectProject(null);act(null,{dataset:{act:'new-project'}})}
   else if(row.action==='new-study'){act(null,{dataset:{act:'create-study'}})}
   else if(row.action==='ai-open'){render();act(null,{dataset:{act:'ai-open'}})}
-  else if(row.action==='next-review'){S.tab='studies';S.sections.pipeline='flow';S.flowSettingsReturn=false;render();reviewPlan(true).catch(fail);return}
+  else if(row.action==='next-review'){S.tab='studies';S.sections.pipeline='flow';render();reviewPlan(true).catch(fail);return}
   else if(row.action)act(null,{dataset:{act:row.action,tab:row.tab}});
   else render();
   if(!commandJobVisible())root.querySelector('h1')?.focus();

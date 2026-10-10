@@ -62,7 +62,7 @@ function submitStudyTitle(form){
 function ensureStudyQuestion(p){
   if(p.description?.trim())return true;
   const first=p.stages.find(s=>s.kind==='poll'),text=String(first&&Object.values(first.questions||{})[0]?.label||'').trim();
-  if(!text||text==='What should this phase decide?')return false;
+  if(!text||/^What should this (?:step|phase) decide\?$/.test(text))return false;
   p.description=text;if(p.context&&typeof p.context==='object'&&!Array.isArray(p.context))p.context.decisionQuestion=text;
   S.dirty=true;return true;
 }

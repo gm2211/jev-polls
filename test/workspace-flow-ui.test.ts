@@ -378,7 +378,7 @@ test('the guided stops advance with Next, skip Options for Yes / no, and block a
   S.sections['flow-inspector'] = 'question';
   const q: any = source.questions.answer;
   const tabs = () => plain(flowRoundTabs(pipeline, source)).map((t: any) => t[0]);
-  assert.deepEqual(tabs(), ['question', 'answers', 'cohort', 'connections']);
+  assert.deepEqual(tabs(), ['question', 'answers', 'cohort', 'connections', 'settings']);
   assert.match(flowInspector(pipeline, source), /Next: Options/);
   q.label = '';
   flowAction('flow-next', { dataset: {} });
@@ -391,7 +391,7 @@ test('the guided stops advance with Next, skip Options for Yes / no, and block a
   assert.match(flowInspector(pipeline, source), /Next: Who answers/);
   assert.match(flowInspector(pipeline, source), /data-section="question" aria-selected="false" data-done="true"/);
   q.type = 'noul'; q.criteria = {};
-  assert.deepEqual(tabs(), ['question', 'cohort', 'connections'], 'Yes / no has no Options stop');
+  assert.deepEqual(tabs(), ['question', 'cohort', 'connections', 'settings'], 'Yes / no has no Options stop');
   S.sections['flow-inspector'] = 'question';
   flowAction('flow-next', { dataset: {} });
   assert.equal(S.sections['flow-inspector'], 'cohort');
