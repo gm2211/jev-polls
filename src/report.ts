@@ -78,7 +78,7 @@ export function renderReport(run: RunRecord, options: { workspace?: boolean } = 
     const visibleVotes=()=>{const votes=selectedResult()?.votes??[];return votes.filter(v=>state.segment==='all'||v.segment===state.segment);};
     const setText=(selector,value)=>{const node=$(selector);if(node)node.textContent=String(value??'');};
     function initHeader(){
-      setText('#reportTitle',run.pipeline.name);setText('#pipelineDescription',run.pipeline.description||'A staged audience research run.');
+      const question=(run.pipeline.description||'').trim();setText('#reportTitle',question||run.pipeline.name);setText('#pipelineDescription',question?run.pipeline.name:'A staged audience research run.');
       setText('#runStatus',(run.status==='completed'?'Completed run':'Run ended with failures')+' · '+(run.provider==='mock'?'MOCK SIMULATION':run.provider==='gliner'?'LOCAL CLASSIFIER':'TYPESAFE MODEL RESULTS'));
       setText('#runId',run.id);setText('#runDate',run.createdAt);setText('#providerLabel',run.provider==='mock'?'MOCK PROVIDER':run.provider==='gliner'?'GLiNER · LOCAL CLASSIFIER':'TYPESAFE MODEL RESULTS');
       setText('#footerMeta',run.model+' · seed '+run.seed);
