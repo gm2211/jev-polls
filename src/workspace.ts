@@ -462,6 +462,9 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
     await execution?.catch(() => undefined);
     await localAgents.close();
     await chatgpt.close();
-    await new Promise<void>((resolveClose, reject) => server.close(error => error ? reject(error) : resolveClose()));
+    const closed = new Promise<void>((resolveClose, reject) => server.close(error => error ? reject(error) : resolveClose()));
+    // Keep-alive clients (agent polls) would otherwise keep a closing server answering on their socket.
+    server.closeAllConnections();
+    await closed;
   })() };
 }
