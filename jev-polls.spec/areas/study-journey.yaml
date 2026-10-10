@@ -69,7 +69,7 @@ behaviors:
       While steps are unfinished, the study header's primary action reads "Review run · N to fix"
       and opens the first unfinished step's panel on the tab that fixes it; with nothing left it
       opens the run review.
-    details: Proposal shown in the "Jev study flow" mockups (step 5); the run review itself is unchanged.
+    details: Proposal shown in the "Jev study flow" mockups (step 5); the run review page is described in review-run-page.
     source:
       text: the user flows aren't flowing at the moment
       reference: jev-polls project thread "Rethink the main user flow", Giulio, 2026-10-09
@@ -156,3 +156,16 @@ behaviors:
     source:
       text: actions and flow still unclear
       reference: jev-polls project chat, Giulio, 2026-10-10, with a screenshot of the 3-step game-name study canvas
+  - id: review-run-page
+    description: >-
+      Review run is one page with no tabs: a summary (steps, request bound, provider and model, the
+      model-estimates caveat), the steps in run order, then run settings. Each step reads like its
+      flow card: number, name and question, kind, when it starts, who answers, and its request count.
+    details: >-
+      Questions, inputs, outputs and context sit in one "What this step asks and reads" disclosure
+      per step, and a step's question text is not repeated there. Steps and conditions are named by
+      step number, matching the flow canvas. Desktop shows up to 8 steps per page, phones 4. The
+      header offers Edit study, Set up evaluation provider when needed, and Run study.
+    source:
+      text: also this ui is shit
+      reference: jev-polls project chat, Giulio, 2026-10-10, with a screenshot of the Review run page for the game-name study
