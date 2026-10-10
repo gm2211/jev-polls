@@ -118,7 +118,7 @@ test('TypeSafe hides response bodies and secrets on errors', async () => {
 test('TypeSafe rejects a malformed probability distribution', async () => {
   const fetch = async (): Promise<Response> => Response.json({
     model: 'jev-test',
-    answers: { choice: { type: 'choice', choice: 'alpha', confidence: 0.9, probabilities: { alpha: 0.9, beta: 0.1, gamma: 0.01 } }, likely: { type: 'noul', noul: 0.5 }, fit: { type: 'score', score: 1, confidence: 0.5, legend: { '0': 'Poor fit', '1': 'Mixed fit', '2': 'Strong fit' }, probabilities: { '0': 0, '1': 1, '2': 0 } } },
+    answers: { choice: { type: 'choice', choice: 'alpha', confidence: 0.9, probabilities: { alpha: 0.9, beta: 0.1, gamma: 0.2 } }, likely: { type: 'noul', noul: 0.5 }, fit: { type: 'score', score: 1, confidence: 0.5, legend: { '0': 'Poor fit', '1': 'Mixed fit', '2': 'Strong fit' }, probabilities: { '0': 0, '1': 1, '2': 0 } } },
     usage: { input_tokens: 1, output_tokens: 1 },
   });
   await assert.rejects(createProvider('typesafe', { apiKey: 'fake-test-key', fetch }).evaluate(request), (error: unknown) => {
@@ -140,6 +140,20 @@ test('TypeSafe accepts and renormalizes small rounding drift in a distribution',
   const total = Object.values(choice.probabilities).reduce((sum, value) => sum + value, 0);
   assert(Math.abs(total - 1) < 1e-12);
   assert(choice.probabilities.alpha! > choice.probabilities.beta!);
+});
+
+test('TypeSafe accepts two-decimal rounding across 14 options (sum 0.99) and renormalizes', async () => {
+  const keys = Array.from({ length: 14 }, (_, index) => `o${index}`);
+  const values = [0, 0, 0.05, 0.03, 0.01, 0, 0.2, 0.04, 0.03, 0.55, 0.06, 0.01, 0, 0.01];
+  const wide: EvaluationRequest = { ...request, questions: { pick: { type: 'choice', label: 'Pick', criteria: Object.fromEntries(keys.map((key) => [key, key])) } } as EvaluationRequest['questions'] };
+  const fetch = async (): Promise<Response> => Response.json({
+    model: 'jev-test',
+    answers: { pick: { type: 'choice', choice: 'o9', confidence: 0.5, probabilities: Object.fromEntries(keys.map((key, index) => [key, values[index]])) } },
+    usage: { input_tokens: 1, output_tokens: 1 },
+  });
+  const result = await createProvider('typesafe', { apiKey: 'fake-test-key', fetch }).evaluate(wide);
+  const pick = result.answers.pick as { probabilities: Record<string, number> };
+  assert(Math.abs(Object.values(pick.probabilities).reduce((sum, value) => sum + value, 0) - 1) < 1e-12);
 });
 
 test('mock choice distributions remain normalized at the 255-option schema limit', async () => {
