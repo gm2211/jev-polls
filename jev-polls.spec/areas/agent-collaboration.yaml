@@ -52,3 +52,24 @@ behaviors:
       reference: 2026-10-09 jev-polls project thread, Giulio
   - id: guide-covers-projects
     description: The agent guide's MCP workflow includes creating or selecting a project before saving cohorts or studies.
+  - id: repo-registered-server
+    description: >-
+      Claude Code sessions opened in the repository load the jev-polls MCP server from .mcp.json,
+      pointed at the fixed workspace URL http://127.0.0.1:4181/, with every tool pre-allowed except
+      run_study, which still asks.
+    source:
+      text: we need an mcp
+      reference: 2026-10-10 jev-polls project chat, Giulio
+  - id: agent-server-control
+    description: >-
+      The workspace_server tool reports whether the workspace is running and can start, stop,
+      restart, or update it (fast-forward pull, reinstall changed dependencies, restart) without
+      shell commands; stop, restart, and update are refused while a study is running, and update is
+      refused with uncommitted changes.
+    details: >-
+      Assumption: the recurring local permission prompts came from shell restarts, so server control
+      belongs in the MCP tools.
+  - id: agent-deletes
+    description: >-
+      delete_project, delete_cohort, and delete_study match the browser quick delete, are
+      revision-checked, and are refused while an affected study is running.

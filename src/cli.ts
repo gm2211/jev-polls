@@ -135,10 +135,10 @@ program.command('connect').argument('[pipeline]', 'Optional existing pipeline to
   .option('--directory <directory>', 'Saved workspace directory').option('--port <port>', 'Local workspace port', integer)
   .description('Connect TypeSafe and set up studies in the browser workspace').action(openWorkspace);
 
-program.command('mcp').option('--workspace-url <url>', 'Running loopback workspace URL', 'http://127.0.0.1:4180/')
+program.command('mcp').option('--workspace-url <url>', 'Running loopback workspace URL', 'http://127.0.0.1:4181/')
   .description('Connect an existing agent to this workspace over MCP stdio')
   .action(async opts => { const { startResearchMcpServer } = await import('./mcp.js'); await startResearchMcpServer(opts.workspaceUrl); });
-program.command('mcp-config').option('--workspace-url <url>', 'Running loopback workspace URL', 'http://127.0.0.1:4180/')
+program.command('mcp-config').option('--workspace-url <url>', 'Running loopback workspace URL', 'http://127.0.0.1:4181/')
   .description('Print credential-free Codex, Claude Code, and MCP client configuration')
   .action(opts => { output(agentConnectionConfig(opts.workspaceUrl)); });
 

@@ -58,7 +58,7 @@ test('MCP agent edits shared drafts and explicitly reviews/runs, without inferen
   t.after(() => workspace.close());
   const client = await connect(t, workspace.url);
   const tools = (await client.listTools()).tools;
-  assert.deepEqual(tools.map(tool => tool.name).sort(), ['get_guide', 'get_run', 'get_run_record', 'get_schema', 'get_workspace', 'review_study', 'run_study', 'save_cohort', 'save_pipeline', 'save_project']);
+  assert.deepEqual(tools.map(tool => tool.name).sort(), ['delete_cohort', 'delete_project', 'delete_study', 'get_guide', 'get_run', 'get_run_record', 'get_schema', 'get_workspace', 'review_study', 'run_study', 'save_cohort', 'save_pipeline', 'save_project', 'workspace_server']);
   assert.equal(tools.find(tool => tool.name === 'run_study')?.annotations?.openWorldHint, true);
   assert.ok(!tools.some(tool => /key|auth/.test(tool.name)));
   assert.match((await call<{ guide: string }>(client, 'get_guide')).guide, /question-independent/);
@@ -191,4 +191,28 @@ test('MCP preserves and updates multiple legacy pipelines inside their migrated 
   assert.deepEqual(saved.document.projects?.[0]?.pipelineIds, [pipeline.id, second.id]);
   assert.deepEqual(saved.document.pipelines[0], pipeline);
   assert.equal(saved.document.pipelines[1]!.name, 'Updated study');
+});
+
+test('MCP deletes mirror the browser quick delete and stay revision-checked', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'jev-mcp-delete-')); t.after(() => rm(directory, { recursive: true, force: true }));
+  const workspace = await startWorkspaceServer({ directory, getAuthStatus: async () => ({ configured: false, source: 'none' }) }); t.after(() => workspace.close());
+  const client = await connect(t, workspace.url);
+  await call(client, 'save_project', { project: { id: 'research', name: 'Research', description: '' }, expectedRevision: 0 });
+  await call(client, 'save_project', { project: { id: 'other', name: 'Other', description: '' }, expectedRevision: 1 });
+  await call(client, 'save_cohort', { cohort, expectedRevision: 2, projectId: 'research' });
+  await call(client, 'save_pipeline', { pipeline, expectedRevision: 3, projectId: 'research' });
+  await call(client, 'save_cohort', { cohort: { ...cohort, id: 'kept' }, expectedRevision: 4, projectId: 'other' });
+  assert.equal((await call<{ error: { code: string } }>(client, 'delete_cohort', { cohortId: 'customers', expectedRevision: 4 }, true)).error.code, 'WORKSPACE_CONFLICT');
+  assert.equal((await call<{ error: { code: string } }>(client, 'delete_study', { pipelineId: 'missing', expectedRevision: 5 }, true)).error.code, 'DRAFT_NOT_FOUND');
+  let saved = await call<WorkspaceSaved>(client, 'delete_cohort', { cohortId: 'customers', expectedRevision: 5 });
+  assert.deepEqual(saved.document.cohorts.map(c => c.id), ['kept']);
+  assert.deepEqual(saved.document.pipelines[0].cohorts, {});
+  assert.equal((saved.document.pipelines[0].stages[0] as { cohort: string }).cohort, '');
+  assert.deepEqual(saved.document.projects!.find(p => p.id === 'research')!.cohortIds, []);
+  saved = await call<WorkspaceSaved>(client, 'delete_study', { pipelineId: pipeline.id, expectedRevision: 6 });
+  assert.deepEqual(saved.document.pipelines, []); assert.deepEqual(saved.document.projects!.find(p => p.id === 'research')!.pipelineIds, []);
+  await call(client, 'save_pipeline', { pipeline, expectedRevision: 7, projectId: 'research' });
+  saved = await call<WorkspaceSaved>(client, 'delete_project', { projectId: 'research', expectedRevision: 8 });
+  assert.deepEqual(saved.document.projects!.map(p => p.id), ['other']);
+  assert.deepEqual(saved.document.pipelines, []); assert.deepEqual(saved.document.cohorts.map(c => c.id), ['kept']);
 });

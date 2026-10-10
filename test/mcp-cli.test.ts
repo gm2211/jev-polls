@@ -43,10 +43,10 @@ test('an agent connects through the CLI stdio protocol without triggering infere
 });
 
 test('agent configuration contains no secret and unsafe startup errors stay off stdout', () => {
-  const config = agentConnectionConfig('http://127.0.0.1:4180/');
+  const config = agentConnectionConfig('http://127.0.0.1:4181/');
   assert.equal(config.command, process.execPath);
   assert.ok(config.args[0]!.endsWith('/dist/cli.js'));
-  assert.deepEqual(config.args.slice(1), ['mcp', '--workspace-url', 'http://127.0.0.1:4180/']);
+  assert.deepEqual(config.args.slice(1), ['mcp', '--workspace-url', 'http://127.0.0.1:4181/']);
   assert.doesNotMatch(JSON.stringify(config), /TYPESAFE_API_KEY|Bearer|apiKey/);
   for (const url of ['https://example.com/', 'http://127.0.0.1:4180/path', 'http://user:fake-secret@127.0.0.1:4180/']) {
     assert.throws(() => agentConnectionConfig(url), /local workspace URL/);
