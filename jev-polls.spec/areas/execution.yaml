@@ -16,6 +16,10 @@ behaviors:
     description: >-
       Provider answers are validated (IDs, types, distributions summing to 1, consistent winners and
       means) before caching or aggregation; malformed answers fail the respondent.
+  - id: probability-rounding-tolerance
+    description: >-
+      A returned Choice or Score distribution within 0.001 of summing to 1 is accepted and
+      renormalized; larger errors still fail the respondent as invalid.
   - id: exact-response-cache
     description: >-
       Validated responses are cached by provider, endpoint, and exact request and revalidated on
