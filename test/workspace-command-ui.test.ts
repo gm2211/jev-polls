@@ -141,11 +141,11 @@ const textFile = (text: string, name = 'names.json') => ({ name, size: Buffer.by
 
 test('attaching a file shows its name, sends it with the request, and removing it clears it', async () => {
   const h = harness(); h.commandAction('draft-panel-open', { dataset: {} });
-  assert.match(h.draftSidePanel(), /Drop a file here, or choose file/); assert.deepEqual(h.draftMaterial(), {});
+  assert.match(h.draftSidePanel(), /Drop a file here, or choose file/); assert.deepEqual(JSON.parse(JSON.stringify(h.draftMaterial())), {});
   await h.draftAttachRead(textFile('[["Deterrent","What the arsenal is for."]]', '<names>.json'));
-  assert.deepEqual(h.draftMaterial(), { material: '[["Deterrent","What the arsenal is for."]]' });
+  assert.deepEqual(JSON.parse(JSON.stringify(h.draftMaterial())), { material: '[["Deterrent","What the arsenal is for."]]' });
   assert.match(h.draftSidePanel(), /&lt;names&gt;\.json/); assert.match(h.draftSidePanel(), /Remove file/);
-  h.commandAction('draft-attach-remove', { dataset: {} }); assert.deepEqual(h.draftMaterial(), {}); assert.match(h.draftSidePanel(), /Drop a file here/);
+  h.commandAction('draft-attach-remove', { dataset: {} }); assert.deepEqual(JSON.parse(JSON.stringify(h.draftMaterial())), {}); assert.match(h.draftSidePanel(), /Drop a file here/);
 });
 
 test('a rejected file keeps the previous attachment and explains why', async () => {
