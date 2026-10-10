@@ -1035,7 +1035,9 @@ test('confirming a project rename saves it so a reload keeps the new name', asyn
   const browser = browserHarness(); await settle();
   const { S, render } = browser.client;
   S.tab = 'project-settings'; render();
-  assert.match(browser.element('app').innerHTML, /type="submit" title="Save project details" aria-label="Save project details"/);
+  // The header Save is the only commit control; the form has no second button for the same job.
+  assert.match(browser.element('app').innerHTML, /data-act="save"/);
+  assert.doesNotMatch(browser.element('app').innerHTML, /Save project details|type="submit"/);
   const form: any = { dataset: { form: 'project-settings' }, reportValidity: () => true, values: { name: 'Naming', description: '' } };
   form.requestSubmit = () => browser.listeners.get('submit')!({ target: { closest: () => form }, preventDefault() {} });
   browser.element('app').querySelectorAll = (selector: string) => selector === '[data-form]' ? [form] : [];
@@ -1394,8 +1396,14 @@ test('cohort generation is entered explicitly and its return action restores the
   assert.doesNotMatch(cohorts(), /cohort-generator/);
   act(null, { dataset: { act: 'new-cohort' } });
   assert.match(browser.element('app').innerHTML, /cohort-generator/);
-  assert.doesNotMatch(browser.element('app').innerHTML, /role="tablist"/);
-  assert.match(browser.element('app').innerHTML, /Back to cohorts/);
+  assert.doesNotMatch(browser.element('app').innerHTML, /role="tablist"|section-tabs|Back to cohorts/);
+  // The Cohorts crumb is the way back; Create manually sits beside Generate; the empty-prompt notice waits for an attempt.
+  assert.match(browser.element('app').innerHTML, /data-act="back-cohorts">Cohorts</);
+  assert.match(browser.element('app').innerHTML, /data-act="cohort-generate"[^>]*>Generate cohort<\/button><button class="button" type="button" data-act="manual-cohort">Create manually</);
+  assert.match(browser.element('app').innerHTML, /id="cohortReadiness" class="warning" role="status" hidden><\/p>/);
+  act(null, { dataset: { act: 'cohort-generate' } });
+  assert.equal(S.cohortAttempted, true);
+  assert.equal(browser.element('cohortReadiness').textContent, 'Describe who should be in this cohort.');
   act(null, { dataset: { act: 'cohort-generator-close' } });
   assert.match(browser.element('app').innerHTML, /<nav class="app-sidebar" aria-label="Project">/);
   assert.doesNotMatch(browser.element('app').innerHTML, /cohort-generator/);
@@ -1410,7 +1418,8 @@ test('cohort generation is entered explicitly and its return action restores the
   S.doc.cohorts[0].description = 'Unsaved cohort detail'; S.dirty = true;
   act(null, { dataset: { act: 'cohort-section', section: 'definition' } });
   act(null, { dataset: { act: 'generate-personas' } });
-  assert.match(browser.element('app').innerHTML, /Back to cohort/);
+  assert.match(browser.element('app').innerHTML, /data-act="breadcrumb-cohort"/);
+  assert.doesNotMatch(browser.element('app').innerHTML, /Back to cohort/);
   act(null, { dataset: { act: 'cohort-generator-close' } });
   assert.match(browser.element('app').innerHTML, /Unsaved cohort detail/);
   assert.equal(S.dirty, true);

@@ -47,7 +47,7 @@ function sectionTabs(key,options,selected){
 }
 function sectionPanels(key,options){
   const active=options.some(o=>o.id===S.sections[key])?S.sections[key]:options[0]?.id;
-  return sectionTabs(key,options,active)+options.map(o=>'<div class="section-panel" data-section-panel data-section-key="'+attr(key)+'" data-section-id="'+attr(o.id)+'" '+(active===o.id?'':'hidden')+'>'+o.html+'</div>').join('');
+  return (options.length>1?sectionTabs(key,options,active):'')+options.map(o=>'<div class="section-panel" data-section-panel data-section-key="'+attr(key)+'" data-section-id="'+attr(o.id)+'" '+(active===o.id?'':'hidden')+'>'+o.html+'</div>').join('');
 }
 function revealSectionField(field){
   let panel=field.closest?.('[data-section-panel]');
