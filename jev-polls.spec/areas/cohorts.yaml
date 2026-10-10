@@ -45,6 +45,18 @@ behaviors:
     description: >-
       Users can create a cohort manually and add, edit, or remove personas, segments, and sources
       without the drafting assistant.
+  - id: persona-page
+    description: >-
+      A persona is one page: profile fields, background, attributes and evidence are edited in
+      place in a main column, weight and Remove persona sit beside them, and Regenerate is a
+      header button that opens the replacement panel above the page.
+    details: >-
+      Replaced on 2026-10-10 a five-tab layout (Background, Attributes, Weight & sources, Edit with
+      three sub-tabs, Regenerate) that split six fields across tabs and hid the edit form behind a
+      second tab row. Previous and Next step through the cohort from the header.
+    source:
+      text: Persona page: five tabs for six fields (UI audit, item 9)
+      reference: jev-polls project thread "UI audit in a headless browser", 2026-10-10
   - id: persona-browsing
     description: >-
       Persona lists paginate with stable page membership, can be grouped by attribute, and stay
