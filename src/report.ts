@@ -146,6 +146,7 @@ export function renderReport(run: RunRecord, options: { workspace?: boolean } = 
       const stage=selectedStage();const questions=stage?.kind==='poll'?stage.questions:stage?.kind==='aggregate'?{[stage.outputQuestion]:{label:stage.outputQuestion}}:stage?.kind==='decision'?{[stage.outputQuestion]:{label:stage.outputQuestion}}:{};
       host.append(title);
       if(!result||result.status!=='completed'){const empty=el('div','empty');appendReason(empty,result?.reason??'This stage has no completed result.',result?.status);host.append(empty);return;}
+      if(result.batching)host.append(el('p','notice batching-note',result.batching.note+' ('+result.batching.batches+' batches'+(result.layers?.length?'; earlier layers are kept in the run record':'')+').'));
       const grid=el('div','summary-grid');let count=0;
       Object.entries(questions).forEach(([qid,q])=>{
         const full=result.summaries[qid];if(!full)return;const summary=summaryForSegment(full);if(!summary)return;count++;

@@ -13,7 +13,9 @@ export type Question = ChoiceQuestion | NoulQuestion | ScoreQuestion;
 export type Condition = { all: Condition[] } | { any: Condition[] } | { not: Condition } | { stage: string; question: string; metric: 'margin' | 'topProbability' | 'mean' | 'winner'; op: 'gt' | 'gte' | 'lt' | 'lte' | 'eq' | 'ne'; value: number | string };
 export interface BaseStage { id: string; label: string; dependsOn: string[]; join?: 'all' | 'any'; when?: Condition }
 export type PollInputSelect = 'summary' | 'winner' | 'mean' | 'probabilities' | 'responses';
-export interface PollInputBinding { stage: string; question: string; select?: PollInputSelect }
+/** How an oversized `responses` input is split: `auto` fits every Jev request, `{ size }` is a fixed number of responses per batch. */
+export type PollInputBatch = 'auto' | { size: number };
+export interface PollInputBinding { stage: string; question: string; select?: PollInputSelect; /** Only with select 'responses': read the responses in batches, then combine the verdicts (map-reduce). */ batch?: PollInputBatch }
 export interface PollStage extends BaseStage { kind: 'poll'; cohort: string; questions: Record<string, Question>; size?: number; repeats?: number; context?: Json; inputs?: Record<string, PollInputBinding> }
 export interface AggregateStage extends BaseStage { kind: 'aggregate'; inputs: { stage: string; question: string; weight: number }[]; outputQuestion: string }
 export interface DecisionStage extends BaseStage { kind: 'decision'; from: { stage: string; question: string }; outputQuestion: string }
@@ -29,10 +31,13 @@ export interface Usage { inputTokens: number; outputTokens: number; requests: nu
 export interface EvaluationRequest { model: string; state: Json; questions: Record<string, Question>; seed: string }
 export interface Evaluation { answers: Record<string, Answer>; model: string; usage: { inputTokens: number; outputTokens: number; tokenUsage?: 'unreported'; measuredInputTokens?: number } }
 export interface Provider { name: 'typesafe' | 'mock' | 'gliner'; cacheIdentity?: string; evaluate(request: EvaluationRequest): Promise<Evaluation>; close?(): Promise<void> }
-export interface Vote { personaId: string; cohortId?: string; segment: string; repeat: number; weight: number; answers: Record<string, Answer>; cacheHit: boolean; model: string }
+export interface Vote { personaId: string; cohortId?: string; segment: string; repeat: number; weight: number; answers: Record<string, Answer>; cacheHit: boolean; model: string; /** Intermediate batching votes only: the batch (map) or group (reduce) this vote covers, from 1. */ batch?: number }
 export interface SummaryBase { type: Question['type']; label: string; probabilities?: Record<string, number>; mean?: number; winner?: string; margin?: number; topProbability?: number; meanConfidence?: number; respondentCount: number; totalWeight: number }
 export interface QuestionSummary extends SummaryBase { bySegment: Record<string, SummaryBase>; byRepeat: Record<string, SummaryBase> }
-export interface StageResult { id: string; kind: Stage['kind']; label: string; status: 'completed' | 'skipped' | 'failed'; reason?: string; dependsOn: string[]; votes: Vote[]; summaries: Record<string, QuestionSummary>; startedAt: string; finishedAt: string }
+/** One layer of a batched step: the map layer reads response batches; each reduce layer combines the persona's own earlier verdicts. */
+export interface StageLayer { kind: 'map' | 'reduce'; /** 0 for map, 1.. for reduce rounds. */ round: number; /** Requests per persona and repeat in this layer. */ requests: number; votes: Vote[] }
+export interface StageBatching { input: string; sourceStage: string; sourceLabel: string; totalResponses: number; batchSize: number; batches: number; groupSize: number; reduceRounds: number; note: string }
+export interface StageResult { id: string; kind: Stage['kind']; label: string; status: 'completed' | 'skipped' | 'failed'; reason?: string; dependsOn: string[]; votes: Vote[]; summaries: Record<string, QuestionSummary>; /** Present when an input was read in batches; `votes` are the final layer. */ batching?: StageBatching; layers?: StageLayer[]; startedAt: string; finishedAt: string }
 export interface RunRecord { version: 1; id: string; createdAt: string; finishedAt: string; pipeline: Pipeline; pipelineHash: string; provider: Provider['name']; model: string; seed: string; status: 'completed' | 'failed'; cohorts: Record<string, Cohort>; stages: Record<string, StageResult>; warnings: string[]; usage: Usage }
 export interface RunMemberProgress { stage: string; personaId: string; label: string; segment: string; age: number; repeat: number; status: 'queued' | 'running' | 'completed' | 'failed'; answers?: Record<string, Answer>; model?: string; cacheHit?: boolean; reason?: string }
 export interface RunStageProgress { stage: string; status: 'running' | 'completed' | 'failed' | 'skipped'; reason?: string }

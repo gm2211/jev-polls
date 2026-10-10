@@ -27,7 +27,8 @@ const conditionSchema: z.ZodType<Condition> = z.lazy(() => z.union([
   z.object({ stage: id, question: id, metric: z.enum(['margin', 'topProbability', 'mean', 'winner']), op: z.enum(['gt', 'gte', 'lt', 'lte', 'eq', 'ne']), value: z.union([z.number().finite(), text]) }).strict(),
 ]));
 const base = { id, label: text, dependsOn: z.array(id), join: z.enum(['all', 'any']).optional(), when: conditionSchema.optional() };
-const pollInputBinding = z.object({ stage: id, question: id, select: z.enum(['summary', 'winner', 'mean', 'probabilities', 'responses']).optional() }).strict();
+const batchSetting = z.union([z.literal('auto'), z.object({ size: z.number().int().min(1).max(100_000) }).strict()]);
+const pollInputBinding = z.object({ stage: id, question: id, select: z.enum(['summary', 'winner', 'mean', 'probabilities', 'responses']).optional(), batch: batchSetting.optional() }).strict();
 export const pipelineSchema = z.object({ version: z.literal(1), id, name: text, description: text, context: z.json(), cohorts: z.record(id, text), stages: z.array(z.discriminatedUnion('kind', [
   z.object({ ...base, kind: z.literal('poll'), cohort: id, questions: z.record(id, questionSchema).refine(v => Object.keys(v).length > 0, 'At least one question is required'), size: z.number().int().positive().optional(), repeats: z.number().int().min(1).max(100).optional(), context: z.json().optional(), inputs: z.record(id, pollInputBinding).optional() }).strict(),
   z.object({ ...base, kind: z.literal('aggregate'), inputs: z.array(z.object({ stage: id, question: id, weight: positive }).strict()).min(1), outputQuestion: id }).strict(),
@@ -116,7 +117,9 @@ export function parsePipeline(input: unknown): Pipeline {
         const q = outputs[binding.stage]?.[binding.question];
         assert(q, `Stage ${s.id}: unknown input question ${binding.stage}.${binding.question}`);
         assert(inputSelectCompatible(binding.select ?? 'summary', q), `Stage ${s.id}: input selector '${binding.select}' is incompatible with ${q.type} question ${binding.stage}.${binding.question}`);
+        assert(binding.batch === undefined || binding.select === 'responses', `Stage ${s.id}: input ${alias} can be split into batches only when it reads individual responses (select 'responses')`);
       }
+      assert(Object.values(s.inputs).filter(binding => binding.batch !== undefined).length <= 1, `Stage ${s.id}: only one input can be split into batches`);
     }
   }
   return p;
