@@ -129,6 +129,19 @@ test('TypeSafe rejects a malformed probability distribution', async () => {
   });
 });
 
+test('TypeSafe accepts and renormalizes small rounding drift in a distribution', async () => {
+  const fetch = async (): Promise<Response> => Response.json({
+    model: 'jev-test',
+    answers: { choice: { type: 'choice', choice: 'alpha', confidence: 0.9, probabilities: { alpha: 0.6004, beta: 0.3, gamma: 0.1 } }, likely: { type: 'noul', noul: 0.5 }, fit: { type: 'score', score: 1, confidence: 0.5, legend: { '0': 'Poor fit', '1': 'Mixed fit', '2': 'Strong fit' }, probabilities: { '0': 0, '1': 1, '2': 0 } } },
+    usage: { input_tokens: 1, output_tokens: 1 },
+  });
+  const result = await createProvider('typesafe', { apiKey: 'fake-test-key', fetch }).evaluate(request);
+  const choice = result.answers.choice as { probabilities: Record<string, number> };
+  const total = Object.values(choice.probabilities).reduce((sum, value) => sum + value, 0);
+  assert(Math.abs(total - 1) < 1e-12);
+  assert(choice.probabilities.alpha! > choice.probabilities.beta!);
+});
+
 test('mock choice distributions remain normalized at the 255-option schema limit', async () => {
   const criteria = Object.fromEntries(Array.from({ length: 255 }, (_, index) => [`option-${index}`, `Option ${index}`]));
   const broadRequest: EvaluationRequest = {

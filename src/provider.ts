@@ -71,6 +71,9 @@ export class ProviderError extends Error {
   }
 }
 
+/** Allowed drift from 1 in a returned distribution before it is treated as invalid. */
+export const PROBABILITY_SUM_TOLERANCE = 1e-3;
+
 function stableJson(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'undefined';
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
@@ -136,7 +139,9 @@ function validateAnswer(question: Question, value: unknown, id: string): Answer 
     assertProbability(probabilities[key], `${id}.${key}`);
     sum += probabilities[key];
   }
-  if (Math.abs(sum - 1) > 1e-5) throw invalidResponse('probability_total', `TypeSafe returned an unnormalized probability distribution for ${id}.`);
+  // Hosted Jev rounds each probability, so long option lists can drift slightly from 1; renormalize small drift, reject real errors.
+  if (Math.abs(sum - 1) > PROBABILITY_SUM_TOLERANCE) throw invalidResponse('probability_total', `TypeSafe returned an unnormalized probability distribution for ${id}.`);
+  if (Math.abs(sum - 1) > 1e-9) for (const key of expected) probabilities[key] = (probabilities[key] as number) / sum;
   assertProbability(answer.confidence, `${id}.confidence`);
 
   if (question.type === 'choice') {
