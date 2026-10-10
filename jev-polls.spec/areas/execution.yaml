@@ -20,7 +20,8 @@ behaviors:
     description: >-
       Jev reports probabilities rounded to two decimals, so a returned Choice or Score distribution
       within that rounding (0.005 per option, at least 0.001) of summing to 1 is accepted and
-      renormalized; larger errors still fail the respondent as invalid.
+      renormalized, and the chosen option may trail the top probability by one rounding step; larger
+      errors still fail the respondent as invalid.
   - id: exact-response-cache
     description: >-
       Validated responses are cached by provider, endpoint, and exact request and revalidated on
