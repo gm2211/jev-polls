@@ -58,7 +58,7 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={recoverDraftingJob,recoverableDraftingJob,loadLocalAgents,cohortJobNotice,cohortJobNoticeVisible,commandState,adoptCohortProposal,commandEntries,commandExecute,inlineCohortJobVisible,inlineCohortTarget,setupCohortPicker,runCaveats,beginRun,commandApplyProposal,commandJobVisible,S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,locationHash,restoreLocation,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,studies,review,say,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,studyQuestionList,validateSetupAnswers,questionParts,upsertQuestion,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={plural,recoverDraftingJob,recoverableDraftingJob,loadLocalAgents,cohortJobNotice,cohortJobNoticeVisible,commandState,adoptCohortProposal,commandEntries,commandExecute,inlineCohortJobVisible,inlineCohortTarget,setupCohortPicker,runCaveats,beginRun,commandApplyProposal,commandJobVisible,S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,locationHash,restoreLocation,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,studies,review,say,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,studyQuestionList,validateSetupAnswers,questionParts,upsertQuestion,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
   if (openExistingProject) (context as any).clientTest.S.projectId = 'existing-research';
@@ -1656,7 +1656,8 @@ test('project detail submission saves metadata and pipeline creation assigns own
   act(null, { dataset: { act: 'study-title-cancel' } });
   assert.doesNotMatch(browser.element('app').innerHTML, /data-form="study-title"/);
   act(null, { dataset: { act: 'back-studies' } });
-  assert.match(browser.element('app').innerHTML, /class="create-row study-create-row" data-act="create-study"/);
+  assert.equal((browser.element('app').innerHTML.match(/data-act="create-study"/g) || []).length, 1, 'a study list offers a single New study button');
+  assert.match(browser.element('app').innerHTML, /class="button primary" data-act="create-study"/);
   act(null, { dataset: { act: 'create-study' } });
   assert.equal(S.doc.pipelines.length, 2, 'a project holds several studies');
   assert.equal(S.doc.pipelines[1].name, 'Study 2');
@@ -2815,12 +2816,12 @@ test('replay scrub preserves bounds and selecting a member pauses playback', asy
   const browser=browserHarness();await settle();const {S,act,render}=browser.client;
   S.tab='runs';S.liveRunId='replay';S.snap.runs=[{id:'replay',projectId:S.projectId,pipelineName:'Replay',status:'completed',liveMembers:[{stage:'poll',personaId:'p',label:'Profile',age:30,segment:'general',repeat:1,status:'completed',answers:{a:{type:'noul',noul:.4}}}]}];render();
   act(null,{dataset:{act:'arena-replay'}});act(null,{dataset:{act:'arena-scrub'},value:'999'});
-  assert.match(browser.element('app').innerHTML,/1 of 1 members revealed/);
+  assert.match(browser.element('app').innerHTML,/1 of 1 member revealed/);
   act(null,{dataset:{act:'arena-scrub'},value:'-9'});
-  assert.match(browser.element('app').innerHTML,/0 of 1 members revealed/);
+  assert.match(browser.element('app').innerHTML,/0 of 1 member revealed/);
   act(null,{dataset:{act:'arena-play'}});const tick=browser.timeouts.at(-1)!;
   act(null,{dataset:{act:'live-member',stage:'poll',key:'poll:p:1',page:'0'}});tick();
-  assert.match(browser.element('app').innerHTML,/0 of 1 members revealed/);
+  assert.match(browser.element('app').innerHTML,/0 of 1 member revealed/);
   assert.doesNotMatch(browser.element('app').innerHTML,/Yes · 40%/);
 });
 
@@ -3120,4 +3121,60 @@ test('a remembered job that another tab applied or discarded is dropped instead 
   await loadLocalAgents();
   assert.equal(S.localJob, null);
   assert.equal(browser.storage.has('jev-local-job:http://127.0.0.1:4180:existing-research'), false);
+});
+
+test('proposal summary counts only the selected project', async () => {
+  const browser = browserHarness();
+  await settle();
+  const { S, proposalReview } = browser.client;
+  const mine = { cohorts: S.doc.cohorts.length, pipelines: S.doc.pipelines.length };
+  S.doc.cohorts.push({ ...structuredClone(S.doc.cohorts[0]), id: 'other-pool' });
+  S.doc.pipelines.push({ ...structuredClone(S.doc.pipelines[0]), id: 'other-study' });
+  S.doc.projects.push({ ...structuredClone(S.doc.projects[0]), id: 'other-project', name: 'Other', cohortIds: ['other-pool'], pipelineIds: ['other-study'] });
+  const proposed = JSON.parse(JSON.stringify(S.doc));
+  const extra = { ...structuredClone(proposed.pipelines[0]), id: 'extra-study' };
+  proposed.pipelines.push(extra); proposed.projects[0].pipelineIds.push('extra-study');
+  const html = proposalReview({ status: 'completed', revision: S.revision, proposal: { document: proposed, explanation: 'Add one study.' } });
+  assert.match(html, new RegExp(`<dt>Cohorts</dt><dd>${mine.cohorts} → ${mine.cohorts}`));
+  assert.match(html, new RegExp(`<dt>Studies</dt><dd>${mine.pipelines} → ${mine.pipelines + 1}</dd>`));
+});
+
+test('count labels use the singular for one persona, member and step', async () => {
+  const browser = browserHarness();
+  await settle();
+  const { S, stageMap, plural } = browser.client;
+  const pipeline = S.doc.pipelines[0], pool = S.doc.cohorts.find((c: any) => c.id === pipeline.cohorts[pipeline.stages.find((s: any) => s.kind === 'poll').cohort]);
+  pool.personas = pool.personas.slice(0, 1); S.pipelineId = pipeline.id;
+  for (const s of pipeline.stages) if (s.kind === 'poll') s.size = 1;
+  pipeline.stages = pipeline.stages.slice(0, 1);
+  const html = stageMap(pipeline);
+  assert.match(html, /<span>1 persona<\/span>/); assert.doesNotMatch(html, /1 personas|1 members|1 steps/);
+  assert.match(html, /\(1 member\)/);
+  assert.equal(plural(1, 'member'), '1 member'); assert.equal(plural(2, 'member'), '2 members');
+});
+
+test('empty cohorts copy credits the drafting AI, not Jev, with drafting personas', async () => {
+  const browser = browserHarness();
+  await settle();
+  const { S, cohorts, studies } = browser.client;
+  S.doc.projects[0].cohortIds = []; S.tab = 'cohorts'; S.cohortId = null; S.cohortComposer = false;
+  const html = cohorts();
+  assert.match(html, /Your drafting AI drafts its segments and personas/); assert.doesNotMatch(html, /Jev drafts/);
+  S.tab = 'studies'; S.pipelineId = null;
+  assert.equal((studies().match(/data-act="create-study"/g) || []).length, 1, 'one New study button when studies exist');
+});
+
+test('array attributes are charted per value and the note says so', async () => {
+  const browser = browserHarness();
+  await settle();
+  const { S, cohortDistributions } = browser.client;
+  const pool = S.doc.cohorts[0];
+  pool.personas.push({ ...structuredClone(pool.personas[0]), id: 'second-person' });
+  pool.personas.forEach((p: any, i: number) => { p.attributes = { ...(p.attributes || {}), favoriteFranchises: i % 2 ? ['Doom', 'StarCraft'] : ['Doom'] }; });
+  S.distributionField = 'attributes.favoriteFranchises'; S.distributionWeighted = false;
+  const html = cohortDistributions(pool);
+  assert.match(html, /distribution-label">Doom</); assert.match(html, /distribution-label">StarCraft</);
+  assert.doesNotMatch(html, /\[&quot;Doom/);
+  assert.match(html, /each value is charted separately as the share of personas that include it/);
+  assert.match(html, /\d+ missing values/);
 });

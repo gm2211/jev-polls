@@ -33,10 +33,23 @@ behaviors:
       The Build with words panel accepts one TXT, Markdown, CSV or JSON file up to 256 KiB, shows
       its name with a remove button, and sends it as untrusted source material; a list of names
       with descriptions becomes the options of every question that compares them.
+  - id: draft-attach-recovered-name
+    description: >-
+      A drafting job keeps the name (never the content) of the file it was sent with; when the
+      panel reopens a recovered job, it shows "Sent with this request: name" read-only until a new
+      file is attached.
+    source:
+      text: After job recovery the attached material file chip is gone even though the job used it.
+      reference: jev-polls demo recording, 2026-10-10
   - id: proposal-explanation-formatting
     description: >-
-      A proposal's explanation renders paragraphs, bullets, bold and inline code with all provider
-      text escaped; its summary is labeled (Cohorts, Studies, Steps) and counts are pluralized.
+      A proposal's explanation renders paragraphs, bullets, ordered lists (on separate lines or
+      inline after a colon), bold (including bold around inline code) and inline code with all
+      provider text escaped; its summary is labeled (Cohorts, Studies, Steps), counts are
+      pluralized, and they count only the selected project.
+    source:
+      text: Bold with inline code rendered as literal asterisks, numbered lists were not lists, and Studies 2 to 2 counted other projects.
+      reference: jev-polls demo recording, 2026-10-10
   - id: draft-study-name-and-sample
     description: >-
       Drafts name a study with a short question of at most 80 characters, and no poll's sample
