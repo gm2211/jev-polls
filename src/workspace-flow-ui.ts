@@ -62,7 +62,7 @@ function flowSampleNotice(p,s){
 }
 function flowReadiness(p,s){
   if(s.kind==='poll'){
-    if(!Object.values(s.questions||{}).length||Object.values(s.questions).some(q=>!q.label.trim()||q.label==='What should this phase decide?'))return 'Needs question';
+    if(!Object.values(s.questions||{}).length||Object.values(s.questions).some(q=>!q.label.trim()||(/^What should this (?:step|phase) decide\?$/).test(q.label)))return 'Needs question';
     if(!poolForPhase(p,s)?.personas.length)return 'Needs cohort';
     if(Object.values(s.questions).some(q=>q.type==='choice'?Object.keys(q.criteria).length<2||Object.entries(q.criteria).some(([key,value])=>!String(optionName(key,value)).trim()):q.type==='score'?q.criteria.length<2||q.criteria.some(value=>!value.trim()):false))return 'Needs options';
     if(flowSampleShort(p,s))return 'Needs more personas';
@@ -81,7 +81,7 @@ function flowPlural(n,word){return Number(n).toLocaleString('en-US')+' '+word+(N
 function flowNodeTitle(p,s){
   const question=Object.values(s.questions||{})[0]?.label?.trim(),custom=s.label?.trim();
   if(s.kind!=='poll')return {title:custom||(s.kind==='aggregate'?'Combine answers':'Final result'),sub:s.kind==='aggregate'?'Weights the connected answers together':'Picks the leading option'};
-  const asked=question&&question!=='What should this phase decide?'?question:'',more=Object.keys(s.questions||{}).length-1,named=custom&&!['First question','Next question','New question'].includes(custom)&&custom!==asked;
+  const asked=question&&!/^What should this (?:step|phase) decide\?$/.test(question)?question:'',more=Object.keys(s.questions||{}).length-1,named=custom&&!['First question','Next question','New question'].includes(custom)&&custom!==asked;
   return named?{title:custom,sub:asked?asked+(more>0?' (+'+more+' more)':''):'Add the question'}:{title:asked||'Untitled question',sub:more>0?'+'+more+' more '+(more===1?'question':'questions'):''};
 }
 function flowOutputUsed(p,s,q){return p.stages.some(x=>x.id!==s.id&&flowInputs(p,x).some(([,input])=>input.stage===s.id&&(!input.question||input.question===q.id)))}
@@ -128,10 +128,10 @@ function flowConnections(p,s){
 }
 function flowCohortMap(p,s){
   const c=poolForPhase(p,s);if(inlineCohortTarget(p,s))return setupCohortPicker(p,s);
-  if(!c||S.flowCohortPick)return (c?'<button class="button small" data-act="flow-cohort-change">Back to member map</button>':'')+setupCohortPicker(p,s);
+  if(!c||S.flowCohortPick)return (c?'<button class="button small" data-act="flow-cohort-change">Back to cohort</button>':'')+setupCohortPicker(p,s);
   const key='flow:'+p.id+':'+s.id+':'+c.id,person=hostMapMember(c,key),index=person?c.personas.findIndex(item=>item.id===person.id):-1;
-  if(person)return '<section class="flow-member-focus"><div class="flow-member-navigation"><button class="button small" data-act="host-member-close" data-map="'+attr(key)+'">'+icon('left')+' Cohort map</button><div class="row"><button class="button small icon-button" data-act="host-member" data-map="'+attr(key)+'" data-id="'+attr(c.personas[index-1]?.id||'')+'" '+(index===0?'disabled':'')+' aria-label="Previous member">'+icon('left')+'</button><span>'+(index+1)+' / '+c.personas.length+'</span><button class="button small icon-button" data-act="host-member" data-map="'+attr(key)+'" data-id="'+attr(c.personas[index+1]?.id||'')+'" '+(index===c.personas.length-1?'disabled':'')+' aria-label="Next member">'+icon('right')+'</button></div></div>'+hostMapDetails(c,person)+'</section>';
-  return '<div class="flow-cohort-summary"><strong>'+esc(c.name)+'</strong><div class="row"><button class="button small" data-act="phase-pool" data-id="'+attr(c.id)+'">Open full cohort</button><button class="button small" data-act="flow-cohort-change">Change cohort</button></div></div><section class="flow-cohort-map"><h3>Cohort host map</h3>'+hostMap(c,{key,limit:24})+'<p class="subtle">Hover for a quick look. Select a member to inspect their synthetic profile.</p></section>';
+  if(person)return '<section class="flow-member-focus"><div class="flow-member-navigation"><button class="button small" data-act="host-member-close" data-map="'+attr(key)+'">'+icon('left')+' Cohort</button><div class="row"><button class="button small icon-button" data-act="host-member" data-map="'+attr(key)+'" data-id="'+attr(c.personas[index-1]?.id||'')+'" '+(index===0?'disabled':'')+' aria-label="Previous member">'+icon('left')+'</button><span>'+(index+1)+' / '+c.personas.length+'</span><button class="button small icon-button" data-act="host-member" data-map="'+attr(key)+'" data-id="'+attr(c.personas[index+1]?.id||'')+'" '+(index===c.personas.length-1?'disabled':'')+' aria-label="Next member">'+icon('right')+'</button></div></div>'+hostMapDetails(c,person)+'</section>';
+  return '<div class="flow-cohort-summary"><strong>'+esc(c.name)+'</strong><div class="row"><button class="button small" data-act="phase-pool" data-id="'+attr(c.id)+'">Open full cohort</button><button class="button small" data-act="flow-cohort-change">Change cohort</button></div></div><section class="flow-cohort-map"><h3>Who answers</h3>'+hostMap(c,{key,limit:24})+'<p class="subtle">Hover for a quick look. Select a member to inspect their synthetic profile.</p></section>';
 }
 /** Steps that still block a run review, in canvas order, with the panel tab that fixes each. */
 function flowTodo(p){

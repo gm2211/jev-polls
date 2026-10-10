@@ -174,7 +174,7 @@ function studies(){
   const liveRun=p&&liveStudyRun();if(liveRun)return liveStudyPage(p,liveRun);
   if(!p){
     const listing=projectPipelines().length>0;
-    const content=listing?studyList():emptyCreate('create-study','New study','Click anywhere here to start. You name it with the question it should answer, then add rounds on its track.');
+    const content=listing?studyList():emptyCreate('create-study','New study','Click anywhere here to start. You name it with the question it should answer, then add the steps it needs.');
     return header('Studies',esc(project()?.description?.trim()||'Each study asks one or more cohorts a chain of questions.'),(S.dirty?saveButton():'')+(listing?'<button class="button primary" data-act="create-study">'+icon('plus')+'New study</button>':''))+tabs()+'<section id="view-studies" role="tabpanel" aria-labelledby="tab-studies">'+content+'</section>';
   }
   const s=selectedStage(),mode=S.sections.pipeline||'flow';const edit=mode==='phase'&&S.sections['question-list-'+p.id]?studyQuestionList(p):s?stageForm(p,s):empty('Add your first question','Choose who answers, then define their answer options.','<button class="button primary" data-act="add-stage" data-kind="poll">Add first question</button>');

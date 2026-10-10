@@ -3120,7 +3120,7 @@ test('a new tab reattaches to a running cohort generation and offers it on the C
   assert.match(cohortJobNotice(), /Review cohort/);
 });
 
-test('recovery prefers a running job, skips option, persona and command jobs, and opens the Build with words panel for study drafts', async () => {
+test('recovery prefers a running job, skips option, persona and command jobs, and opens the Draft with assistant panel for study drafts', async () => {
   const browser = browserHarness(); await settle();
   const { S, recoverDraftingJob, recoverableDraftingJob, commandState } = browser.client;
   const base = { engine: 'codex', revision: 1, message: '', projectId: 'existing-research' };
@@ -3247,7 +3247,7 @@ test('a new project lands on an empty study canvas with two entry points and no 
   assert.doesNotMatch(html(), /data-act="review"|Review run/, 'nothing to review on an empty canvas');
   assert.doesNotMatch(html(), /data-act="new-cohort"/, 'no cohort setup is needed first');
   act(null, { dataset: { act: 'draft-panel-open' } });
-  assert.match(html(), /Build with words/, 'the words target opens the Build with words panel');
+  assert.match(html(), /Draft with assistant/, 'the words target opens the drafting panel');
   assert.equal(S.doc.pipelines.length, browser.client.S.doc.pipelines.length);
 });
 

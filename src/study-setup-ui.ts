@@ -10,7 +10,7 @@ function optionDescription(value){return value&&typeof value==='object'?value.de
 function stepTitle(p,s){
   const questions=Object.values(s.questions||{}),question=questions[0]?.label?.trim();
   const custom=s.label?.trim(),prefix=s.kind==='poll'&&custom&&!['First question','Next question','New question'].includes(custom)&&custom!==question?custom+': ':'';
-  const title=s.kind==='poll'?prefix+(question&&question!=='What should this phase decide?'?question:'Untitled question')+(questions.length>1?' + '+(questions.length-1)+' more':''):(s.label?.trim()||(s.kind==='aggregate'?'Combine answers':'Final result'));
+  const title=s.kind==='poll'?prefix+(question&&!/^What should this (?:step|phase) decide\?$/.test(question)?question:'Untitled question')+(questions.length>1?' + '+(questions.length-1)+' more':''):(s.label?.trim()||(s.kind==='aggregate'?'Combine answers':'Final result'));
   return (p.stages.findIndex(x=>x.id===s.id)+1)+'. '+title.replace(/\s+/g,' ');
 }
 function inputTitle(p,input){
@@ -18,7 +18,7 @@ function inputTitle(p,input){
   const question=source.questions?.[input.question];
   return stepTitle(p,question?{...source,questions:{[input.question]:question}}:source);
 }
-function setupQuestionText(q){const text=q?.label||'';return text.trim()==='What should this phase decide?'?'':text}
+function setupQuestionText(q){const text=q?.label||'';return /^What should this (?:step|phase) decide\?$/.test(text.trim())?'':text}
 function setupStageRole(p,s){
   if(s.kind!=='poll')return s.kind==='aggregate'?'Combined answer':'Final answer';
   const polls=p.stages.filter(x=>x.kind==='poll'),index=polls.findIndex(x=>x.id===s.id);
@@ -109,7 +109,7 @@ function choiceOptionList(p,s,qid,q){
 function applyStudySetup(form){
   const s=selectedStage(),qid=form.dataset.questionId,q=s?.questions?.[qid];if(!q)return;
   form.querySelector?.('[data-options-box]')&&optionsBoxCommit();
-  const d=new FormData(form),typed=String(d.get('setupPrompt')??q.label),label=q.label==='What should this phase decide?'&&!typed?q.label:typed;
+  const d=new FormData(form),typed=String(d.get('setupPrompt')??q.label),label=/^What should this (?:step|phase) decide\?$/.test(q.label)&&!typed?q.label:typed;
   // Preserve custom instructions; remove only the duplicated question from our old default.
   const suffix='\nChoose the option that best answers this question. Select no-match if none is suitable.';
   if(label!==q.label&&q.instructions===q.label+suffix)q.instructions='Answer the question using your persona and the supplied context.';
