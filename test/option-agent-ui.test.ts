@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Script } from 'node:vm';
 import { OPTION_AGENT_CLIENT, OPTION_AGENT_PANEL } from '../src/option-agent-ui.js';
+import { DRAFT_CONTENT_CLIENT } from '../src/draft-content-ui.js';
 
 function harness() {
   const listeners = new Map<string, Function[]>();let mounted=true,rebuildOnSave=false;
@@ -30,7 +31,7 @@ function harness() {
     optionDescription: (value: any) => value && typeof value === 'object' ? value.description ?? '' : '',
     esc: (value: unknown) => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
   };
-  new Script(OPTION_AGENT_CLIENT + '\nglobalThis.agent={optionAgentInline,optionAgentPoll,optionAgentOpen,optionAgentReadFile,optionAgentStart,optionAgentApply,optionAgentCancel,optionAgentClose,optionAgentUpdate,optionAgentRecords,optionAgentAction,draft:()=>optionAgentDraft};').runInNewContext(context);
+  new Script(DRAFT_CONTENT_CLIENT + OPTION_AGENT_CLIENT + '\nglobalThis.agent={optionAgentInline,optionAgentPoll,optionAgentOpen,optionAgentReadFile,optionAgentStart,optionAgentApply,optionAgentCancel,optionAgentClose,optionAgentUpdate,optionAgentRecords,optionAgentAction,draft:()=>optionAgentDraft};').runInNewContext(context);
   const result = (criteria: any, status = 'completed') => ({ id: 'job', status, revision: S.revision, proposal: { document: { pipelines: [{ id: 'study', stages: [{ id: 'panel', questions: { preference: { type: 'choice', criteria } } }] }] } } });
   return { ...context.agent, S, q, stage, p, requests, el: (suffix: string) => getElement('optionAgent' + suffix), result,
     mount(value:boolean){mounted=value;if(value){nodes.clear();context.agent.optionAgentUpdate()}},rebuildSave(){rebuildOnSave=true},prompt(value:string){const target=getElement('optionAgentPrompt');target.value=value;for(const fn of listeners.get('input')||[])fn({target})},job(value: any) { nextJob = value; }, ready(value: boolean) { ready = value; } };
