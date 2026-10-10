@@ -41,6 +41,18 @@ behaviors:
     source:
       text: Jev does not draft personas; the user's drafting AI does.
       reference: jev-polls demo recording, 2026-10-10
+  - id: new-cohort-page
+    description: >-
+      The New cohort page opens quiet: the prompt field, the persona count, Generate cohort and
+      Create manually side by side, and no warning until the user presses Generate with an empty
+      description, which then shows the hint and focuses the field.
+    details: >-
+      The Cohorts breadcrumb is the way back, so the page has no extra back button except Back to
+      study when it was opened from a step. Changed 2026-10-10 from a page that warned on first load,
+      disabled Generate, showed a one-tab section bar and hid Create manually under the fold.
+    source:
+      text: New cohort page scolds before you type (UI audit, item 13)
+      reference: jev-polls project thread "UI audit in a headless browser", 2026-10-10
   - id: manual-editing
     description: >-
       Users can create a cohort manually and add, edit, or remove personas, segments, and sources

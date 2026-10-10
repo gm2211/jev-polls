@@ -65,4 +65,17 @@ behaviors:
       listRow in the workspace client.
     source:
       text: Three sibling list pages, three card designs (UI audit, item 8)
+  - id: save-is-the-only-commit
+    description: >-
+      Editing forms have no per-form Apply button; the page header's Save is the one commit control,
+      and fields are read into the draft when the user saves or leaves the editor.
+    details: >-
+      Removed on 2026-10-10: Apply weights, Apply details, Apply source, Apply cohort details, Apply
+      brief, Apply persona edits, Apply weight, and the unlabeled check-mark button on Project
+      settings. Typing in any editing form marks the draft unsaved at once, so the "Unsaved
+      changes" status and the Save button reflect the edit before it is committed. Sub-editors that
+      build a draft object before adding it to a list (distribution targets, proposed options) keep
+      their own confirm button. A section tab row appears only when there are two or more sections.
+    source:
+      text: Apply, then Save, then it says "All changes saved" anyway (UI audit, item 7)
       reference: jev-polls project thread "UI audit in a headless browser", 2026-10-10
