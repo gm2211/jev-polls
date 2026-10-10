@@ -5,6 +5,7 @@ import { runPipeline } from '../src/engine.js';
 import { chunk, compactAnswer } from '../src/batching.js';
 import { estimateBudgets, enforceBudgets, estimateRequestTokens, JEV_STATE_AND_QUESTION_LIMIT } from '../src/request-budget.js';
 import { parsePipeline } from '../src/schema.js';
+import { parseRun } from '../src/run-record.js';
 import { emptyWorkspaceDocument, workspacePlan } from '../src/workspace-store.js';
 
 function makeCohort(id: string, count: number): Cohort {
@@ -74,6 +75,15 @@ test('1000 responses read by 8 board members in batches of 100 take 10 map and 1
   assert.equal(result.batching!.batches, 10);
   assert.match(result.batching!.note, /Board read 1,000 responses from Gamers in 10 batches of 100, then combined them in 1 round/);
   assert.equal(record.usage.requests, 1000 + 88);
+});
+
+test('a saved run with batched layers loads back for reports', async () => {
+  const record = await runPipeline(study(optionCount(2), responses(100)), { crowd: makeCohort('crowd', 300), board: makeCohort('board', 3) }, { ...options, provider: provider([]) });
+  assert.ok(record.stages.board!.batching);
+  assert.ok(record.stages.board!.layers?.length);
+  const loaded = parseRun(JSON.parse(JSON.stringify(record)));
+  assert.deepEqual(loaded.stages.board!.batching, record.stages.board!.batching);
+  assert.equal(loaded.stages.board!.layers!.length, record.stages.board!.layers!.length);
 });
 
 test('the plan counts the same requests the engine makes', async () => {
