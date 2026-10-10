@@ -9,3 +9,6 @@ dist/
 coverage/
 __pycache__/
 *.pyc
+
+# Recorded demo videos (shared outside git)
+demos/*.mp4
