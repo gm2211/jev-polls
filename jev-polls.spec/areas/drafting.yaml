@@ -59,3 +59,28 @@ behaviors:
       second apply gets a clear "already applied" message.
     source:
       text: A running 1000-persona generation is invisible in a new tab and its finished proposal is unreachable.
+  - id: proposal-references-resolve
+    description: >-
+      A proposal whose pipelines name a cohort id that is not in the resulting project fails the
+      draft with a message naming the study and alias and listing the valid cohort ids; the id is
+      never guessed or corrected. Large cohorts are sent with their exact id first and the provider
+      is told to copy ids verbatim.
+    source:
+      text: audience pointed at a cohort id that mixes the cohort prefix with the study id's suffix; step 1 showed Needs cohort.
+      reference: jev-polls project thread, 2026-10-10
+  - id: study-name-short
+    description: >-
+      When a proposal is applied, a study name or research question over 120 characters is kept as
+      its first sentence cut at a word boundary to at most 100 characters (with an ellipsis when cut),
+      and the full text moves into the study context so nothing is lost.
+    source:
+      text: the assistant again set the study's name to a 5-line paragraph.
+      reference: jev-polls project thread, 2026-10-10
+  - id: draft-choice-output
+    description: >-
+      Drafting guidance states that a Choice question returns a probability for every option (a
+      weighted ranking) with no written explanations, and keeps poll repeats at 1 unless the user
+      asks for repeated sampling.
+    source:
+      text: A Choice question records only one pick. The full ranking is given in the chair's written explanation.
+      reference: jev-polls project thread, 2026-10-10
