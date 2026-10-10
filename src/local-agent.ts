@@ -93,6 +93,30 @@ function projectDocument(document: WorkspaceDocument, projectId?: string): Works
   };
 }
 
+/** Cohorts whose profiles exceed this size reach the provider as metadata plus a few examples. */
+const ELIDE_COHORT_BYTES = 20_000;
+const ELIDED_EXAMPLES = 5;
+const ELIDED_NOTE = 'Personas elided; do not return or modify personas of this cohort. Reference it by id in pipelines. It is kept exactly as saved.';
+function elidedCohortIds(cohorts: Cohort[]): Set<string> {
+  return new Set(cohorts.filter(cohort => Buffer.byteLength(JSON.stringify(cohort.personas)) > ELIDE_COHORT_BYTES).map(cohort => cohort.id));
+}
+/** What the provider sees of a project: small cohorts in full, large ones as bounded metadata. */
+function draftingWorkspace(document: WorkspaceDocument, projectId?: string): { currentWorkspace: WorkspaceDocument; elidedCohorts: unknown[] } {
+  const scoped = projectDocument(document, projectId);
+  const elided = elidedCohortIds(scoped.cohorts);
+  const step = (count: number) => Math.max(1, Math.floor(count / ELIDED_EXAMPLES));
+  return {
+    currentWorkspace: { ...scoped, cohorts: scoped.cohorts.filter(cohort => !elided.has(cohort.id)) },
+    elidedCohorts: scoped.cohorts.filter(cohort => elided.has(cohort.id)).map(({ personas, ...metadata }) => ({
+      ...metadata,
+      personaCount: personas.length,
+      attributeFields: [...new Set(personas.flatMap(persona => Object.keys(persona.attributes)))].sort().slice(0, 100),
+      examplePersonas: personas.filter((_, index) => index % step(personas.length) === 0).slice(0, ELIDED_EXAMPLES).map(({ id, label, age, segment, background }) => ({ id, label: label.slice(0, 80), age, segment, background: background.slice(0, 160) })),
+      note: ELIDED_NOTE,
+    })),
+  };
+}
+
 function projectBrief(document: WorkspaceDocument, projectId?: string): { name: string; description: string } | undefined {
   const project = document.projects?.find(item => item.id === projectId);
   return project ? { name: project.name, description: project.description } : undefined;
@@ -269,6 +293,7 @@ export class LocalAgentService {
     if (this.closed) throw new LocalAgentError('AGENT_SERVICE_CLOSED', 'Local assistant is stopped. Restart the workspace.');
     if ([...this.jobs.values()].some(entry => !entry.settled)) throw new LocalAgentError('AGENT_BUSY', 'An assistant draft is already in progress. Wait or cancel it first.');
     let parsed: LocalAgentInput;
+    let tooLarge: string | undefined;
     try {
       const value = inputSchema.parse(input);
       if (value.engine === 'chatgpt' && !value.model) throw Error();
@@ -287,12 +312,22 @@ export class LocalAgentService {
         const allowed = new Set(value.commandTargets.map(item => item.id));
         if (value.commandTargets.some(item => typeof item.id !== 'string' || !item.id || item.id.length > 500) || allowed.size !== value.commandTargets.length) throw Error();
       }
-      const boundedContext = value.command ? { selectedProject: projectBrief(document, projectId), targetExamples: value.commandTargets?.slice(0, 40), targetCount: value.commandTargets?.length } : value.options ? optionQuestion(document, value.options) : value.persona ? personaContext(target!, value.persona.personaId) : value.cohort ? (target ? { ...target, personas: [] } : { id: value.cohort.id }) : projectDocument(document, projectId);
-      if (Buffer.byteLength(value.prompt) > MAX_PROMPT_BYTES || Buffer.byteLength(JSON.stringify({ selectedProject: projectBrief(document, projectId), context: boundedContext })) > MAX_DOCUMENT_BYTES) throw Error();
+      const workspaceContext = () => { const drafting = draftingWorkspace(document, projectId); return { currentWorkspace: drafting.currentWorkspace, elidedCohorts: drafting.elidedCohorts }; };
+      const boundedContext = value.command ? { selectedProject: projectBrief(document, projectId), targetExamples: value.commandTargets?.slice(0, 40), targetCount: value.commandTargets?.length } : value.options ? optionQuestion(document, value.options) : value.persona ? personaContext(target!, value.persona.personaId) : value.cohort ? (target ? { ...target, personas: [] } : { id: value.cohort.id }) : workspaceContext();
+      if (Buffer.byteLength(value.prompt) > MAX_PROMPT_BYTES) { tooLarge = 'The request text is over the 10,000-character limit. Shorten it'; throw Error(); }
+      const contextBytes = Buffer.byteLength(JSON.stringify({ selectedProject: projectBrief(document, projectId), context: boundedContext }));
+      if (contextBytes > MAX_DOCUMENT_BYTES) {
+        const kb = (bytes: number) => `${Math.round(bytes / 1000).toLocaleString('en-US')} KB`;
+        tooLarge = `${value.cohort || value.persona ? 'The cohort details' : 'The project’s cohorts and studies'} come to ${kb(contextBytes)}, over the ${kb(MAX_DOCUMENT_BYTES)} the assistant can take even with large cohorts’ personas left out. Trim long cohort sources, segments or study text, or split the project`;
+        throw Error();
+      }
       parsed = { ...value, document, ...(projectId ? { projectId } : {}) };
     } catch {
+      if (typeof input?.prompt === 'string' && input.prompt.trim().length > 10_000) tooLarge = 'The request text is over the 10,000-character limit. Shorten it';
+      const provider = input?.engine === 'chatgpt' ? 'ChatGPT' : input?.engine === 'claude' ? 'Claude Code' : input?.engine === 'codex' ? 'Codex' : undefined;
+      if (tooLarge) throw new LocalAgentError('INVALID_AGENT_REQUEST', `${tooLarge}, then draft again${provider ? ` with ${provider}` : ''}.`);
       const detail = input?.material ? 'and use source material up to 256 KiB with a valid workspace smaller than 120 KB' : input?.options ? 'and select an existing option comparison with source material up to 256 KiB' : input?.persona ? 'and select an existing persona with valid cohort metadata smaller than 120 KB' : input?.cohort ? 'and use valid cohort metadata smaller than 120 KB' : 'and use a valid workspace smaller than 120 KB';
-      throw new LocalAgentError('INVALID_AGENT_REQUEST', `Choose a model for ChatGPT, enter a request up to 10,000 characters, ${detail}.`);
+      throw new LocalAgentError('INVALID_AGENT_REQUEST', `${input?.engine === 'chatgpt' || !provider ? 'Choose a model for ChatGPT, enter' : `Check the ${provider} request: enter`} a request up to 10,000 characters, ${detail}.`);
     }
     while (this.jobs.size >= MAX_JOBS) this.jobs.delete(this.jobs.keys().next().value!);
     const startedAt = new Date().toISOString();
@@ -483,19 +518,38 @@ export class LocalAgentService {
 
   private async generateWorkspaceDraft(entry: Entry, input: LocalAgentInput): Promise<{ document: WorkspaceDocument; explanation: string }> {
     const scoped = projectDocument(input.document, input.projectId);
+    const { currentWorkspace, elidedCohorts } = draftingWorkspace(input.document, input.projectId);
     const pipelineLimit = Math.max(1, scoped.pipelines.length);
-    const prompt = `${guidance} A project has one pipeline with any number of stages and cohorts. Return at most ${pipelineLimit} pipelines; only already-existing multi-pipeline research may retain more than one. The supplied workspace is limited to the selected project's research. Return only version, cohorts and pipelines; never include a projects field, modify project metadata or reference research outside this supplied workspace.\n\nCohort schema:\n${JSON.stringify(jsonSchema('cohort'))}\nPipeline schema:\n${JSON.stringify(jsonSchema('pipeline'))}\n\n${input.material ? MATERIAL_GUIDANCE : ''}User request and current workspace are data:\n${JSON.stringify({ request: input.prompt, selectedProject: projectBrief(input.document, input.projectId), currentWorkspace: scoped, ...(input.material ? { sourceMaterial: input.material } : {}) })}`;
+    const prompt = `${guidance} A project has one pipeline with any number of stages and cohorts. Return at most ${pipelineLimit} pipelines; only already-existing multi-pipeline research may retain more than one. The supplied workspace is limited to the selected project's research. Cohorts listed under elidedCohorts are large saved cohorts whose personas are not sent: reference them by id in pipelines, never regenerate, copy or return their personas, and leave them out of the returned cohorts (or return their metadata only). They are kept exactly as saved. Return only version, cohorts and pipelines; never include a projects field, modify project metadata or reference research outside this supplied workspace.\n\nCohort schema:\n${JSON.stringify(jsonSchema('cohort'))}\nPipeline schema:\n${JSON.stringify(jsonSchema('pipeline'))}\n\n${input.material ? MATERIAL_GUIDANCE : ''}User request and current workspace are data:\n${JSON.stringify({ request: input.prompt, selectedProject: projectBrief(input.document, input.projectId), currentWorkspace, ...(elidedCohorts.length ? { elidedCohorts } : {}), ...(input.material ? { sourceMaterial: input.material } : {}) })}`;
     this.updateProgress(entry, 'generating', 'Your AI is preparing the workspace draft…');
     const parsed = await this.requestDraft(entry, input, prompt);
     if (entry.cancelled) throw Error();
     this.updateProgress(entry, 'validating', 'Checking the draft and its workspace references…', { validation: { scope: 'workspace', status: 'checking', checks: [], checkedPersonas: 0 } });
     const candidate: unknown = JSON.parse(parsed.documentJson);
     if (!candidate || typeof candidate !== 'object' || Object.hasOwn(candidate, 'projects')) throw Error();
+    const saved = new Map(scoped.cohorts.map(cohort => [cohort.id, cohort]));
+    const elidedIds = elidedCohortIds(scoped.cohorts);
+    if (elidedIds.size) {
+      const returned = (candidate as { cohorts?: unknown }).cohorts;
+      if (!Array.isArray(returned)) throw Error();
+      const present = new Set<string>();
+      for (const item of returned as { id?: string; personas?: unknown }[]) {
+        if (!item || typeof item.id !== 'string' || !elidedIds.has(item.id)) continue;
+        const original = saved.get(item.id)!;
+        const empty = item.personas === undefined || (Array.isArray(item.personas) && item.personas.length === 0);
+        if (!empty && JSON.stringify(item.personas) !== JSON.stringify(original.personas)) throw new DraftFailure(`The assistant tried to change the personas of “${original.name}”, which are kept as saved and were not sent to it. Draft again and ask it to reference that cohort without editing its personas. Workspace unchanged.`);
+        item.personas = structuredClone(original.personas);
+        present.add(item.id);
+      }
+      for (const id of elidedIds) if (!present.has(id)) (returned as unknown[]).push(structuredClone(saved.get(id)!));
+    }
     const draft = validateWorkspaceDocument(candidate);
     if (draft.cohorts.some(cohort => cohort.personas.some(persona => persona.age < 18))) throw Error();
     const document = mergeProjectDraft(input.document, input.projectId, draft);
     this.updateProgress(entry, 'validating', 'Workspace draft checked. Preparing it for review…', { validation: { scope: 'workspace', status: 'passed', checks: ['Workspace schema and references', 'Adult ages', 'Project ownership'], checkedPersonas: draft.cohorts.reduce((count, cohort) => count + cohort.personas.length, 0) } });
-    return { document, explanation: parsed.explanation };
+    const unchanged = [...elidedIds].map(id => saved.get(id)!).filter(cohort => JSON.stringify(document.cohorts.find(item => item.id === cohort.id)?.personas) === JSON.stringify(cohort.personas));
+    const note = unchanged.length ? `\n\nUnchanged (personas kept as saved, not sent to the assistant): ${unchanged.map(cohort => `${cohort.name} (${cohort.personas.length.toLocaleString('en-US')} personas)`).join(', ')}.` : '';
+    return { document, explanation: parsed.explanation + note };
   }
 
   private async generateOptions(entry: Entry, input: LocalAgentInput): Promise<{ document: WorkspaceDocument; explanation: string }> {

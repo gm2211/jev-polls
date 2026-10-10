@@ -41,6 +41,15 @@ behaviors:
     description: >-
       Drafts name a study with a short question of at most 80 characters, and no poll's sample
       size exceeds its cohort's persona count.
+  - id: draft-with-large-cohorts
+    description: >-
+      Study drafting works in projects with large cohorts: a cohort too large to send is given to
+      the provider as its metadata, persona count and a few example personas, marked as elided, and
+      the assistant cannot change its personas. Its saved personas stay byte-identical, the
+      proposal shows it as unchanged, and a request that is too large names what was too large and
+      the selected provider.
+    source:
+      text: A 1,000-persona cohort made Draft pipeline refuse with a generic message that mentioned ChatGPT while Claude Code was selected.
   - id: drafting-job-recovery
     description: >-
       A running or finished-but-unapplied drafting job stays reachable after a reload or in a new
