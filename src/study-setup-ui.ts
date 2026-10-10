@@ -10,16 +10,15 @@ function optionDescription(value){return value&&typeof value==='object'?value.de
 function stepTitle(p,s){
   const questions=Object.values(s.questions||{}),question=questions[0]?.label?.trim();
   const custom=s.label?.trim(),prefix=s.kind==='poll'&&custom&&!['First question','Next question','New question'].includes(custom)&&custom!==question?custom+': ':'';
-  const title=s.kind==='poll'?prefix+(question&&question!=='What should this phase decide?'?question:'Untitled question')+(questions.length>1?' + '+(questions.length-1)+' more':''):(s.label?.trim()||(s.kind==='aggregate'?'Combine answers':'Final result'));
+  const title=s.kind==='poll'?prefix+(question&&!/^What should this (?:step|phase) decide\?$/.test(question)?question:'Untitled question')+(questions.length>1?' + '+(questions.length-1)+' more':''):(s.label?.trim()||(s.kind==='aggregate'?'Combine answers':'Final result'));
   return (p.stages.findIndex(x=>x.id===s.id)+1)+'. '+title.replace(/\s+/g,' ');
 }
-function stepSettingsTitle(p,s){return 'Step '+(p.stages.findIndex(x=>x.id===s.id)+1)+' settings'}
 function inputTitle(p,input){
   const source=p.stages.find(x=>x.id===input.stage);if(!source)return input.stage;
   const question=source.questions?.[input.question];
   return stepTitle(p,question?{...source,questions:{[input.question]:question}}:source);
 }
-function setupQuestionText(q){const text=q?.label||'';return text.trim()==='What should this phase decide?'?'':text}
+function setupQuestionText(q){const text=q?.label||'';return /^What should this (?:step|phase) decide\?$/.test(text.trim())?'':text}
 function setupStageRole(p,s){
   if(s.kind!=='poll')return s.kind==='aggregate'?'Combined answer':'Final answer';
   const polls=p.stages.filter(x=>x.kind==='poll'),index=polls.findIndex(x=>x.id===s.id);
@@ -58,11 +57,9 @@ function setupCohortPicker(p,s){
 }
 function stageForm(p,s,focused=false){
   if(s.kind!=='poll')return resultSetup(p,s);
-  const mode=S.sections.pipeline||'phase',tabs='';
-  if(mode==='advanced')return tabs+advancedStageForm(p,s);
   const entry=setupQuestion(s),pool=poolForPhase(p,s);
   const picker=setupQuestionToolbar(p,s);
-  if(!entry)return tabs+panel('Add a question','','<button class="button primary" data-act="add-question">Add question</button>',picker);
+  if(!entry)return panel('Add a question','','<button class="button primary" data-act="add-question">Add question</button>',picker);
   const [qid,q]=entry,entries=Object.entries(s.questions);
   const questionPicker=entries.length>1?'<nav class="section-tabs" aria-label="Questions in this step">'+entries.map(([key,value])=>'<button type="button" class="button small" data-act="setup-question" data-id="'+attr(key)+'" aria-pressed="'+(key===qid)+'">'+esc(setupQuestionText(value)||'Question '+(entries.findIndex(([id])=>id===key)+1))+'</button>').join('')+'</nav>':'';
 
@@ -112,7 +109,7 @@ function choiceOptionList(p,s,qid,q){
 function applyStudySetup(form){
   const s=selectedStage(),qid=form.dataset.questionId,q=s?.questions?.[qid];if(!q)return;
   form.querySelector?.('[data-options-box]')&&optionsBoxCommit();
-  const d=new FormData(form),typed=String(d.get('setupPrompt')??q.label),label=q.label==='What should this phase decide?'&&!typed?q.label:typed;
+  const d=new FormData(form),typed=String(d.get('setupPrompt')??q.label),label=/^What should this (?:step|phase) decide\?$/.test(q.label)&&!typed?q.label:typed;
   // Preserve custom instructions; remove only the duplicated question from our old default.
   const suffix='\nChoose the option that best answers this question. Select no-match if none is suitable.';
   if(label!==q.label&&q.instructions===q.label+suffix)q.instructions='Answer the question using your persona and the supplied context.';
@@ -154,8 +151,6 @@ function reconcileSetupDependencies(s,removed,remaining){
 }
 function setupAnswerSignature(q){return JSON.stringify([q?.type,q?.type==='choice'?Object.entries(q.criteria||{}).sort(([a],[b])=>a.localeCompare(b)):q?.criteria])}
 function resultSetup(p,s){
-  const mode=S.sections.pipeline||'phase',tabs='';
-  if(mode==='advanced')return tabs+advancedStageForm(p,s);
   const current=s.kind==='decision'?[s.from]:s.inputs,first=current.find(x=>x.stage&&x.question),base=first?resolvedQuestion(p,first.stage,first.question):null;
   const compatible=q=>!base||setupAnswerSignature(q)===setupAnswerSignature(base);
   const outputs=dataInputOptions(p,s).flatMap(source=>phaseOutput(p,source).map(q=>({source,q}))).filter(({source,q})=>s.kind==='decision'?q.type==='choice':compatible(resolvedQuestion(p,source.id,q.id)||{}));

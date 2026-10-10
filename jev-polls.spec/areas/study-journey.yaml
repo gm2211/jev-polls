@@ -98,7 +98,11 @@ behaviors:
       something to connect.
     details: >-
       Modeled on railway.com's service panel. Options also lists what later rounds can use as
-      inputs. Selecting another round, adding one, or connecting an input reopens the panel.
+      inputs. Selecting another round, adding one, or connecting an input reopens the panel. A
+      Settings tab (added 2026-10-10, UI audit item 15) ends the row and holds the Simple and
+      Advanced step settings that used to be a separate page reached from a sliders button that
+      looked like the study settings button; the panel title names the step, so no step dropdown
+      is needed.
     source:
       text: creating a voting round with types, inputs, outputs and which needs a cohort assigned
       reference: jev-polls project thread "Rethink the main user flow", Giulio, 2026-10-09
@@ -260,8 +264,8 @@ behaviors:
         showing check and cancel icons beside Save
   - id: step-settings-no-repeat
     description: >-
-      Step settings never repeat the study question: the page heading and last crumb both read
-      "Step N settings".
+      Step settings never repeat the study question: the Settings tab sits under the panel title,
+      which names the step by its number and question.
     details: >-
       First shipped as a "Step N settings" label beside a Back to flow button; replaced the same day
       by breadcrumb levels (navigation.breadcrumbs).
@@ -275,7 +279,7 @@ behaviors:
       Editing an Ask cohort step starts with "What kind of answer?": Yes / no, Compare options or
       Ordered scale, each with a one-line explanation, before the question text, name or personas.
     details: >-
-      Shown first on the step panel's Question tab and in Step settings. The app has no separate
+      Shown first on the step panel's Question tab and on its Settings tab. The app has no separate
       ranking type; Compare options ranks the options by preference, and its hint says so.
     source:
       text: "first step should be choosing question tipe: yes / no, ranking, noul (or whatever the jev types are)"

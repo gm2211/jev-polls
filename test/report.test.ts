@@ -34,7 +34,7 @@ const fixture = (): RunRecord => ({
 test('renders a standalone interactive report with run state, panel evidence, and controls', () => {
   const html = renderReport(fixture());
   assert.match(html, /<!doctype html>/i);
-  assert.match(html, /Panel route/);
+  assert.match(html, /<h2 id="pipelineHeading">Steps</);
   assert.match(html, /data-view="findings"/);
   assert.match(html, /data-view="people"/);
   assert.match(html, /data-view="repeats"/);

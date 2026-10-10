@@ -127,7 +127,7 @@ export function createLiveVotingView(model: ReturnType<typeof createArenaModel>)
 
   function stageNav(input: any): string {
     if (input.stages.length < 2) return '';
-    return `<nav class="lv-stages" aria-label="Pipeline steps">${input.stages.map((stage: any) => {
+    return `<nav class="lv-stages" aria-label="Study steps">${input.stages.map((stage: any) => {
       const dependencies = (stage.dependsOn || []).map((id: string) => input.stages.find((candidate: any) => candidate.id === id)?.label || id);
       const detail = `${stage.kind || 'step'} · ${stage.status || 'pending'} · ${dependencies.length ? `after ${dependencies.join(', ')}` : 'first step'}`;
       return `<button type="button" data-act="live-stage" data-stage="${esc(stage.id)}" aria-pressed="${stage.id === input.stageId}" data-stage-state="${esc(stage.status)}" title="${esc(detail)}" aria-label="${esc(`${stage.label}, ${detail}`)}"><i aria-hidden="true"></i><span>${esc(stage.label)}</span></button>`;

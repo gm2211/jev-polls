@@ -96,4 +96,21 @@ behaviors:
       their own confirm button. A section tab row appears only when there are two or more sections.
     source:
       text: Apply, then Save, then it says "All changes saved" anyway (UI audit, item 7)
+  - id: one-vocabulary
+    description: >-
+      The workspace and the report use one set of nouns: project, study, step, cohort, persona,
+      run, report. A step is never a stage, phase, panel or round in user-facing text, a study is
+      never a pipeline, and the live run page is not an arena.
+    details: >-
+      Swept on 2026-10-10 (UI audit item 6): "What should this pipeline do?" and "Build with words"
+      became "What should this study do?" and "Draft with assistant"; "Cohort host map" became
+      "Who answers"; "THE COHORT ARENA" became "LIVE RUN"; "Pipeline stages", "Entry stage",
+      "poll phase" and "Arena pages" became "Study steps", "First step", "Ask cohort step" and
+      "Result pages"; the report's "Panel route", "Stage report", "field notes" and "research run"
+      became "Steps", "Step report" and "study report"; the empty-studies copy no longer says
+      "rounds on its track". The placeholder question text for a new step reads "What should this
+      step decide?", and the old "phase" wording is still recognized as a placeholder in saved
+      files. Identifiers, file formats and the CLI keep their names.
+    source:
+      text: Five words for the same thing (UI audit, item 6)
       reference: jev-polls project thread "UI audit in a headless browser", 2026-10-10
