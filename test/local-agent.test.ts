@@ -1090,3 +1090,55 @@ test('command palette jobs are never listed for recovery', async t => {
   assert.equal(job.status, 'running');
   assert.deepEqual(service.list('one'), []);
 });
+
+function largeCohortWorkspace(): WorkspaceDocument {
+  const document = projectWorkspace();
+  document.cohorts[0]!.personas = Array.from({ length: 1000 }, (_, i) => ({ ...structuredClone(proposed.cohorts[0]!.personas[0]!), id: `big-${i}`, label: `Big ${i}`, background: `Synthetic adult profile ${i} with a long enough biography to make the whole cohort several hundred kilobytes. `.repeat(6) }));
+  return document;
+}
+const sentWorkspace = (prompt: string) => JSON.parse(prompt.slice(prompt.indexOf('User request and current workspace are data:\n') + 'User request and current workspace are data:\n'.length));
+
+test('large cohorts reach the provider as bounded metadata and keep every saved persona', async t => {
+  const document = largeCohortWorkspace(); const before = structuredClone(document);
+  assert.ok(Buffer.byteLength(JSON.stringify(document.cohorts[0])) > 400_000);
+  let promptBytes = 0;
+  const service = projectDraftService(t, prompt => {
+    promptBytes = Buffer.byteLength(prompt);
+    const sent = sentWorkspace(prompt);
+    assert.deepEqual(sent.currentWorkspace.cohorts, []);
+    assert.equal(sent.elidedCohorts[0].personaCount, 1000);
+    assert.ok(sent.elidedCohorts[0].examplePersonas.length <= 5);
+    assert.match(sent.elidedCohorts[0].note, /do not return or modify personas/);
+    return { version: 1, cohorts: [{ ...structuredClone(proposed.cohorts[0]!), id: 'new-cohort' }], pipelines: [{ ...structuredClone(document.pipelines[0]!), id: 'new-study', cohorts: { audience: 'customers', extra: 'new-cohort' } }] };
+  });
+  const done = await terminal(service, service.start({ ...projectRequest, document }));
+  assert.equal(done.status, 'completed', done.message);
+  assert.ok(promptBytes < 30_000, `prompt was ${promptBytes} bytes`);
+  const result = done.proposal!.document;
+  assert.equal(JSON.stringify(result.cohorts.find(item => item.id === 'customers')!.personas), JSON.stringify(before.cohorts[0]!.personas));
+  assert.equal(result.cohorts.find(item => item.id === 'customers')!.personas.length, 1000);
+  assert.ok(result.cohorts.some(item => item.id === 'new-cohort'));
+  assert.match(done.proposal!.explanation, /Unchanged .*1,000 personas/);
+  assert.deepEqual(document, before);
+});
+
+test('an assistant cannot rewrite or drop the personas of an elided cohort', async t => {
+  const document = largeCohortWorkspace();
+  const rewritten = selectedDraft(document); rewritten.cohorts[0]!.personas = rewritten.cohorts[0]!.personas.slice(0, 10);
+  const service = projectDraftService(t, () => rewritten);
+  const job = await terminal(service, service.start({ ...projectRequest, document }));
+  assert.equal(job.status, 'failed'); assert.equal(job.proposal, undefined);
+  assert.match(job.message, /personas of “Customers”/);
+  const kept = projectDraftService(t, () => ({ ...selectedDraft(document), cohorts: [] }));
+  const ok = await terminal(kept, kept.start({ ...projectRequest, document }));
+  assert.equal(ok.status, 'completed'); assert.equal(ok.proposal!.document.cohorts.find(item => item.id === 'customers')!.personas.length, 1000);
+});
+
+test('oversized requests name what was too large and the selected provider', async t => {
+  const document = projectWorkspace(); document.cohorts[0]!.assumptions = Array.from({ length: 150 }, (_, i) => `${i} ${'x'.repeat(900)}`);
+  const service = projectDraftService(t, () => ({}));
+  for (const [engine, label] of [['claude', 'Claude Code'], ['codex', 'Codex']] as const) {
+    assert.throws(() => service.start({ ...projectRequest, engine, document }), error => error instanceof LocalAgentError && /cohorts and studies come to/.test(error.message) && error.message.includes(label) && !/ChatGPT/.test(error.message));
+  }
+  assert.throws(() => service.start({ ...projectRequest, engine: 'claude', document: projectWorkspace(), prompt: 'x'.repeat(10_001) }), error => error instanceof LocalAgentError && /request text/.test(error.message) && !/ChatGPT/.test(error.message));
+});
