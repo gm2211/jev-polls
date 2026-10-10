@@ -38,3 +38,11 @@ behaviors:
     description: A single click on a control opens it even while an inline title or name editor is focused.
   - id: dialogs-close-on-escape
     description: Esc closes the AI settings dialog like its close button.
+  - id: errors-clear-on-success
+    description: >-
+      The error banner clears when a later save or review succeeds and on any click, can be
+      dismissed by clicking it, and sticks near the top instead of pushing content down for good.
+    source:
+      text: The red error banner stayed visible after the next save and Review run succeeded.
+      reference: jev-polls project thread, 2026-10-10
+

@@ -1142,3 +1142,50 @@ test('oversized requests name what was too large and the selected provider', asy
   }
   assert.throws(() => service.start({ ...projectRequest, engine: 'claude', document: projectWorkspace(), prompt: 'x'.repeat(10_001) }), error => error instanceof LocalAgentError && /request text/.test(error.message) && !/ChatGPT/.test(error.message));
 });
+
+test('a proposal that references a cohort id that does not exist fails clearly and is never guessed', async t => {
+  const document = largeCohortWorkspace();
+  let sent: any;
+  const bad = selectedDraft(document); bad.cohorts = []; bad.pipelines[0]!.cohorts = { audience: 'customers-1b18-hallucinated' };
+  const service = projectDraftService(t, prompt => { sent = sentWorkspace(prompt); return bad; });
+  const job = await terminal(service, service.start({ ...projectRequest, document }));
+  assert.equal(job.status, 'failed'); assert.equal(job.proposal, undefined);
+  assert.match(job.message, /alias “audience”/); assert.doesNotMatch(job.message, /hallucinated/);
+  assert.match(job.message, /Valid cohort ids in this project: customers/);
+  assert.match(job.message, /closest saved cohort is customers/);
+  assert.equal(Object.keys(sent.elidedCohorts[0])[0], 'id');
+  assert.match(sent.elidedCohorts[0].note, /exact id, copied verbatim/);
+  assert.equal(document.pipelines[0]!.cohorts.audience, 'customers');
+});
+
+test('over-long study names and research questions are shortened and the full text moves into the study context', async t => {
+  const document = projectWorkspace();
+  const long = 'Which candidate should the chair pick for the board seat? ' + 'Weigh experience, fit and risk in detail across every dimension we care about. '.repeat(4);
+  const draft = selectedDraft(document);
+  Object.assign(draft.pipelines[0]!, { name: long, description: long, context: { known: 'kept' } });
+  const service = projectDraftService(t, () => draft);
+  const job = await terminal(service, service.start({ ...projectRequest, document }));
+  assert.equal(job.status, 'completed', job.message);
+  const study = job.proposal!.document.pipelines.find(item => item.id === 'selected-study')!;
+  assert.equal(study.name, 'Which candidate should the chair pick for the board seat?');
+  assert.equal(study.description, study.name);
+  assert.deepEqual(study.context, { known: 'kept', fullStudyName: long, fullResearchQuestion: long });
+  const run = 'word '.repeat(60);
+  const second = selectedDraft(document); Object.assign(second.pipelines[0]!, { name: run, description: 'Short question?', context: {} });
+  const service2 = projectDraftService(t, () => second);
+  const done = await terminal(service2, service2.start({ ...projectRequest, document }));
+  const study2 = done.proposal!.document.pipelines.find(item => item.id === 'selected-study')!;
+  assert.ok(study2.name.length <= 101 && study2.name.endsWith('…') && !study2.name.includes('wor…'));
+  assert.equal(study2.description, 'Short question?');
+  assert.deepEqual(study2.context, { fullStudyName: run });
+});
+
+test('drafting guidance explains Choice output and keeps repeats at 1', async t => {
+  let prompt = '';
+  const service = projectDraftService(t, p => { prompt = p; return selectedDraft(projectWorkspace()); });
+  await terminal(service, service.start({ ...projectRequest, document: projectWorkspace() }));
+  assert.match(prompt, /Choice question returns a probability for every option/);
+  assert.match(prompt, /no written explanations/);
+  assert.match(prompt, /repeats at 1 unless the user explicitly asks/);
+  assert.match(prompt, /copied verbatim/);
+});

@@ -80,3 +80,13 @@ behaviors:
     source:
       text: should be able to click on canvas to create node with dropdown - look at railway.com or hex.com for inspiration
       reference: jev-polls project thread, 2026-10-09
+  - id: prune-dangling-aliases
+    description: >-
+      Choosing a cohort for a step removes study cohort aliases that no step uses and that point to
+      a missing cohort (aliases of existing cohorts stay). Review and save do the same with a
+      notice naming the study and alias, and a step that still uses a missing cohort is reported
+      in plain words naming the study, step and alias. CLI and MCP errors are unchanged.
+    source:
+      text: Pipeline references missing cohort id; the user had to click x on "audience → Choose a cohort" in Study settings.
+      reference: jev-polls project thread, 2026-10-10
+

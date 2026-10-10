@@ -118,7 +118,17 @@ function assignSetupCohort(p,s,cid){
   let alias=Object.entries(p.cohorts).find(([,value])=>value===cid)?.[0];
   if(!alias){alias='cohort';let n=2;while(Object.hasOwn(p.cohorts,alias))alias='cohort_'+n++;p.cohorts[alias]=cid}
   s.cohort=alias;
+  pruneDanglingAliases(p,[alias]);
 }
+/** Drops cohort aliases no step uses that point at a cohort that is missing (or still unselected); aliases of existing cohorts stay. Returns the removed aliases. */
+function pruneDanglingAliases(p,keep=[]){
+  const used=new Set((p?.stages||[]).filter(s=>s.kind==='poll').map(s=>s.cohort)),known=new Set((S.doc?.cohorts||[]).map(c=>c.id)),removed=[];
+  for(const [alias,cid] of Object.entries(p?.cohorts||{}))if(!used.has(alias)&&!keep.includes(alias)&&!known.has(cid)){delete p.cohorts[alias];removed.push(alias)}
+  if(removed.length){S.dirty=true;S.plan=null}
+  return removed;
+}
+function danglingAliasNotice(p,removed){return 'Removed unused cohort alias'+(removed.length>1?'es ':' ')+removed.map(a=>'“'+a+'”').join(', ')+' from “'+(p.name||p.id)+'” because '+(removed.length>1?'they pointed':'it pointed')+' to a cohort that is not in this project.'}
+function pruneAndAnnounce(p){const removed=pruneDanglingAliases(p);if(removed.length&&typeof say==='function')say(danglingAliasNotice(p,removed));return removed}
 function setupContextSummary(p,s){
   const sources=s.inputs===undefined?s.dependsOn.map(id=>{const source=p.stages.find(x=>x.id===id);return source?stepTitle(p,source):id}):Object.values(s.inputs).map(input=>inputTitle(p,input));
   const labels=[...new Set(sources)];
@@ -197,11 +207,12 @@ function setupAction(a,el){
 }
 const setupFormats={};
 function validateSetupAnswers(p){
+  pruneAndAnnounce(p);
   for(const s of p?.stages||[])if(s.kind==='poll')for(const [qid,q] of Object.entries(s.questions)){
     const missing=!setupHasQuestion(q)||(q.type==='choice'&&Object.entries(q.criteria).some(([key,value])=>!String(optionName(key,value)).trim()))||(q.type==='score'&&q.criteria.some(value=>!value.trim()));
     if(missing){S.sections[setupWizardKey(p,s,qid)]=!setupHasQuestion(q)?'question':'options';if(q.type==='choice')S.sections['setup-input-'+p.id+'-'+s.id+'-'+qid]='manual';S.stageId=s.id;S.sections.pipeline='flow';S.sections['flow-inspector']='question';S.sections['question-list-'+p.id]=false;S.sections['setup-question-'+s.id]=qid;render();throw Error('Add the question and text for every answer option before reviewing.');}
   }
-  for(const s of p?.stages||[])if(s.kind==='poll'&&!poolForPhase(p,s)?.personas.length){S.stageId=s.id;S.sections.pipeline='flow';S.sections['flow-inspector']='cohort';S.flowCohortPick=true;render();throw Error('Choose a cohort with synthetic members before reviewing.');}
+  for(const s of p?.stages||[])if(s.kind==='poll'&&!poolForPhase(p,s)?.personas.length){S.stageId=s.id;S.sections.pipeline='flow';S.sections['flow-inspector']='cohort';S.flowCohortPick=true;render();throw Error('Study “'+(p.name||p.id)+'” step “'+stepTitle(p,s)+'” has no usable cohort'+(s.cohort&&!(S.doc?.cohorts||[]).some(c=>c.id===p.cohorts?.[s.cohort])?' (its alias “'+s.cohort+'” points to a cohort that is missing)':'')+'. Choose a cohort with synthetic members before reviewing.');}
 }
 `;
 
