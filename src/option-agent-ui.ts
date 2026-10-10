@@ -64,12 +64,7 @@ function optionAgentUpdate(){
 async function optionAgentReadFile(file){
   const d=optionAgentDraft;if(!d||!file||d.starting||d.job?.status==='running')return;const version=++d.readVersion;d.reading=true;if(optionAgentEl('File'))optionAgentEl('File').value='';optionAgentUpdate();
   try{
-    if(!/\.(txt|md|csv|json)$/i.test(file.name))throw Error('Choose a TXT, Markdown, CSV or JSON file.');
-    if(file.size>256*1024)throw Error('File is too large. Maximum size is 256 KiB.');
-    const text=await file.text();if(!optionAgentAlive(d)||d.readVersion!==version||d.starting||d.job?.status==='running')return;
-    if(new TextEncoder().encode(text).length>256*1024)throw Error('File is too large. Maximum size is 256 KiB.');
-    if(text.includes('\u0000')||text.includes('\ufffd'))throw Error('Use a UTF-8 text file. Binary or invalid text cannot be read.');
-    if(!text.trim())throw Error('File is empty. Choose a file with your candidate names or notes.');
+    const text=await materialReadFile(file);if(!optionAgentAlive(d)||d.readVersion!==version||d.starting||d.job?.status==='running')return;
     d.material=text;d.filename=file.name;d.error=null;optionAgentUpdate();
   }catch(error){if(optionAgentAlive(d)&&d.readVersion===version)optionAgentError(error,d)}finally{if(optionAgentAlive(d)&&d.readVersion===version){d.reading=false;optionAgentUpdate()}}
 }

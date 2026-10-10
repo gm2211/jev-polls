@@ -23,8 +23,19 @@ root.addEventListener('keydown',e=>{
   const form=e.target.closest?.('[data-inline-edit]');if(!form||e.key!=='Escape')return;
   e.preventDefault();e.stopPropagation();inlineEditCancel(form);
 },true);
+let inlineEditPointer=null;
+root.addEventListener('pointerdown',e=>{inlineEditPointer=e.target.closest?.('[data-act]')||null},true);
+document.addEventListener('pointerup',()=>{inlineEditPointer=null},true);
+function inlineEditSoftCancel(form){
+  /* Re-rendering here would delete the control being pressed and swallow its click, so end the edit first and repaint after the click. */
+  if(form.dataset.form==='study-title')S.studyTitleEdit=null;else S.projectRename=null;
+  const repaint=()=>{if(form.isConnected)render()};
+  document.addEventListener('click',repaint,{once:true});setTimeout(()=>{document.removeEventListener('click',repaint);repaint()},1500);
+}
 root.addEventListener('focusout',e=>{
   const form=e.target.closest?.('[data-inline-edit]');if(!form||form.contains(e.relatedTarget)||!form.isConnected||!inlineEditOpen(form)||!document.hasFocus())return;
+  const control=(e.relatedTarget?.closest?.('[data-act]'))||inlineEditPointer;
+  if(control&&!form.contains(control)){inlineEditSoftCancel(form);return}
   inlineEditCancel(form);
 });
 function submitStudyTitle(form){

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Script } from 'node:vm';
 import { COMMAND_CLIENT } from '../src/workspace-command-ui.js';
+import { DRAFT_CONTENT_CLIENT } from '../src/draft-content-ui.js';
 
 function harness(overrides: Record<string, unknown> = {}) {
   const listeners = new Map<string, Function>();
@@ -9,7 +10,7 @@ function harness(overrides: Record<string, unknown> = {}) {
     doc: { projects: [{ id: 'one', name: 'Games', pipelineIds: ['names'], cohortIds: ['gamers'] }, { id: 'two', name: 'Food', pipelineIds: ['food'], cohortIds: [] }],
       pipelines: [{ id: 'names', name: 'Naming study', stages: [{ id: 'ask', label: 'Name preference', kind: 'poll' }] }, { id: 'food', name: 'Taste study', stages: [{ id: 'taste', label: 'Taste choice', kind: 'poll' }] }], cohorts: [{ id: 'gamers', name: '<Gamers>' }] } };
   const calls: string[] = [];
-  const context: any = { S, document: { addEventListener(type: string, fn: Function) { listeners.set(type, fn); }, querySelector: () => null, getElementById: () => null, activeElement: { isConnected: false } },
+  const context: any = { S, TextEncoder, document: { addEventListener(type: string, fn: Function) { listeners.set(type, fn); }, querySelector: () => null, getElementById: () => null, activeElement: { isConnected: false } },
     root: { querySelector: () => null, querySelectorAll: () => [], classList: { toggle() {} } },
     esc: (x: unknown) => String(x).replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
     attr: (x: unknown) => String(x).replace(/"/g, '&quot;'), icon: () => '',
@@ -23,7 +24,7 @@ function harness(overrides: Record<string, unknown> = {}) {
     applyLocalProposal: async () => { S.proposalApplied = true; const p = { id: 'new', name: 'New study', stages: [{ id: 'newstep', kind: 'poll' }] }; S.doc.pipelines.push(p); context.project().pipelineIds.push(p.id); },
   };
   Object.assign(context, overrides);
-  new Script(COMMAND_CLIENT + '\nglobalThis.command={commandEntries,commandExecute,commandInput,commandAction,commandOpen,commandApplyProposal,draftSidePanel,commandResults,commandJobVisible,commandAskAI,commandClose,commandChoices,state:commandState};').runInNewContext(context);
+  new Script(DRAFT_CONTENT_CLIENT + COMMAND_CLIENT + '\nglobalThis.command={draftAttachRead,draftMaterial,commandBeforeRender,commandEntries,commandExecute,commandInput,commandAction,commandOpen,commandApplyProposal,draftSidePanel,commandResults,commandJobVisible,commandAskAI,commandClose,commandChoices,state:commandState};').runInNewContext(context);
   return { ...context.command, S, calls, key: listeners.get('keydown')! };
 }
 
@@ -134,4 +135,28 @@ test('AI settings removes palette before opening its native dialog',()=>{
   assert.equal(h.state.open,false);assert.equal(h.state.busy,false);
   assert.ok(h.calls.indexOf('render')>=0);
   assert.ok(h.calls.indexOf('render')<h.calls.indexOf('act:ai-open'));
+});
+
+const textFile = (text: string, name = 'names.json') => ({ name, size: Buffer.byteLength(text), text: async () => text });
+
+test('attaching a file shows its name, sends it with the request, and removing it clears it', async () => {
+  const h = harness(); h.commandAction('draft-panel-open', { dataset: {} });
+  assert.match(h.draftSidePanel(), /Drop a file here, or choose file/); assert.deepEqual(JSON.parse(JSON.stringify(h.draftMaterial())), {});
+  await h.draftAttachRead(textFile('[["Deterrent","What the arsenal is for."]]', '<names>.json'));
+  assert.deepEqual(JSON.parse(JSON.stringify(h.draftMaterial())), { material: '[["Deterrent","What the arsenal is for."]]' });
+  assert.match(h.draftSidePanel(), /&lt;names&gt;\.json/); assert.match(h.draftSidePanel(), /Remove file/);
+  h.commandAction('draft-attach-remove', { dataset: {} }); assert.deepEqual(JSON.parse(JSON.stringify(h.draftMaterial())), {}); assert.match(h.draftSidePanel(), /Drop a file here/);
+});
+
+test('a rejected file keeps the previous attachment and explains why', async () => {
+  const h = harness(); h.commandAction('draft-panel-open', { dataset: {} });
+  await h.draftAttachRead(textFile('good')); await h.draftAttachRead(textFile('x', 'photo.png'));
+  assert.equal(h.draftMaterial().material, 'good'); assert.match(h.draftSidePanel(), /Choose a TXT, Markdown, CSV or JSON file/);
+});
+
+test('opening the drafting panel closes the step panel, and opening a step closes the drafting panel', () => {
+  const h = harness(); h.S.flowPanel = true;
+  h.commandAction('draft-panel-open', { dataset: {} }); assert.equal(h.S.flowPanel, false); assert.equal(h.commandJobVisible(), true);
+  h.commandBeforeRender(); assert.equal(h.commandJobVisible(), true);
+  h.S.flowPanel = true; h.commandBeforeRender(); assert.equal(h.commandJobVisible(), false);
 });

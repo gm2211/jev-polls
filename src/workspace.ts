@@ -15,7 +15,7 @@ import { writeJson, writeText } from './io.js';
 import { WorkspaceStore, workspacePlan, WorkspaceConflictError, validateWorkspaceDocument } from './workspace-store.js';
 import { renderWorkspace } from './workspace-ui.js';
 import { agentConnectionConfig } from './agent-config.js';
-import { buildCommandTargets, optionDraftInputSchema, LocalAgentError, LocalAgentService } from './local-agent.js';
+import { buildCommandTargets, materialSchema, optionDraftInputSchema, LocalAgentError, LocalAgentService } from './local-agent.js';
 import { ChatGptConnection, chatGptMessage, createDraftClient, type ChatGptDraftClient } from './chatgpt.js';
 import type { Pipeline, Provider } from './types.js';
 import type { AuthStatus } from './auth.js';
@@ -296,7 +296,7 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
     }
     if (method === 'GET' && pathname === '/api/local-agents') { send(response, 200, await localAgents.availability()); return; }
     if (method === 'POST' && pathname === '/api/agent/jobs') {
-      const input = z.object({ projectId: safeId.optional(), engine: z.enum(['codex', 'claude', 'chatgpt']), model: z.string().trim().min(1).max(200).optional(), prompt: z.string().trim().min(1).max(10_000), revision: z.number().int().nonnegative().safe(), cohort: z.object({ id: safeId, size: z.number().int().min(1).max(MAX_COHORT_PERSONAS) }).strict().optional(), persona: z.object({ cohortId: safeId, personaId: safeId }).strict().optional(), options: optionDraftInputSchema.optional() }).strict().refine(value => [value.cohort, value.persona, value.options].filter(Boolean).length <= 1, 'Choose one draft target').parse(await body(request, 2 * 1024 * 1024));
+      const input = z.object({ projectId: safeId.optional(), engine: z.enum(['codex', 'claude', 'chatgpt']), model: z.string().trim().min(1).max(200).optional(), prompt: z.string().trim().min(1).max(10_000), revision: z.number().int().nonnegative().safe(), cohort: z.object({ id: safeId, size: z.number().int().min(1).max(MAX_COHORT_PERSONAS) }).strict().optional(), persona: z.object({ cohortId: safeId, personaId: safeId }).strict().optional(), options: optionDraftInputSchema.optional(), material: materialSchema.optional() }).strict().refine(value => [value.cohort, value.persona, value.options].filter(Boolean).length <= 1, 'Choose one draft target').refine(value => value.material === undefined || !(value.cohort || value.persona || value.options), 'Source material belongs to workspace drafts').parse(await body(request, 2 * 1024 * 1024));
       const saved = await store.read();
       if (saved.revision !== input.revision) throw new WorkspaceConflictError(input.revision, saved.revision);
       if (input.engine === 'chatgpt' && (changingChatGpt || (await chatgpt.snapshot()).signingIn || changingChatGpt)) throw new HttpError(409, 'CHATGPT_BUSY', 'Finish or cancel ChatGPT sign-in before drafting.');

@@ -51,4 +51,6 @@ function aiSettingsAction(action,el){
   if(action==='ai-section'){S.aiSection=el.dataset.section;updateAISettings();if(S.aiSection==='external'&&!S.agentConfig)void loadAgentConfig();return true}
   return false;
 }
+/* Esc closes the dialog like the close button, even where the browser's own cancel handling is blocked. */
+document.addEventListener('keydown',e=>{if(e.key!=='Escape'||e.isComposing)return;const dialog=document.getElementById('aiSettingsDialog');if(dialog?.open){e.preventDefault();e.stopPropagation();dialog.close()}},true);
 `;

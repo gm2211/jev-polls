@@ -32,3 +32,9 @@ behaviors:
     description: Removing steps, personas, segments, sources, questions, or inputs, or replacing options, can be undone or is confirmed.
   - id: no-dead-ui
     description: Every view and control in the workspace is reachable.
+  - id: draft-panel-no-overlap
+    description: The drafting panel and the step panel never show together; opening one closes the other.
+  - id: single-click-opens-panel
+    description: A single click on a control opens it even while an inline title or name editor is focused.
+  - id: dialogs-close-on-escape
+    description: Esc closes the AI settings dialog like its close button.
