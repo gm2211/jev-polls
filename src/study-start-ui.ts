@@ -5,11 +5,23 @@ function emptyCreate(act,title,hint){
 }
 function createRow(act,label,cls=''){return '<button type="button" class="create-row '+cls+'" data-act="'+act+'">'+icon('plus')+'<span>'+esc(label)+'</span></button>'}
 function createStudy(){
-  const p=freshPipeline('');p.name='Study '+(projectPipelines().length+1);
+  /* A new study starts as an empty canvas: the first question is added on the canvas, not pre-made. */
+  const p=freshPipeline('');p.stages=[];p.name='Study '+(projectPipelines().length+1);
   S.doc.pipelines.push(p);ownPipeline(p);
-  S.tab='studies';S.plan=null;S.studyComposer=false;S.pipelineId=p.id;S.stageId=p.stages[0]?.id||null;
-  S.sections.pipeline='flow';S.studyTitleEdit=p.id;S.dirty=true;
+  S.tab='studies';S.plan=null;S.studyComposer=false;S.studyLibrary=false;S.pipelineId=p.id;S.stageId=null;
+  S.sections.pipeline='flow';S.studyTitleEdit=p.id;S.flowPanel=false;S.flowSource=null;S.flowAdd=null;S.flowCreate=null;S.dirty=true;
   render();const input=root.querySelector('[data-form=study-title] [name=question]');input?.focus();
+}
+function openStudy(studyId){
+  S.tab='studies';S.studyLibrary=false;S.studyComposer=false;S.plan=null;S.pipelineId=studyId;S.stageId=pipeline()?.stages[0]?.id||null;
+  S.sections.pipeline='flow';S.flowSettingsReturn=false;S.flowPanel=false;render();
+}
+/** Where a project opens: a new or study-less project goes straight to a fresh canvas, a one-study project to that study; the Studies list is the landing page only from two studies on. */
+function landOnProject(projectId){
+  const count=S.doc.projects.find(p=>p.id===projectId)?.pipelineIds.length||0;
+  if(count>1){selectProject(projectId,true);return}
+  selectProject(projectId);
+  if(count===1&&projectPipelines()[0])openStudy(projectPipelines()[0].id);else createStudy();
 }
 function studyTitle(p){
   if(S.studyTitleEdit!==p.id)return '<div class="study-title"><h1 tabindex="-1">'+esc(studyQuestion(p))+'</h1><button type="button" class="button small icon-button study-title-edit" data-act="study-title-edit" aria-label="Edit study question" title="Edit study question">'+icon('edit')+'</button><button type="button" class="button small icon-button study-title-edit" data-act="section-view" data-section-key="pipeline" data-section-id="context" aria-label="Study settings" title="Study settings">'+icon('settings')+'</button></div>';

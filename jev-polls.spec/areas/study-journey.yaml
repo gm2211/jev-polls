@@ -11,13 +11,59 @@ prose: >-
 behaviors:
   - id: project-lands-on-studies
     description: >-
-      Creating a project opens its studies list straight away: the list when studies exist, or an
-      empty list that offers to create the first one.
+      Opening a project that already holds two or more studies lands on its Studies list; an empty
+      list offers to create the first study. A project with fewer studies lands on a canvas
+      (project-lands-on-canvas).
+    details: >-
+      Narrowed on 2026-10-10: the original rule sent every new project to the studies list, which
+      meant an extra screen before the first question.
     source:
       text: >-
         I create a project -> right away list of studies or create new if none presetn (look up
         examples online of ux for empty lists and create new by just clicking empty list e.g.)
       reference: jev-polls project thread "Rethink the main user flow", Giulio, 2026-10-09
+  - id: project-lands-on-canvas
+    description: >-
+      Creating a project, or opening one that has no study, goes straight to a new empty study canvas:
+      the study ("Study 1") is created on the spot with its title editor focused. A project with
+      exactly one study opens that study. Neither visits the Studies or Cohorts pages first.
+    details: >-
+      The Studies list stays one click away in the sidebar and breadcrumbs. Reopening a project
+      whose only study is still empty opens that study instead of creating another. Creating a study
+      from the list gives the same empty canvas. Part of the one-minute guided demo path: New project
+      to Run study on the canvas and its slide-over only (guided-demo-path). Earlier brief, 2026-10-09: "I create a project -> right away list of studies or create new if none present -> pipeline editor railway-style".
+    source:
+      text: >-
+        there is no guided flow - I have to know about cohorts - I had told you I want an experience
+        like railway.com.
+      reference: jev-polls project thread, Giulio, 2026-10-10
+  - id: empty-canvas-entry-points
+    description: >-
+      An empty study canvas offers two entry points on the canvas itself: a large "Add your first
+      question" target and a "Describe the study in words" target that opens Build with words.
+      Clicking anywhere else on the empty canvas also adds the first question.
+    details: >-
+      Replaces the small "Add question" button. The first question takes the study question as its
+      text when the study already has one. Review run is not offered until a step exists.
+    source:
+      text: >-
+        there is no guided flow - I have to know about cohorts - I had told you I want an experience
+        like railway.com.
+      reference: jev-polls project thread, Giulio, 2026-10-10
+  - id: guided-demo-path
+    description: >-
+      From New project to Run study, everything happens on the study canvas and its slide-over: no
+      visit to the Cohorts, Studies or Settings pages and, where avoidable, no separate Review page.
+    details: >-
+      Acceptance bar for the guided flow (project-lands-on-canvas, empty-canvas-entry-points,
+      guided-step-setup, inline-audience-creation, single-next-action). Each guided-flow pull
+      request reports the exact click path and the screens it touches.
+    source:
+      text: >-
+        you must be able to produce a 1 minute demo that shows very simple, streamlined, almost
+        guided process, without needing to jump between screens and with a compelling live voting
+        view
+      reference: jev-polls project thread, Giulio, 2026-10-10
   - id: empty-list-creates
     description: >-
       An empty studies or cohorts list is itself the create control: clicking anywhere in it

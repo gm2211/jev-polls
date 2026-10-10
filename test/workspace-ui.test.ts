@@ -1647,6 +1647,8 @@ test('project detail submission saves metadata and pipeline creation assigns own
   const created = S.doc.pipelines[0];
   assert.equal(created.description, 'Which service is preferred?');
   assert.equal(created.context.decisionQuestion, 'Which service is preferred?');
+  assert.equal(created.stages.length, 0, 'a new study is an empty canvas');
+  act(null, { dataset: { act: 'flow-add', kind: 'independent' } });
   assert.equal(Object.values(created.stages[0].questions)[0].label, 'Which service is preferred?', 'an empty first question takes the study question');
   assert.match(browser.element('app').innerHTML, /<h1 tabindex="-1">Which service is preferred\?<\/h1>/);
   act(null, { dataset: { act: 'study-title-edit' } });
@@ -2290,6 +2292,8 @@ test('project entry and back navigation visit every breadcrumb level and preserv
   const browser=browserHarness(false);await settle();const {S,act}=browser.client;
   const html=()=>browser.element('app').innerHTML;
   act(null,{dataset:{act:'open-project',id:'existing-research'}});
+  assert.equal(S.pipelineId,'study','a one-study project opens that study');assert.equal(S.studyLibrary,false);
+  act(null,{dataset:{act:'project-overview'}});
   assert.equal(S.pipelineId,null);assert.equal(S.stageId,null);assert.equal(S.tab,'studies');assert.equal(S.studyLibrary,true);
   assert.doesNotMatch(html(),/aria-label="Project sections"|class="project-overview"/);
   // Section pages show every level: the section is the current, last crumb.
@@ -2308,7 +2312,8 @@ test('project entry and back navigation visit every breadcrumb level and preserv
   assert.match(html(),/<h1 tabindex="-1">Studies<\/h1>/);
   act(null,{dataset:{act:'projects'}});assert.equal(S.projectId,null);
   act(null,{dataset:{act:'open-project',id:'existing-research'}});
-  assert.equal(S.pipelineId,null);assert.equal(S.tab,'studies');assert.equal(S.studyLibrary,true);
+  assert.equal(S.pipelineId,'study');assert.equal(S.tab,'studies');assert.equal(S.studyLibrary,false);
+  act(null,{dataset:{act:'project-overview'}});assert.equal(S.studyLibrary,true);
   act(null,{dataset:{act:'open-pipeline',id:'study'}});
   assert.equal(JSON.stringify(S.doc),before);assert.equal(S.dirty,true);assert.equal(S.sections['setup-wizard-study-panel-answer'],'options');
 });
@@ -2316,7 +2321,8 @@ test('project entry and back navigation visit every breadcrumb level and preserv
 test('breadcrumbs step down one level at a time and opening a study lands on its canvas',async()=>{
   const browser=browserHarness(false);await settle();const {S,act}=browser.client;
   const crumbs=()=>[...browser.element('app').innerHTML.match(/<nav class="workspace-breadcrumbs"[\s\S]*?<\/nav>/)![0].matchAll(/(?:<button[^>]*>|<span[^>]*aria-current="page">)([^<]*)<\/(?:button|span)>/g)].map(m=>m[1]).join(' / ');
-  act(null,{dataset:{act:'open-project',id:'existing-research'}});assert.equal(crumbs(),'Projects / Existing research / Studies');
+  act(null,{dataset:{act:'open-project',id:'existing-research'}});assert.equal(crumbs(),'Projects / Existing research / Studies / Original study');
+  act(null,{dataset:{act:'project-overview'}});assert.equal(crumbs(),'Projects / Existing research / Studies');
   S.sections.pipeline='advanced';S.flowSettingsReturn=true;
   act(null,{dataset:{act:'open-pipeline',id:'study'}});
   assert.equal(S.sections.pipeline,'flow','a study opens on its canvas, not on a step');assert.equal(S.flowPanel,false);
@@ -2402,7 +2408,7 @@ test('study navigation has clear scope, a reachable single-study library and con
 
 test('study rows show concise counts without answer-format badges or changing contracts',async()=>{
   const browser=browserHarness(false);await settle();const {S,act,render}=browser.client;
-  act(null,{dataset:{act:'open-project',id:'existing-research'}});
+  act(null,{dataset:{act:'open-project',id:'existing-research'}});act(null,{dataset:{act:'project-overview'}});
   const p=S.doc.pipelines[0],first=p.stages[0];
   p.cohorts={audience:'cohort',sameAudience:'cohort',unassigned:'',missing:'missing-cohort'};
   const row=()=>browser.element('app').innerHTML.match(/<button[^>]*data-act="open-pipeline"[^>]*data-id="study"[^>]*>[\s\S]*?<\/button>/)![0];
@@ -2424,7 +2430,7 @@ test('study rows show concise counts without answer-format badges or changing co
 
 test('result-only study rows omit an invented answer format and safely expose their clickable title',async()=>{
   const browser=browserHarness(false);await settle();const {S,act,render}=browser.client;
-  act(null,{dataset:{act:'open-project',id:'existing-research'}});
+  act(null,{dataset:{act:'open-project',id:'existing-research'}});act(null,{dataset:{act:'project-overview'}});
   const p=S.doc.pipelines[0];
   p.description='Choose "best" <img src=x onerror=alert(1)> & result';p.cohorts={};
   p.stages=[{id:'combine',kind:'aggregate',label:'Combined result',inputs:[],dependsOn:[],outputQuestion:'result'}];
@@ -3177,4 +3183,77 @@ test('array attributes are charted per value and the note says so', async () => 
   assert.doesNotMatch(html, /\[&quot;Doom/);
   assert.match(html, /each value is charted separately as the share of personas that include it/);
   assert.match(html, /\d+ missing values/);
+});
+
+test('a new project lands on an empty study canvas with two entry points and no cohort detour', async () => {
+  const browser = browserHarness(false); await settle();
+  const { S, act } = browser.client;
+  const html = () => browser.element('app').innerHTML;
+  let finishSave: (value: unknown) => void = () => {};
+  browser.respond('/api/workspace', new Promise(resolve => { finishSave = resolve; }), 'POST');
+  act({}, { dataset: { act: 'new-project' } });
+  const form = { dataset: { form: 'new-project' }, values: { projectName: 'Guided project', projectBrief: 'Pick a name' } };
+  browser.listeners.get('submit')!({ target: { closest: () => form }, preventDefault() {} });
+  await settle();
+  finishSave({ revision: 2, document: (browser.bodies[0]!.body as any).document });
+  await settle();
+  const project = S.doc.projects.find((p: any) => p.name === 'Guided project');
+  assert.equal(S.projectId, project.id, 'the new project is open');
+  assert.equal(project.pipelineIds.length, 1, 'its first study is created on the spot');
+  const study = S.doc.pipelines.find((p: any) => p.id === project.pipelineIds[0]);
+  assert.equal(study.name, 'Study 1');
+  assert.equal(study.stages.length, 0, 'the study starts as an empty canvas');
+  assert.equal(S.pipelineId, study.id);
+  assert.equal(S.tab, 'studies');
+  assert.equal(S.studyLibrary, false, 'not the Studies list');
+  assert.match(html(), /data-form="study-title"/, 'the title editor is open');
+  assert.match(html(), /class="flow-empty" data-act="flow-add" data-kind="independent"/, 'clicking anywhere on the empty canvas adds the first question');
+  assert.match(html(), /data-act="flow-add" data-kind="independent"[^>]*><span class="flow-empty-icon"[\s\S]*?Add your first question/);
+  assert.match(html(), /data-act="draft-panel-open"><span class="flow-empty-icon"[\s\S]*?Describe the study in words/);
+  assert.doesNotMatch(html(), /data-act="review"|Review run/, 'nothing to review on an empty canvas');
+  assert.doesNotMatch(html(), /data-act="new-cohort"/, 'no cohort setup is needed first');
+  act(null, { dataset: { act: 'draft-panel-open' } });
+  assert.match(html(), /Build with words/, 'the words target opens the Build with words panel');
+  assert.equal(S.doc.pipelines.length, browser.client.S.doc.pipelines.length);
+});
+
+test('opening a project lands on a fresh canvas, its only study, or the Studies list from two studies', async () => {
+  const browser = browserHarness(false); await settle();
+  const { S, act, render } = browser.client;
+  const html = () => browser.element('app').innerHTML;
+  const empty = { id: 'empty-project', name: 'Empty', description: '', cohortIds: [], pipelineIds: [] };
+  S.doc.projects.push(empty);
+  act(null, { dataset: { act: 'open-project', id: 'empty-project' } });
+  assert.equal(S.doc.pipelines.filter((p: any) => empty.pipelineIds.includes(p.id)).length, 1, 'a project with no study gets one');
+  assert.equal(S.pipelineId, empty.pipelineIds[0]);
+  assert.match(html(), /Add your first question/);
+  act(null, { dataset: { act: 'projects' } });
+  act(null, { dataset: { act: 'open-project', id: 'empty-project' } });
+  assert.equal(empty.pipelineIds.length, 1, 'reopening opens the study instead of creating another');
+  assert.equal(S.pipelineId, empty.pipelineIds[0]);
+  act(null, { dataset: { act: 'create-study' } });
+  act(null, { dataset: { act: 'projects' } });
+  assert.equal(empty.pipelineIds.length, 2);
+  act(null, { dataset: { act: 'open-project', id: 'empty-project' } });
+  assert.equal(S.pipelineId, null);
+  assert.equal(S.studyLibrary, true, 'two studies land on the Studies list');
+  render();
+  assert.match(html(), /<h1 tabindex="-1">Studies<\/h1>/);
+});
+
+test('the first question added to an empty canvas opens its panel and takes the study question', async () => {
+  const browser = browserHarness(false); await settle();
+  const { S, act } = browser.client;
+  act(null, { dataset: { act: 'open-project', id: 'existing-research' } });
+  act(null, { dataset: { act: 'project-overview' } });
+  S.doc.projects[0].pipelineIds = []; S.doc.pipelines = [];
+  act(null, { dataset: { act: 'create-study' } });
+  const study = S.doc.pipelines[0];
+  study.description = 'Which name fits best?';
+  act(null, { dataset: { act: 'flow-add', kind: 'independent' } });
+  assert.equal(study.stages.length, 1);
+  assert.equal(S.stageId, study.stages[0].id);
+  assert.equal(S.flowPanel, true);
+  assert.equal(Object.values(study.stages[0].questions)[0].label, 'Which name fits best?');
+  assert.doesNotMatch(browser.element('app').innerHTML, /class="flow-empty"/);
 });

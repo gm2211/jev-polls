@@ -104,8 +104,15 @@ function flowNode(p,s){
 function flowNewStage(p,kind,source){
   return kind==='aggregate'?{id:id(),kind:'aggregate',label:'Combined answers',inputs:[],outputQuestion:'combined',dependsOn:[]}:kind==='decision'?{id:id(),kind:'decision',label:'Final result',from:{stage:'',question:''},outputQuestion:'decision',dependsOn:[]}:{id:id(),kind:'poll',label:'New question',cohort:source?.kind==='poll'?source.cohort:Object.keys(p.cohorts)[0]||'',questions:{answer:{type:'choice',label:'',instructions:'Answer the question using your persona and the supplied context.',criteria:{option_a:'',option_b:''}}},inputs:{},dependsOn:[],repeats:1};
 }
+/** The empty canvas is itself the way in: a question target, a describe-in-words target, and a click anywhere adds the first question. */
+function flowEmptyCanvas(){
+  return '<div class="flow-empty" data-act="flow-add" data-kind="independent"><div class="flow-empty-targets">'+
+    '<button type="button" class="flow-empty-target" data-primary="true" data-act="flow-add" data-kind="independent"><span class="flow-empty-icon" aria-hidden="true">'+icon('plus')+'</span><strong>Add your first question</strong><span>Choose how people answer, then write the question.</span></button>'+
+    '<button type="button" class="flow-empty-target" data-act="draft-panel-open"><span class="flow-empty-icon" aria-hidden="true">'+icon('edit')+'</span><strong>Describe the study in words</strong><span>Tell the assistant what you want to learn, then review its draft.</span></button>'+
+    '</div><p class="flow-empty-hint">Click anywhere on the canvas to add a question.</p></div>';
+}
 function flowCanvas(p){
-  if(!p.stages.length)return empty('Start with your question','Add a question and choose who answers.','<button class="button primary" data-act="flow-add" data-kind="independent">Add question</button>');
+  if(!p.stages.length)return flowEmptyCanvas();
   const depths=flowDepths(p),levels=[...new Set(depths.values())].sort((a,b)=>a-b);
   return '<div class="flow-viewport" tabindex="0" role="region" aria-label="Study flow canvas. Drag steps to arrange them; click empty canvas or press Enter to add a step." aria-keyshortcuts="Enter"><div class="flow-space"><div class="flow-map">'+levels.map(level=>'<div class="flow-column">'+p.stages.filter(s=>depths.get(s.id)===level).map(s=>flowNode(p,s)).join('')+'</div>').join('')+'</div>'+flowCreateMenu(p)+'</div></div>';
 }
@@ -192,6 +199,7 @@ function flowAction(a,el){
   if(a==='flow-disconnect'){const s=p.stages.find(s=>s.id===el.dataset.id);if(s)flowDisconnect(p,s,el.dataset.key)}
   else if(a==='flow-add'){
     const source=p.stages.find(s=>s.id===el.dataset.id),output=source&&phaseOutput(p,source)[0],stage=flowNewStage(p,el.dataset.kind,source);
+    if(!p.stages.length&&stage.kind==='poll'&&p.description?.trim())Object.values(stage.questions)[0].label=p.description.trim();
     if(source&&output)flowConnect({...p,stages:[...p.stages,stage]},source.id,output.id,stage.id);
     p.stages.push(stage);S.stageId=stage.id;S.flowPanel=true;S.flowAdd=null;S.flowSource=null;S.flowCreate=null;S.flowCohortPick=stage.kind==='poll';S.sections['flow-inspector']=stage.kind==='poll'?'cohort':'question';
   }else return true;
@@ -355,6 +363,17 @@ root.addEventListener('keydown',e=>{
 `;
 
 export const WORKSPACE_FLOW_CSS = `
+.flow-empty{display:grid;justify-items:center;align-content:center;gap:16px;min-height:360px;padding:32px 16px;background:var(--raised);border-top:1px solid var(--line);cursor:pointer}
+.flow-empty-targets{display:flex;flex-wrap:wrap;justify-content:center;gap:16px;width:100%}
+.flow-empty-target{appearance:none;display:grid;justify-items:center;align-content:center;gap:8px;flex:1 1 240px;max-width:340px;min-height:180px;padding:24px 20px;border:2px dashed var(--control-line);border-radius:var(--radius-panel,10px);background:var(--surface);color:var(--ink);font:inherit;text-align:center;cursor:pointer;transition:border-color 140ms ease-out,background 140ms ease-out}
+.flow-empty-target[data-primary=true]{border-color:var(--blue)}
+.flow-empty-target:hover,.flow-empty-target:focus-visible{border-color:var(--blue);background:var(--action)}
+.flow-empty-target:focus-visible{outline:2px solid var(--focus,var(--blue));outline-offset:2px}
+.flow-empty-target strong{font:600 17px/1.3 var(--display);letter-spacing:-.01em}
+.flow-empty-target>span:last-child{max-width:30ch;color:var(--muted);font-size:13px}
+.flow-empty-icon{display:grid;place-items:center;width:44px;height:44px;border-radius:50%;background:var(--action);color:var(--blue)}.flow-empty-icon .ui-icon{width:22px;height:22px}
+.flow-empty-hint{margin:0;color:var(--muted);font-size:12px}
+@media(min-width:761px){.flow-empty{min-height:max(360px,calc(100dvh - 330px))}}
 .flow-workspace{display:grid;grid-template-columns:minmax(0,1fr) 360px;gap:16px;align-items:start;min-width:0}
 .flow-board,.flow-inspector{border:1px solid var(--line);border-radius:var(--radius-panel);background:var(--surface);min-width:0;overflow:hidden}
 .flow-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 16px;border-bottom:1px solid var(--line)}.flow-toolbar h2{margin:0;font-size:14px;white-space:nowrap}.flow-toolbar h2 span{font-weight:400;font-size:12px;margin-left:6px;color:var(--muted)}.flow-toolbar .row{gap:6px}

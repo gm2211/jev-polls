@@ -10,7 +10,9 @@ prose: >-
   Save.
 behaviors:
   - id: create-project
-    description: New project asks for a name and research brief, saves it, and opens its Studies tab.
+    description: >-
+      New project asks for a name and research brief, saves it, and opens a new empty study
+      canvas (study-journey.project-lands-on-canvas).
   - id: rename-confirm
     description: >-
       Renaming a project uses an explicit confirm control, a check icon, that commits the new
