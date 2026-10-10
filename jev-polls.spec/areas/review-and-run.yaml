@@ -41,3 +41,13 @@ behaviors:
       text: >-
         we're gonna have one Jev for each persona so we need to make sure that the collective size of the question with all the options and the backstory for the persona, any detail and context about the persona, those things have to be within the limits for Jev otherwise it's just not gonna work.
       reference: 2026-10-09 jev-polls project thread, Giulio
+  - id: batched-input-review
+    description: >-
+      A step with a batched input shows how it reads, e.g. "Reads 1,000 responses in 10 batches of
+      100, then combines them in 1 round", with its largest Jev request. Request counts include
+      every layer, and a step blocked by an unbatched responses input offers Split into batches on
+      its Inputs tab, which Review opens when it reports the step.
+    source:
+      text: >-
+        we might end up having to figure out some sort of like map reduce at some point if we if the size of our inputs is too big uh between steps where we cannot pass the outputs of what the previous step into the later step um we might have to basically kind of like actually create like a clone of all the steps into like a clone the steps of the second step. So for example if it was like board member eight board eight board members reviewing you know the outputs of like a thousand like cohorts, maybe it will have to be something like uh eight board board members review the first batch of like a hundred, another eight board members review like the batch of another a hundred, and so on and so forth in parallel and then you know eight board members and you ideally like then we can fit like the output of like those steps into like a single like thing but we w we'll have you know enough layers until it all fits in the input tokens.
+      reference: 2026-10-09 jev-polls project thread, Giulio

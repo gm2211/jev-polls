@@ -6,7 +6,7 @@ import type { Cohort, Json, Pipeline } from './types.js';
 import type { WorkspaceDocument, WorkspaceProject, WorkspaceSaved } from './workspace-types.js';
 import { parseCohort, parsePipeline, stageOrder } from './schema.js';
 import { validateTargets } from './cohort-insights.js';
-import { enforceBudgets, estimateBudgets, type StageBudget } from './request-budget.js';
+import { enforceBudgets, estimateBudgets, type BatchPlan, type StageBudget } from './request-budget.js';
 
 const FILE_NAME = 'workspace.json';
 const MAX_DOCUMENT_BYTES = MAX_WORKSPACE_BYTES;
@@ -199,24 +199,25 @@ export function workspacePlan(document: WorkspaceDocument, pipelineId: string, p
   pipeline: Pipeline;
   cohorts: Record<string, Cohort>;
   maxRequests: number;
-  stages: Array<{ id: string; label: string; kind: string; dependsOn: string[]; cohort?: string; profiles?: number; repeats?: number; requests: number; budget?: StageBudget }>;
+  stages: Array<{ id: string; label: string; kind: string; dependsOn: string[]; cohort?: string; profiles?: number; repeats?: number; requests: number; budget?: StageBudget; batching?: BatchPlan }>;
   warnings: string[];
 } {
   const { projectId, pipeline, cohorts } = resolveWorkspaceProject(document, pipelineId);
   let maxRequests = 0;
   const ordered = stageOrder(pipeline);
   // Jev limits apply per request; GLiNER has its own input limit enforced at run time.
-  const budgets = provider === 'gliner' ? {} : estimateBudgets(pipeline, cohorts, ordered);
-  const budgetWarnings = enforceBudgets(budgets);
+  const budgets = estimateBudgets(pipeline, cohorts, ordered);
+  const budgetWarnings = provider === 'gliner' ? [] : enforceBudgets(budgets);
   const stages = ordered.map((stage) => {
     if (stage.kind !== 'poll') return { id: stage.id, label: stage.label, kind: stage.kind, dependsOn: [...stage.dependsOn], requests: 0 };
     const cohort = cohorts[stage.cohort]!;
     const positiveIds = new Set(cohort.segments.filter((segment) => segment.weight > 0).map((segment) => segment.id));
     const profiles = stage.size ?? cohort.personas.filter((persona) => positiveIds.has(persona.segment)).length;
     const repeats = stage.repeats ?? 1;
-    const requests = profiles * repeats;
+    const batching = budgets[stage.id]?.batching;
+    const requests = profiles * repeats * (batching?.requestsPerRun ?? 1);
     maxRequests += requests;
-    return { id: stage.id, label: stage.label, kind: stage.kind, dependsOn: [...stage.dependsOn], cohort: stage.cohort, profiles, repeats, requests, ...(budgets[stage.id] ? { budget: budgets[stage.id]! } : {}) };
+    return { id: stage.id, label: stage.label, kind: stage.kind, dependsOn: [...stage.dependsOn], cohort: stage.cohort, profiles, repeats, requests, ...(budgets[stage.id] && provider !== 'gliner' ? { budget: budgets[stage.id]! } : {}), ...(batching ? { batching } : {}) };
   });
   const warnings = new Set<string>(budgetWarnings);
   for (const cohort of new Set(Object.values(cohorts))) {
@@ -311,11 +312,19 @@ function validateStageDraft(value: unknown, path: string): void {
       for (const [alias, binding] of Object.entries(bindings)) {
         id(alias, `${path}.inputs key`);
         const entryPath = `${path}.inputs.${alias}`;
-        const b = object(binding, entryPath, ['stage', 'question', 'select'], ['stage', 'question']);
+        const b = object(binding, entryPath, ['stage', 'question', 'select', 'batch'], ['stage', 'question']);
         string(b.stage, `${entryPath}.stage`); if (b.stage !== '') id(b.stage, `${entryPath}.stage`);
         string(b.question, `${entryPath}.question`); if (b.question !== '') id(b.question, `${entryPath}.question`);
         if (b.select !== undefined) enumValue(b.select, ['summary', 'winner', 'mean', 'probabilities', 'responses'], `${entryPath}.select`);
+        if (b.batch !== undefined) {
+          if (b.select !== 'responses') throw new Error(`${entryPath}.batch needs select 'responses'`);
+          if (b.batch !== 'auto') {
+            const setting = object(b.batch, `${entryPath}.batch`, ['size'], ['size']);
+            if (!Number.isSafeInteger(setting.size) || (setting.size as number) < 1 || (setting.size as number) > 100_000) throw new Error(`${entryPath}.batch.size must be an integer between 1 and 100000`);
+          }
+        }
       }
+      if (Object.values(bindings).filter(binding => (binding as { batch?: unknown }).batch !== undefined).length > 1) throw new Error(`${path}.inputs can split only one input into batches`);
     }
   } else if (preliminary.kind === 'aggregate') {
     const s = object(value, path, [...common, 'inputs', 'outputQuestion'], ['id', 'label', 'kind', 'dependsOn', 'inputs', 'outputQuestion']);
