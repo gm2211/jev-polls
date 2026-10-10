@@ -30,9 +30,9 @@ const savedJobSchema = z.object({
   id: z.string().regex(WORKSPACE_RUN_ID), projectId: safeId, pipelineId: safeId, pipelineName: z.string().max(100_000),
   status: z.enum(['running', 'completed', 'failed']), createdAt: z.string().max(100), message: z.string().max(100_000),
   provider: evaluationProvider.optional(),
-  stages: z.array(z.object({ id: safeId, label: z.string().max(100_000), kind: z.enum(['poll', 'aggregate', 'decision']), dependsOn: z.array(safeId), status: z.enum(['pending', 'running', 'completed', 'skipped', 'failed']), reason: z.string().max(100_000).optional() }).strict()).optional(),
+  stages: z.array(z.object({ id: safeId, label: z.string().max(100_000), kind: z.enum(['poll', 'aggregate', 'decision']), dependsOn: z.array(safeId), status: z.enum(['pending', 'running', 'completed', 'skipped', 'failed']), reason: z.string().max(100_000).optional(), batching: z.object({ batches: z.number().int().positive(), reduceRounds: z.number().int().positive(), layers: z.number().int().nonnegative() }).strict().optional() }).strict()).optional(),
   progress: z.object({ stage: safeId, completed: z.number().int().nonnegative(), total: z.number().int().nonnegative() }).strict().optional(),
-  liveMembers: z.array(z.object({ stage: safeId, personaId: safeId, label: z.string().max(100_000), segment: safeId, age: z.number().finite(), repeat: z.number().int().positive(), status: z.enum(['queued','running','completed','failed']), answers: z.record(z.string(), z.unknown()).optional(), model: z.string().optional(), cacheHit: z.boolean().optional(), reason: z.string().max(100_000).optional() }).strict()).optional(),
+  liveMembers: z.array(z.object({ stage: safeId, personaId: safeId, label: z.string().max(100_000), segment: safeId, age: z.number().finite(), repeat: z.number().int().positive(), weight: z.number().finite().nonnegative().optional(), order: z.number().int().nonnegative().optional(), batch: z.object({ phase: z.enum(['map','combine']), done: z.number().int().nonnegative(), total: z.number().int().positive() }).strict().optional(), status: z.enum(['queued','running','completed','failed']), answers: z.record(z.string(), z.unknown()).optional(), model: z.string().optional(), cacheHit: z.boolean().optional(), reason: z.string().max(100_000).optional() }).strict()).optional(),
   usage: z.object({ inputTokens: z.number().finite().nonnegative(), outputTokens: z.number().finite().nonnegative(), requests: z.number().int().nonnegative(), cacheHits: z.number().int().nonnegative(), tokenUsage: z.literal('unreported').optional(), measuredInputTokens: z.number().int().nonnegative().optional() }).strict().optional(),
   reportUrl: z.string().regex(/^\/reports\/[0-9a-f-]{36}$/).optional(),
 }).strict();
@@ -42,7 +42,7 @@ function initialRunStages(pipeline: Pipeline): NonNullable<WorkspaceRun['stages'
 function recordedRunStages(pipeline: Pipeline, record: Awaited<ReturnType<typeof loadRun>>): NonNullable<WorkspaceRun['stages']> {
   return pipeline.stages.map(stage => {
     const result = record.stages[stage.id];
-    return { id: stage.id, label: stage.label, kind: stage.kind, dependsOn: [...stage.dependsOn], status: result?.status ?? 'failed', ...(result?.reason ? { reason: result.reason } : {}) };
+    return { id: stage.id, label: stage.label, kind: stage.kind, dependsOn: [...stage.dependsOn], status: result?.status ?? 'failed', ...(result?.reason ? { reason: result.reason } : {}), ...(result?.batching && result.batching.batches > 1 ? { batching: { batches: result.batching.batches, reduceRounds: result.batching.reduceRounds, layers: result.layers?.length ?? 0 } } : {}) };
   });
 }
 class HttpError extends Error { constructor(readonly status: number, readonly code: string, message: string) { super(message); } }
@@ -78,6 +78,8 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
   const connectAccount = options.connectAccount ?? (async (key: string) => { const result = await verifyTypeSafeConnection(key); await setApiKey(key); return result; });
   const jobs = new Map<string, WorkspaceRun>();
   const runRecords = new Map<string, string>();
+  /** Per live run: a change counter and the counter value at each member's last event, so polls can ask only for what changed. */
+  const liveChanges = new WeakMap<WorkspaceRun, { version: number; versions: number[]; finished: number }>();
   const plans = new Map<string, { pipelineId: string; revision: number; provider: 'typesafe' | 'gliner'; expires: number }>();
   let activeRun: WorkspaceRun | null = null;
   let activeProvider: Provider | undefined;
@@ -222,10 +224,16 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
         },
         onMemberProgress: event => {
           const members = job.liveMembers ??= [];
+          const changes = liveChanges.get(job) ?? { version: 0, versions: [], finished: 0 };
+          liveChanges.set(job, changes);
           const key = `${event.stage}:${event.personaId}:${event.repeat}`;
-          const index = liveMemberIndexes.get(key);
-          if (index === undefined) { liveMemberIndexes.set(key, members.length); members.push(event); }
-          else members[index] = event;
+          let index = liveMemberIndexes.get(key);
+          // The order members finished in is what a replay reveals them in.
+          const order = event.status === 'completed' || event.status === 'failed' ? changes.finished++ : undefined;
+          const stored = order === undefined ? event : { ...event, order };
+          if (index === undefined) { index = members.length; liveMemberIndexes.set(key, index); members.push(stored); }
+          else members[index] = stored;
+          changes.versions[index] = ++changes.version;
         },
       });
       await writeJson(join(runDirectory, 'run.json'), record);
@@ -377,7 +385,16 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
         const id = key.slice(0, -'/record'.length);
         send(response, 200, await savedRunRecord(await ownedRun(id))); return;
       }
-      send(response, 200, await ownedRun(key)); return;
+      const job = await ownedRun(key);
+      // `?since=<liveVersion>` returns only members that changed after that point; without it, everything.
+      const changes = liveChanges.get(job);
+      const sinceText = new URL(request.url ?? '/', origin).searchParams.get('since');
+      if (changes && job.liveMembers) {
+        const since = sinceText === null ? -1 : Number(sinceText);
+        const delta = Number.isInteger(since) && since >= 0;
+        send(response, 200, { ...job, liveMembers: delta ? job.liveMembers.filter((_, index) => (changes.versions[index] ?? 0) > since) : job.liveMembers, liveVersion: changes.version, liveTotal: job.liveMembers.length, ...(delta ? { liveDelta: true } : {}) }); return;
+      }
+      send(response, 200, job); return;
     }
     if (method === 'GET' && pathname.startsWith('/reports/')) {
       const job = await ownedRun(pathname.slice('/reports/'.length));

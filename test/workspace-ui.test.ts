@@ -58,7 +58,7 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={plural,recoverDraftingJob,recoverableDraftingJob,loadLocalAgents,cohortJobNotice,cohortJobNoticeVisible,commandState,adoptCohortProposal,commandEntries,commandExecute,inlineCohortJobVisible,inlineCohortTarget,setupCohortPicker,runCaveats,beginRun,commandApplyProposal,commandJobVisible,S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,locationHash,restoreLocation,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,studies,review,say,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,studyQuestionList,validateSetupAnswers,questionParts,upsertQuestion,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList,studyNextAction,studyReviewPanel,rememberRunSignature,ensureStudyQuestion};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={locationHash,plural,recoverDraftingJob,recoverableDraftingJob,loadLocalAgents,cohortJobNotice,cohortJobNoticeVisible,commandState,adoptCohortProposal,commandEntries,commandExecute,inlineCohortJobVisible,inlineCohortTarget,setupCohortPicker,runCaveats,beginRun,commandApplyProposal,commandJobVisible,S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,locationHash,restoreLocation,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,studies,review,say,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,studyQuestionList,validateSetupAnswers,questionParts,upsertQuestion,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList,studyNextAction,studyReviewPanel,rememberRunSignature,ensureStudyQuestion};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
   if (openExistingProject) (context as any).clientTest.S.projectId = 'existing-research';
@@ -186,7 +186,8 @@ test('run starts only with ready provider and valid current form settings', asyn
   const submissions = browser.bodies.filter(entry => entry.path === '/api/run');
   assert.equal(submissions.length, 1);
   assert.deepEqual(submissions[0]!.body, { projectId: S.projectId, pipelineId: 'study', provider: 'typesafe', revision: 1, planToken: 'reviewed-plan', seed: 'chosen-seed', concurrency: 3, maxRequests: 17 });
-  assert.equal(S.tab, 'runs'); assert.equal(S.plan, null); assert.equal(S.liveRunId, 'new-run');
+  // The map opens where the study is; there is no jump to the Runs page.
+  assert.equal(S.tab, 'studies'); assert.equal(S.plan, null); assert.equal(S.liveRunId, 'new-run');
 });
 
 test('run review escapes imported pipeline names', async () => {
@@ -2705,20 +2706,20 @@ test('live run navigation pins selected stage and member while polling advances 
   const members=Array.from({length:52},(_,i)=>({stage:'screen',personaId:'person-'+i,label:'Person '+i,repeat:1,status:i===0?'running':'queued',segment:'Audience',age:30}));
   const run:any={id:'run-live',projectId:S.projectId,pipelineName:'Live study',createdAt:'2026-10-08T12:00:00Z',status:'running',message:'Evaluating',liveMembers:members};
   S.snap.runs=[run];render();assert.match(browser.element('app').innerHTML,/data-act="live-open"/);
-  act(null,{dataset:{act:'live-open',id:run.id}});assert.match(browser.element('app').innerHTML,/aria-label="Live cohort behavior"/);
-  act(null,{dataset:{act:'live-page',page:'2',stage:'screen'}});assert.equal(S.liveMemberPage,2);assert.equal(S.liveStage,'screen');
-  assert.match(browser.element('app').innerHTML,/Page 3 of 3/);assert.match(browser.element('app').innerHTML,/Person 51/);
-  act(null,{dataset:{act:'live-member',key:'screen:person-51:1',stage:'screen',page:'2'}});
+  act(null,{dataset:{act:'live-open',id:run.id}});assert.match(browser.element('app').innerHTML,/aria-label="Live voting"/);
+  assert.equal((browser.element('app').innerHTML.match(/class="lv-tile[" ]/g)||[]).length,52,'every member is on the one map, no paging');
+  act(null,{dataset:{act:'live-member',key:'screen:person-51:1'}});
   assert.equal(S.liveMemberKey,'screen:person-51:1');assert.match(browser.element('app').innerHTML,/<h3>Person 51<\/h3>/);
   const next=structuredClone(S.snap);next.runs[0].liveMembers.forEach((m:any)=>m.status='completed');next.runs[0].liveMembers.push({stage:'follow-up',personaId:'next',label:'Next member',repeat:1,status:'running',segment:'Audience',age:35});
   next.runs[0].liveMembers[51].answers={interest:{type:'noul',noul:.8}};
   applySnapshot(next);
-  assert.equal(S.liveStage,'screen');assert.equal(S.liveMemberPage,2);assert.equal(S.liveMemberKey,'screen:person-51:1');
-  assert.match(browser.element('app').innerHTML,/<h3>Person 51<\/h3>/);assert.match(browser.element('app').innerHTML,/Yes · 80%/);
-  act(null,{dataset:{act:'live-stage',stage:'follow-up'}});assert.equal(S.liveMemberPage,0);assert.equal(S.liveMemberKey,'');assert.match(browser.element('app').innerHTML,/<h3>Next member<\/h3>/);
+  assert.equal(S.liveMemberKey,'screen:person-51:1');
+  assert.match(browser.element('app').innerHTML,/data-stage="follow-up"/,'a new running step takes over the map');
+  act(null,{dataset:{act:'live-stage',stage:'screen'}});assert.equal(S.liveStage,'screen');assert.equal(S.liveMemberKey,'');
+  assert.match(browser.element('app').innerHTML,/data-stage="screen"/);
   act(null,{dataset:{act:'live-close'}});assert.equal(S.liveRunId,'history');assert.match(browser.element('app').innerHTML,/Study runs/);
-  applySnapshot({...next,runs:[{...next.runs[0],message:'Still evaluating'}]});assert.doesNotMatch(browser.element('app').innerHTML,/aria-label="Live cohort behavior"/);
-  act(null,{dataset:{act:'live-open',id:run.id}});assert.equal(S.liveMemberPage,0);assert.equal(S.liveMemberKey,'');assert.equal(S.liveStage,'');
+  applySnapshot({...next,runs:[{...next.runs[0],message:'Still evaluating'}]});assert.doesNotMatch(browser.element('app').innerHTML,/aria-label="Live voting"/);
+  act(null,{dataset:{act:'live-open',id:run.id}});assert.equal(S.liveMemberKey,'');assert.equal(S.liveStage,'');
 });
 
 test('run polling preserves draft panel prompt focus and text selection',async()=>{
@@ -2790,16 +2791,18 @@ test('run review keeps nonblocking assumptions optional and preserves run settin
 test('voting replay reveals saved members without inference and stops at navigation boundaries', async () => {
   const browser = browserHarness(); await settle();
   const { S, act, render } = browser.client;
-  const run = { id: 'arena', projectId: S.projectId, pipelineName: 'Replay study', status: 'completed', createdAt: '2026-10-08T12:00:00Z', message: 'Done', liveMembers: Array.from({length: 26}, (_, i) => ({stage:'poll', personaId:'p'+i, label:'Profile '+i, segment:'general', age:30, repeat:1, status:'completed', answers:{test:{type:'choice', choice:'saved-'+i, probabilities:{yes:1}}}})) };
+  const run = { id: 'arena', projectId: S.projectId, pipelineName: 'Replay study', status: 'completed', createdAt: '2026-10-08T12:00:00Z', message: 'Done', liveMembers: Array.from({length: 26}, (_, i) => ({stage:'poll', personaId:'p'+i, label:'Profile '+i, segment:'general', age:30, repeat:1, status:'completed', order:25-i, answers:{test:{type:'choice', choice:'saved-'+i, probabilities:{yes:1}}}})) };
   S.snap.runs=[run]; S.tab='runs'; S.liveRunId=run.id; render();
+  assert.match(browser.element('app').innerHTML,/Voting replay/);
   const initialRequests=browser.requests.length;
   act(null,{dataset:{act:'arena-replay'}});
-  assert.doesNotMatch(browser.element('app').innerHTML,/Selected: saved-0/);
+  assert.match(browser.element('app').innerHTML,/0 of 26 members revealed/);
   act(null,{dataset:{act:'arena-step'}});
-  assert.match(browser.element('app').innerHTML,/Selected: saved-0/);
+  assert.match(browser.element('app').innerHTML,/1 of 26 members revealed/);
+  assert.equal(S.liveMemberKey,'poll:p25:1','finishing order, not saved order, decides who is revealed first');
+  assert.match(browser.element('app').innerHTML,/Selected: saved-25/);
   for(let i=0;i<24;i++)act(null,{dataset:{act:'arena-step'}});
-  assert.equal(S.liveMemberPage,1);
-  assert.match(browser.element('app').innerHTML,/Selected: saved-24/);
+  assert.match(browser.element('app').innerHTML,/25 of 26 members revealed/);
   act(null,{dataset:{act:'arena-play'}});
   const staleTick=browser.timeouts.at(-1)!;
   act(null,{dataset:{act:'live-close'}});
@@ -2808,7 +2811,8 @@ test('voting replay reveals saved members without inference and stops at navigat
   assert.match(browser.element('app').innerHTML,/Study runs/);
   assert.equal(browser.requests.length,initialRequests,'Playback must not dispatch any API request');
   act(null,{dataset:{act:'live-open',id:run.id}});
-  assert.match(browser.element('app').innerHTML,/Selected: saved-0/);
+  assert.match(browser.element('app').innerHTML,/Voting replay/);
+  assert.doesNotMatch(browser.element('app').innerHTML,/revealed/,'reopening shows the whole saved result, not a replay in progress');
 });
 
 test('replay pauses while hidden, ignores live runs, and escapes run names', async () => {
@@ -2817,14 +2821,16 @@ test('replay pauses while hidden, ignores live runs, and escapes run names', asy
   const run={id:'arena',projectId:S.projectId,pipelineName:'<unsafe>',status:'running',createdAt:'2026-10-08T12:00:00Z',message:'Running',liveMembers:[{stage:'poll',personaId:'p',label:'Profile',segment:'general',age:30,repeat:1,status:'completed',answers:{test:{type:'noul',noul:.9}}}]};
   S.snap.runs=[run];render();
   assert.match(browser.element('app').innerHTML,/&lt;unsafe&gt;/);
+  assert.match(browser.element('app').innerHTML,/90\.0%/);
   act(null,{dataset:{act:'arena-replay'}});
-  assert.match(browser.element('app').innerHTML,/Yes · 90%/);
+  assert.doesNotMatch(browser.element('app').innerHTML,/revealed/,'a live run has no replay');
   run.status='completed';render();act(null,{dataset:{act:'arena-replay'}});act(null,{dataset:{act:'arena-play'}});
+  assert.doesNotMatch(browser.element('app').innerHTML,/90\.0%/);
   const tick=browser.timeouts.at(-1)!;
   browser.document.visibilityState='hidden';browser.listeners.get('visibilitychange')!();tick();
-  assert.doesNotMatch(browser.element('app').innerHTML,/Yes · 90%/);
+  assert.doesNotMatch(browser.element('app').innerHTML,/90\.0%/);
   browser.document.visibilityState='visible';act(null,{dataset:{act:'arena-step'}});
-  assert.match(browser.element('app').innerHTML,/Yes · 90%/);
+  assert.match(browser.element('app').innerHTML,/90\.0%/);
 });
 
 test('replay scrub preserves bounds and selecting a member pauses playback', async () => {
@@ -2835,9 +2841,10 @@ test('replay scrub preserves bounds and selecting a member pauses playback', asy
   act(null,{dataset:{act:'arena-scrub'},value:'-9'});
   assert.match(browser.element('app').innerHTML,/0 of 1 member revealed/);
   act(null,{dataset:{act:'arena-play'}});const tick=browser.timeouts.at(-1)!;
-  act(null,{dataset:{act:'live-member',stage:'poll',key:'poll:p:1',page:'0'}});tick();
+  act(null,{dataset:{act:'live-member',stage:'poll',key:'poll:p:1'}});tick();
   assert.match(browser.element('app').innerHTML,/0 of 1 member revealed/);
-  assert.doesNotMatch(browser.element('app').innerHTML,/Yes · 40%/);
+  assert.doesNotMatch(browser.element('app').innerHTML,/40\.0%/);
+  assert.match(browser.element('app').innerHTML,/Not revealed yet/);
 });
 
 test('an automatically opened active arena stays visible when the run completes', async () => {
@@ -2845,11 +2852,32 @@ test('an automatically opened active arena stays visible when the run completes'
   S.tab='runs';S.liveRunId=null;
   S.snap.runs=[{id:'finishing',projectId:S.projectId,pipelineName:'Finishing',status:'running',liveMembers:[]}];
   render();assert.equal(S.liveRunId,'finishing');
+  assert.match(browser.element('app').innerHTML,/aria-label="Live voting"/);
   applySnapshot({...S.snap,runs:[{...S.snap.runs[0],status:'completed',message:'Done'}]});
-  assert.match(browser.element('app').innerHTML,/aria-label="Live cohort behavior"/);
+  assert.match(browser.element('app').innerHTML,/aria-label="Voting replay"/);
   assert.equal(S.liveRunId,'finishing');
 });
 
+test('starting a run opens live voting in place of the canvas and Back to study returns', async () => {
+  const browser=browserHarness();await settle();const {S,act,render,applySnapshot,locationHash}=browser.client;
+  S.tab='studies';S.pipelineId='study';S.stageId='panel';S.studyLibrary=false;
+  const members=[{stage:'panel',personaId:'a',label:'Ada',repeat:1,status:'running',segment:'Audience',age:30},{stage:'panel',personaId:'b',label:'Bo',repeat:1,status:'queued',segment:'Audience',age:41}];
+  S.snap.runs=[{id:'run-now',projectId:S.projectId,pipelineId:'study',pipelineName:'My study',createdAt:'2026-10-10T12:00:00Z',status:'running',message:'Starting',liveMembers:members}];
+  render();assert.match(browser.element('app').innerHTML,/data-act="live-study-open" data-id="run-now">Live voting/);
+  act(null,{dataset:{act:'live-study-open',id:'run-now'}});
+  const html=browser.element('app').innerHTML;
+  assert.equal(S.tab,'studies');assert.equal(S.liveInline,true);
+  assert.match(html,/aria-label="Live voting"/);assert.match(html,/data-act="live-back">Back to study/);
+  assert.doesNotMatch(html,/flow-workspace|data-act="review"/,'the map replaces the canvas');
+  assert.equal((html.match(/class="lv-tile[" ]/g)||[]).length,2);
+  assert.match(locationHash(),/live=run-now/);
+  applySnapshot({...S.snap,runs:[{...S.snap.runs[0],status:'completed',message:'Done'}]});
+  assert.match(browser.element('app').innerHTML,/aria-label="Voting replay"/);assert.match(browser.element('app').innerHTML,/data-act="live-back"/);
+  act(null,{dataset:{act:'live-back'}});
+  assert.equal(S.liveInline,false);assert.doesNotMatch(browser.element('app').innerHTML,/aria-label="Voting replay"/);
+  assert.match(browser.element('app').innerHTML,/data-act="live-study-open" data-id="run-now">Voting replay/);
+  assert.doesNotMatch(locationHash(),/live=/);
+});
 
 test('cohort rows open through a named native button and keep delete separate',async()=>{
   const browser=browserHarness();await settle();const {S,act,cohortCard}=browser.client;
