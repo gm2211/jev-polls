@@ -1381,7 +1381,7 @@ test('streamed personas rise mid-batch, stay within the batch size, and are neve
     await writeFile(args[args.indexOf('--output-last-message') + 1]!, cohortBatchResponse(child.input)); child.finish();
   }) }); t.after(() => service.close());
   const job = service.start({ engine: 'codex', prompt: 'Create 30 adults', revision: 0, document: empty, cohort: { id: 'customers', size: 30 } });
-  await waitFor(() => stateOf(service, job.id, 1)?.state === 'connecting');
+  await waitFor(() => first !== undefined && stateOf(service, job.id, 1)?.state === 'connecting');
   assert.equal(service.get(job.id)!.progress!.inFlightPersonas, 0);
   first.stdout.write('{"documentJson":"{\\"id\\":\\"customers\\",\\"personas\\":[' + personaKey(1) + '{\\"label\\":\\"P\\",\\"backg');
   await waitFor(() => stateOf(service, job.id, 1)?.state === 'writing');
