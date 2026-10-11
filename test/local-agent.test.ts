@@ -108,7 +108,7 @@ test('cohort progress reports connection checking, the setup call, and only acce
     const data = requestData(input);
     assert.equal(data.cohortMetadata.id, 'customers'); assert.equal(data.originalCohortMetadata, undefined);
     assert.deepEqual(data.segmentMix, { customers: 10 });
-    assert.match(input, /Return documentJson as a JSON array of exactly 10 persona objects/);
+    assert.match(input, /Return personas as an array of exactly 10 persona objects/); assert.doesNotMatch(input, /Include source IDs and syntheticFields/);
   }
   replies[2]!.resolve(cohortBatchResponse(batchInputs[1]));
   await waitFor(() => service.get(job.id)!.progress!.completedBatches === 1);
@@ -1528,6 +1528,39 @@ test('Claude falls back to the single JSON result when the CLI rejects the strea
   assert.equal(seen[0], 'stream-json'); assert.ok(seen.includes('json'));
 });
 
+test('Claude writes persona batches as real JSON at low effort, and drops --effort for a CLI without it', async t => {
+  for (const effortSupported of [true, false]) {
+    const root = await setup(t); const batchArgs: string[][] = [];
+    const service = new LocalAgentService({ temporaryRoot: root, spawn: fakeSpawner(async ({ args, child }) => {
+      const schema = JSON.parse(args[args.indexOf('--json-schema') + 1]!) as { properties: Record<string, unknown> };
+      const reply = JSON.parse(cohortBatchResponse(child.input)) as { documentJson: string };
+      if (!schema.properties.personas) { assert.ok(!args.includes('--effort'), 'the setup call keeps the default effort'); child.stdout.write(JSON.stringify({ type: 'result', is_error: false, structured_output: { documentJson: reply.documentJson, explanation: 'ok' } }) + '\n'); child.finish(); return; }
+      batchArgs.push([...args]);
+      if (!effortSupported && args.includes('--effort')) { child.finish(1); return; }
+      // Only the fields that differ between people: the app fills id, weight, sourceIds and syntheticFields.
+      const personas = (JSON.parse(reply.documentJson) as Cohort).personas.map(({ label, segment, age, background, attributes }) => ({ label, segment, age, background, attributes }));
+      child.stdout.write(JSON.stringify({ type: 'result', is_error: false, structured_output: { personas } }) + '\n'); child.finish();
+    }) }); t.after(() => service.close());
+    const done = await terminal(service, service.start({ engine: 'claude', prompt: 'Create 30 adults', revision: 0, document: empty, cohort: { id: 'customers', size: 30 } }));
+    assert.equal(done.status, 'completed', done.message); assert.equal(done.progress!.completedPersonas, 30);
+    const persona = done.proposal!.document.cohorts[0]!.personas[0]!;
+    assert.equal(persona.id, 'persona-00001'); assert.equal(persona.weight, 1); assert.deepEqual(persona.sourceIds, []); assert.deepEqual(persona.syntheticFields, ['label', 'age', 'background', 'attributes']);
+    assert.equal(batchArgs[0]![batchArgs[0]!.indexOf('--effort') + 1], 'low');
+    if (effortSupported) assert.equal(batchArgs.length, 3);
+    else assert.equal(batchArgs.filter(args => !args.includes('--effort')).length, 3, 'each batch is drafted again without --effort');
+  }
+});
+
+test('a persona batch may leave id, weight, sources and synthetic fields to the app, and cited sources are still checked', () => {
+  const { personas, ...metadata } = batchCohort(2); const expected = { id: 'customers', size: 2, metadata: { ...metadata, sources: [{ id: 'survey', title: 'Survey', url: 'https://example.com/survey', retrievedAt: '2026-01-01T00:00:00Z', notes: 'Share of buyers' }] } as Record<string, unknown> };
+  const slim = personas.map(({ label, segment, age, background, attributes }) => ({ label, segment, age, background, attributes }));
+  const filled = checkPersonaBatch(JSON.stringify(slim), expected).personas[1]!;
+  assert.equal(filled.weight, 1); assert.deepEqual(filled.sourceIds, []); assert.deepEqual(filled.syntheticFields, ['label', 'age', 'background', 'attributes']);
+  const cited = checkPersonaBatch(JSON.stringify([{ ...slim[0], sourceIds: ['survey'], syntheticFields: ['background'] }, slim[1]]), expected).personas[0]!;
+  assert.deepEqual(cited.sourceIds, ['survey']); assert.deepEqual(cited.syntheticFields, ['background']);
+  assert.throws(() => checkPersonaBatch(JSON.stringify([{ ...slim[0], sourceIds: ['nowhere'] }, slim[1]]), expected), /persona 1 cites unknown source nowhere/);
+});
+
 test('streamed personas rise mid-batch, stay within the batch size, and are never counted as accepted until the batch passes', async t => {
   const root = await setup(t); let first!: FakeChild; const release = deferred<void>();
   const service = new LocalAgentService({ temporaryRoot: root, spawn: fakeSpawner(async ({ args, child }) => {
@@ -1558,6 +1591,27 @@ test('streamed personas rise mid-batch, stay within the batch size, and are neve
   const done = await terminal(service, job);
   assert.equal(done.status, 'completed'); assert.equal(done.progress!.completedPersonas, 30);
   assert.equal(done.progress!.batchDetails!.at(-1)!.state, 'accepted');
+});
+
+test('a persona batch a few people short keeps them and asks only for the rest; extra people are dropped', async t => {
+  const asked: { batch: number; size: number; first: number; mix: Record<string, number>; text: string }[] = [];
+  const client = nativeDraft(async input => {
+    const data = requestData(input); if (!data.batch) return cohortBatchResponse(input);
+    asked.push({ batch: data.batch.number, size: data.batch.size, first: data.batch.firstPosition, mix: data.segmentMix, text: input });
+    const reply = JSON.parse(cohortBatchResponse(input)); const cohort = JSON.parse(reply.documentJson) as Cohort;
+    if (data.batch.number === 1 && data.batch.size === 10) cohort.personas.splice(7);
+    if (data.batch.number === 2) cohort.personas.push({ ...cohort.personas[0]!, label: 'Extra' });
+    return JSON.stringify({ ...reply, documentJson: JSON.stringify(cohort.personas) });
+  });
+  const service = new LocalAgentService({ chatgpt: client }); t.after(() => service.close());
+  const done = await terminal(service, service.start({ engine: 'chatgpt', model: 'draft-model', prompt: 'Create 30 adults', revision: 0, document: empty, cohort: { id: 'customers', size: 30 } }));
+  assert.equal(done.status, 'completed', done.message);
+  const topUp = asked.find(item => item.batch === 1 && item.size === 3)!;
+  assert.equal(topUp.first, 8); assert.deepEqual(topUp.mix, { customers: 3 });
+  assert.match(topUp.text, /had 7 of its 10 people, which are kept; write only the remaining 3/);
+  const personas = done.proposal!.document.cohorts[0]!.personas;
+  assert.equal(personas.length, 30); assert.equal(personas[7]!.label, 'Persona 8', 'the top-up fills positions 8 to 10'); assert.equal(personas[9]!.id, 'persona-00010');
+  assert.ok(!personas.some(persona => persona.label === 'Extra'));
 });
 
 test('batch states move from connecting to writing to checking to accepted, and a failed check shows the retry', async t => {

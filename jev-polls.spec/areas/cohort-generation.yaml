@@ -49,6 +49,31 @@ behaviors:
       for every positive-weight segment, unless a saved segment target already assigns segments.
       Batches return a JSON array of personas; the cohort details are never read from a batch reply,
       so a batch cannot change them.
+  - id: lean-persona-batches
+    description: >-
+      A persona batch writes only what differs between people (label, segment, age, background,
+      attributes, and sourceIds when it cites a source); the app fills ids, weight 1, empty sourceIds
+      and every written field marked synthetic. Claude Code, ChatGPT and API engines return the batch
+      as real JSON, and Claude Code writes persona batches at low effort.
+    details: >-
+      Added 2026-10-11 after "also still too slow, please have a deep investigation thread to explain
+      why it takes this long to generate 1000 json things". Measured on a real 1,000-person Claude Code
+      run (Sonnet, sixteen batches at once, 48 batches of 20 or 21): 2 min 39 s, of which the setup
+      call was 15 s and each batch about 43 s (2.4 s CLI start, 3.6 s thinking before the first
+      persona, 33.5 s streaming at about 190 tokens per second). Batches wrote 319,000 output tokens,
+      about 320 per persona: four fields were the same for every persona (id, weight, sourceIds,
+      syntheticFields) and the personas were escaped inside the documentJson string with an
+      explanation. Writing only the differing fields as real JSON cut a 21-person batch from 7,218 to
+      4,509 output tokens; low effort cut Opus thinking from about 2,000 tokens to about 120 per batch
+      (77.9 s to 43.6 s for the same batch). After: 190,000 output tokens and 1 min 52 s for 1,000
+      Sonnet personas, about 28 s per batch. Codex keeps the documentJson string because its output
+      schema needs named properties. A CLI that rejects --effort is asked again without it, and later
+      batches skip it. The setup call keeps the default effort, since it decides segments and weights;
+      its instructions now spell out the distribution-target bucket rules, because a real Opus setup
+      reply gave a numeric bucket a value, failed its check, and cost a serial 29 s retry.
+    source:
+      text: also still too slow, please have a deep investigation thread to explain why it takes this long to generate 1000 json things
+      reference: 2026-10-11 jev-polls project thread, Giulio
   - id: slow-batch-second-request
     description: >-
       A batch attempt running far longer than the accepted batches gets one second, identical request;
@@ -84,7 +109,11 @@ behaviors:
       limit is still three, so only the first two waits occur before a batch fails the job. A waiting
       batch shows "waiting 20 s after a rate limit (attempt 2 of 3)" and the panel says "4 batches at
       once while the AI is rate-limited", so the displayed wait and window are the real ones.
-      Cancelling ends a wait at once. CLI and MCP behaviour is unchanged apart from the waits.
+      Cancelling ends a wait at once. CLI and MCP behaviour is unchanged apart from the waits. A
+      persona batch that returns fewer people than asked, all passing their checks, keeps them, and its
+      next attempt asks only for the missing positions and segment mix (two of 48 low-effort batches
+      came back one person short in a real run, and each full redo cost about 25 s); extra people
+      are dropped. Neither applies with distribution targets, whose slots are matched by position.
   - id: generation-failure-detail
     description: >-
       A failed generation says which batch failed and which check it failed ("Batch 7 failed its
