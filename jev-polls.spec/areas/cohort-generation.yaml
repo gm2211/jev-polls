@@ -28,14 +28,30 @@ behaviors:
       is published.
   - id: concurrent-batches
     description: >-
-      The first batch is a small metadata batch that runs alone; later batches run with bounded
-      concurrency (twelve at a time), and persona IDs and order follow batch position, never
-      completion order.
+      A cohort of more than 25 personas first gets its details (segments, weights, sources,
+      assumptions) from one setup call that writes no personas; then every persona batch can start at
+      once, sixteen at a time, each writing only personas, and persona IDs and order follow batch
+      position, never completion order.
     details: >-
-      Changed 2026-10-11 from a 25-persona first batch and six concurrent batches. A cohort of up to
-      25 personas is one batch; a larger one opens with a 10-persona batch that sets metadata, so the
-      parallel phase starts after about 40 seconds, then 25-persona batches run twelve at a time. At
-      110 seconds per 25-persona batch, 1,000 personas take about 8 minutes instead of about 15.
+      Changed 2026-10-11 (second time that day) after a 1,000-person run still showed about 7 to 18
+      minutes left. Measured with Claude Code on 400 personas: before, a 10-persona first batch ran
+      alone (28 s) and every later batch rewrote and recopied the whole cohort details (about 2,000
+      characters, roughly 600 tokens of each batch), in two rounds of twelve: 3 min 57 s, including
+      one slow batch of 3 min 24 s. After, a setup call (19 s), then sixteen 25-persona batches at
+      once (41 to 53 s each): 1 min 18 s. CLI startup was about 3 s per call and streaming speed
+      stayed about 170 output tokens per second per batch with sixteen at once, so the time is
+      writing personas, and running more at once is what shortens it. Batches are split evenly so
+      the last round of sixteen is full: 1,000 personas are 48 batches of 20 or 21 in three rounds
+      (instead of 40 of 25 in four), and no batch is smaller than about ten. A saved cohort being
+      regenerated already has its details, so it needs no setup call. A cohort of up to 25 personas
+      is still one batch that also sets the details. Each batch is given its segment mix
+      (segmentMix), whole-person counts in proportion to segment weights with at least one person
+      for every positive-weight segment, unless a saved segment target already assigns segments.
+      Batches return a JSON array of personas; the cohort details are never read from a batch reply,
+      so a batch cannot change them.
+    source:
+      text: generation is way too slow, why?
+      reference: 2026-10-11 jev-polls project thread, Giulio, with a screenshot of batch 1 of 41 at 1 min 19 s
   - id: batch-retry
     description: >-
       A batch that fails parsing or checks is retried with the same request data up to two more times,
@@ -48,7 +64,7 @@ behaviors:
       the same request is sent again after an exponential wait with jitter (about 5 s, then 20 s,
       then 60 s for a batch's later attempts, each 20% either way) and without a rejection note.
       Failed checks and unreadable replies keep the immediate retry with the reason. While any such
-      error is live, no more than four batches are started at once; the limit lifts back to twelve
+      error is live, no more than four batches are started at once; the limit lifts back to sixteen
       after two accepted batches in a row, and another such error restarts that count. The attempt
       limit is still three, so only the first two waits occur before a batch fails the job. A waiting
       batch shows "waiting 20 s after a rate limit (attempt 2 of 3)" and the panel says "4 batches at
@@ -65,7 +81,9 @@ behaviors:
       not return a valid workspace draft" and nothing in the server log. Every batch reply is now
       checked in its own batch for valid JSON, the cohort format (naming the persona and field, such
       as "persona 3 has no segment"), the cohort id, the persona count, details copied exactly from
-      the first batch, and that each persona names a segment and sources the cohort has; before this,
+      the saved cohort (one-batch cohorts), and that each persona names a segment and sources the
+      cohort has; the setup call of a larger cohort is checked the same way for its details and fails
+      as "Setting up the audience failed its checks 3 times: …"; before this,
       a persona with an unknown segment passed its batch and failed only the final check, after
       every batch had been paid for, with no reason given. Each log line carries the job id, batch
       index, attempt, reason and the first 300 characters of the offending output; a failure of the
@@ -100,7 +118,8 @@ behaviors:
       are connecting, writing (persona N of size), checking, retrying after a failed check (attempt N of
       3) and accepted. ChatGPT streams only counters, so its batches show tokens so far and no persona
       count. The early estimate is labeled rough and gives way to the batch-based estimate after two
-      batches complete. Batch 1 is described as setting up the audience before twelve batches run at once.
+      batches complete. While the setup call runs, the status reads "Setting up the audience: segments,
+      weights and assumptions, then 16 batches run at once".
     source:
       text: >-
         why am i not getting details about what's going on - 2mins almost and still 0/1000 is very

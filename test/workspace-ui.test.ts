@@ -3634,7 +3634,9 @@ test('drafting progress separates accepted from being written and describes each
   const html = draftProgress({ id: 'j', engine: 'chatgpt', status: 'running', startedAt: new Date().toISOString(), cohort: { id: 'c', size: 1000 }, progress });
   assert.match(html, /160 <span>\/ 1,000/); assert.match(html, />accepted</);
   assert.match(html, /\+37 being written across 5 batches/);
-  assert.match(html, /Batch 1 sets up the audience: segments, weights, assumptions \(10 people\), then 12 batches run at once/);
+  assert.doesNotMatch(html, /sets up the audience/, 'batches only write personas; the setup happens before any batch');
+  const settingUp = draftProgress({ id: 'j', engine: 'claude', status: 'running', startedAt: new Date().toISOString(), cohort: { id: 'c', size: 1000 }, progress: { phase: 'generating', totalBatches: 48, completedBatches: 0, completedPersonas: 0, totalPersonas: 1000, activeBatches: [], maxConcurrentBatches: 16 } });
+  assert.match(settingUp, /Setting up the audience: segments, weights and assumptions, then 16 batches run at once/);
   assert.match(html, /Batch 2: writing persona 7 of 25/); assert.match(html, /Batch 3: connecting/);
   assert.match(html, /Batch 4: retrying after a failed check \(attempt 2 of 3\)/); assert.match(html, /Batch 5: checking batch/);
   assert.match(html, /Batch 6: writing… \(212 tokens so far\)/); assert.doesNotMatch(html, /Batch 6: writing persona/);
