@@ -6,7 +6,7 @@ import type {
   Question, QuestionSummary, RunOptions, RunRecord, Stage, StageLayer, StageResult, Vote,
 } from './types.js';
 import { summarizeVotes } from './analysis.js';
-import { ProviderError, type ProviderResponseIssue } from './provider.js';
+import { ProviderError, probabilitySumTolerance, scoreMeanTolerance, type ProviderResponseIssue } from './provider.js';
 import { validateClassifierAnswer } from './gliner-provider.js';
 import { inputSelectCompatible } from './schema.js';
 import { CHOICE_WINNER_TOLERANCE, errorMessage, hashValue, isFiniteProbability, resolveQuestion, seededRandom, stableStringify } from './engine-utils.js';
@@ -93,7 +93,8 @@ export function validateEvaluation(evaluation: Evaluation, questions: Record<str
         throw new Error(`provider answer '${id}' has an invalid score legend`);
       }
       const expectedScore = expected.reduce((sum, key, index) => sum + answer.probabilities[key]! * index, 0);
-      if (Math.abs(answer.score - expectedScore) > 0.0101) throw new Error(`provider answer '${id}' score does not match its distribution`);
+      // Providers may renormalize two-decimal rounded probabilities, which can move the mean by up to (size - 1) times the sum drift.
+      if (Math.abs(answer.score - expectedScore) > scoreMeanTolerance(size) + (size - 1) * probabilitySumTolerance(size)) throw new Error(`provider answer '${id}' score does not match its distribution`);
     }
   }
   if (typeof evaluation.model !== 'string' || !evaluation.model.trim()) throw new Error('provider response has no model name');
