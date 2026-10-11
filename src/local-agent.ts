@@ -32,9 +32,23 @@ export interface LocalAgentProgress {
   activeBatches?: number[]; maxConcurrentBatches?: number;
   /** Failed batch attempts so far, and the batch currently being tried again. */
   retries?: number; retry?: { batch: number; attempt: number; maxAttempts: number };
+  /** One entry per batch being drafted (plus a batch accepted since the last update). Streamed counts are never accepted personas. */
+  batchDetails?: BatchDetail[];
+  /** Personas seen in partial output of batches that are not yet accepted. Always at most the batch sizes combined, and never part of completedPersonas. */
+  inFlightPersonas?: number;
+  /** Rough finish time from streaming speed. Present only before two batches have completed; later the batch timings give the estimate. */
+  estimate?: { seconds: number; basis: 'streaming'; at: string };
   validation?: { scope: 'batch' | 'final' | 'persona' | 'workspace'; status: 'checking' | 'passed'; checks: string[]; checkedPersonas: number };
 }
 /** A step an audience will be assigned to once it is generated and accepted. */
+export type BatchState = 'connecting' | 'writing' | 'checking' | 'retrying' | 'accepted';
+export interface BatchDetail {
+  index: number; size: number; state: BatchState; attempt: number; maxAttempts: number;
+  /** Persona objects seen so far in the partial output, capped at size. Zero for providers that stream no content. */
+  streamingPersonas: number; outputChars: number; outputTokens?: number;
+  /** False when the provider reports only counters (ChatGPT), so no persona count exists. */
+  contentStreamed: boolean; startedAt: string;
+}
 export interface AudienceStep { pipelineId: string; stageId: string }
 /**
  * An audience the assistant asked the app to generate instead of drafting its personas inline.
@@ -87,7 +101,10 @@ function batchSpan(size: number, index: number): { offset: number; size: number 
 /** A failed batch is retried this many more times before the whole generation fails. */
 const BATCH_RETRIES = 2;
 const MAX_BATCH_TIMINGS = 20;
-interface ProviderProgress { phase: 'starting' | 'generating' | 'receiving'; outputChars: number; outputTokens?: number }
+interface ProviderProgress { phase: 'starting' | 'generating' | 'receiving'; outputChars: number; outputTokens?: number; streamedPersonas?: number }
+/** A persona object carries a background key; the CLI envelope escapes it, so the quotes may be preceded by backslashes. */
+const PERSONA_KEY = /\\*"background\\*"\s*:/g;
+const PERSONA_KEY_TAIL = 24;
 const outputSchema = { type: 'object', properties: { documentJson: { type: 'string' }, explanation: { type: 'string' } }, required: ['documentJson', 'explanation'], additionalProperties: false };
 const safeCohortId = z.string().max(160).regex(/^[a-z][a-z0-9_-]*$/).refine(value => !['__proto__', 'prototype', 'constructor'].includes(value));
 const audienceStepSchema = z.object({ pipelineId: safeCohortId, stageId: safeCohortId }).strict();
@@ -266,7 +283,8 @@ function optionQuestion(document: WorkspaceDocument, request: NonNullable<LocalA
 
 interface ProcessResult { code: number | null; stdout: string; stderr: string; missing: boolean; limited: boolean }
 interface ProviderSlot { chars: number; tokens?: number }
-interface Entry { public: LocalAgentJob; work?: Promise<void>; aborts: Set<() => void>; slots: Map<number, ProviderSlot>; cancelled: boolean; settled: boolean; command?: boolean; disposition?: 'applied' | 'discarded' }
+interface StreamedBatch { personas: number; chars: number; tokens?: number }
+interface Entry { public: LocalAgentJob; work?: Promise<void>; aborts: Set<() => void>; slots: Map<number, ProviderSlot>; streamed: Map<number, StreamedBatch>; cancelled: boolean; settled: boolean; command?: boolean; describeBatches?: () => { batchDetails: BatchDetail[]; inFlightPersonas: number; estimate?: LocalAgentProgress['estimate'] }; disposition?: 'applied' | 'discarded' }
 class DraftFailure extends Error {}
 /** A failure that another attempt cannot fix, so the batch is not retried. */
 class FatalDraftFailure extends DraftFailure {}
@@ -445,7 +463,7 @@ export class LocalAgentService {
     const startedAt = new Date().toISOString();
     const progress: LocalAgentProgress = { phase: 'checking', ...(parsed.cohort ? { completedPersonas: 0, totalPersonas: parsed.cohort.size, completedBatches: 0, totalBatches: batchCount(parsed.cohort.size) } : parsed.persona ? { completedPersonas: 0, totalPersonas: 1 } : {}) };
     const job: LocalAgentJob = { ...(parsed.projectId ? { projectId: parsed.projectId } : {}), id: randomUUID(), engine: parsed.engine, revision: parsed.revision, status: 'running', message: 'Checking your AI connection…', startedAt, updatedAt: startedAt, progress, ...(engineNeedsModel(parsed.engine) ? { model: parsed.model } : {}), ...(parsed.options ? { options: { pipelineId: parsed.options.pipelineId, stageId: parsed.options.stageId, questionId: parsed.options.questionId } } : {}), ...(parsed.persona ? { persona: parsed.persona } : {}), ...(parsed.material !== undefined && parsed.materialName ? { materialName: parsed.materialName } : {}), ...(parsed.cohort ? { cohort: { ...parsed.cohort, prompt: parsed.prompt } } : {}) };
-    const entry: Entry = { public: job, aborts: new Set(), slots: new Map(), cancelled: false, settled: false, ...(parsed.command ? { command: true } : {}) };
+    const entry: Entry = { public: job, aborts: new Set(), slots: new Map(), streamed: new Map(), cancelled: false, settled: false, ...(parsed.command ? { command: true } : {}) };
     this.jobs.set(job.id, entry);
     entry.work = this.generate(entry, parsed);
     return structuredClone(job);
@@ -505,7 +523,15 @@ export class LocalAgentService {
     const current = entry.slots.get(slot) ?? { chars: 0 };
     const tokens = activity.outputTokens;
     entry.slots.set(slot, { chars: Math.max(current.chars, activity.outputChars), ...(tokens !== undefined && Number.isSafeInteger(tokens) && tokens >= 0 ? { tokens } : current.tokens !== undefined ? { tokens: current.tokens } : {}) });
-    this.updateProgress(entry, 'generating', entry.public.message, { activity: activity.phase, lastActivityAt: new Date().toISOString(), outputSource, ...this.providerTotals(entry) });
+    const seen = entry.streamed.get(slot) ?? { personas: 0, chars: 0 };
+    const personas = activity.streamedPersonas;
+    entry.streamed.set(slot, { personas: Math.max(seen.personas, personas !== undefined && Number.isSafeInteger(personas) && personas >= 0 ? personas : 0), chars: Math.max(seen.chars, activity.outputChars), ...(entry.slots.get(slot)?.tokens !== undefined ? { tokens: entry.slots.get(slot)!.tokens } : {}) });
+    this.updateProgress(entry, 'generating', entry.public.message, { activity: activity.phase, lastActivityAt: new Date().toISOString(), outputSource, ...this.providerTotals(entry), ...this.streamingSummary(entry) });
+  }
+
+  /** In-flight persona total from partial output, refreshed whenever output arrives. Batch details are added by the cohort loop. */
+  private streamingSummary(entry: Entry): { batchDetails?: BatchDetail[]; inFlightPersonas?: number; estimate?: LocalAgentProgress['estimate'] } {
+    return entry.describeBatches?.() ?? {};
   }
 
   /** Output received across all provider calls running at once. */
@@ -521,12 +547,12 @@ export class LocalAgentService {
       try { child = this.spawn(engine, args, { cwd, env: childEnvironment(), detached: process.platform !== 'win32', windowsHide: true }); }
       catch { resolve({ code: null, stdout: '', stderr: '', missing: true, limited: false }); return; }
       this.children.add(child);
-      const stdout: Buffer[] = []; const stdoutDecoder = new StringDecoder('utf8'); const stderr: Buffer[] = []; let bytes = 0; let outputChars = 0; let limited = false; let done = false; let killTimer: NodeJS.Timeout | undefined;
+      const stdout: Buffer[] = []; const stdoutDecoder = new StringDecoder('utf8'); const stderr: Buffer[] = []; let bytes = 0; let outputChars = 0; let streamedPersonas = 0; let tail = ''; let limited = false; let done = false; let killTimer: NodeJS.Timeout | undefined;
       const stop = () => { if (done) return; limited = true; terminate(child); killTimer ??= setTimeout(() => { terminate(child, 'SIGKILL'); finish(null, false); }, 1000); killTimer.unref(); };
       const timer = setTimeout(stop, timeoutMs); timer.unref();
       const finish = (code: number | null, missing: boolean) => { if (done) return; done = true; clearTimeout(timer); if (killTimer) clearTimeout(killTimer); this.children.delete(child); entry?.aborts.delete(stop); resolve({ code, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8'), missing, limited }); };
       entry?.aborts.add(stop);
-      child.stdout.on('data', (data: Buffer) => { bytes += data.length; if (bytes > maxBytes) { stop(); return; } stdout.push(Buffer.from(data)); if (entry && !done && !entry.cancelled) { outputChars += stdoutDecoder.write(data).length; this.recordActivity(entry, { phase: 'receiving', outputChars }, 'cli-stdout', slot); } });
+      child.stdout.on('data', (data: Buffer) => { bytes += data.length; if (bytes > maxBytes) { stop(); return; } stdout.push(Buffer.from(data)); if (entry && !done && !entry.cancelled) { const text = stdoutDecoder.write(data); outputChars += text.length; const window = tail + text; for (const match of window.matchAll(PERSONA_KEY)) if (match.index + match[0].length > tail.length) streamedPersonas++; tail = window.slice(-PERSONA_KEY_TAIL); this.recordActivity(entry, { phase: 'receiving', outputChars, streamedPersonas }, 'cli-stdout', slot); } });
       child.stderr.on('data', (data: Buffer) => { bytes += data.length; if (bytes > maxBytes) { stop(); return; } if (captureStderr) stderr.push(Buffer.from(data)); });
       child.once('error', error => finish(null, (error as NodeJS.ErrnoException).code === 'ENOENT'));
       child.once('close', code => finish(code, false));
@@ -744,7 +770,8 @@ export class LocalAgentService {
     const results: Cohort['personas'][] = [];
     const segmentCounts = new Map<string, number>();
     const recent: Cohort['personas'] = [];
-    const running = new Map<number, { firstStartedAt: string; attempt: number }>();
+    const running = new Map<number, { firstStartedAt: string; attempt: number; attemptStartedAt: string; checking: boolean }>();
+    let justAccepted: BatchDetail[] = [];
     const retrying = new Map<number, number>();
     let acceptedPersonas = 0;
     let acceptedBatches = 0;
@@ -763,6 +790,34 @@ export class LocalAgentService {
     const batchSizeOf = (batchIndex: number) => batchSpan(request.size, batchIndex).size;
     const batchList = (numbers: number[]) => numbers.length < 2 ? `batch ${numbers[0]}` : `batches ${numbers.slice(0, -1).join(', ')} and ${numbers[numbers.length - 1]}`;
 
+    // Describes each batch from what its provider has shown so far. Streamed personas are a view of partial output only; acceptance still needs the batch checks.
+    const describe = () => {
+      const now = Date.now();
+      const batchDetails: BatchDetail[] = [...running.entries()].sort((a, b) => a[0] - b[0]).map(([index, state]) => {
+        const size = batchSizeOf(index); const seen = entry.streamed.get(index) ?? { personas: 0, chars: 0 };
+        const contentStreamed = entry.public.progress?.outputSource !== 'response';
+        const wrote = seen.chars > 0 || seen.tokens !== undefined && seen.tokens > 0;
+        const batchState: BatchState = state.checking ? 'checking' : wrote ? 'writing' : state.attempt > 1 ? 'retrying' : 'connecting';
+        return { index: index + 1, size, state: batchState, attempt: state.attempt, maxAttempts: 1 + BATCH_RETRIES, streamingPersonas: contentStreamed ? Math.min(size, seen.personas) : 0, outputChars: seen.chars, ...(seen.tokens !== undefined ? { outputTokens: seen.tokens } : {}), contentStreamed, startedAt: state.attemptStartedAt };
+      });
+      const inFlightPersonas = batchDetails.reduce((sum, detail) => sum + detail.streamingPersonas, 0);
+      // Rough pace from partial output: personas written per batch-second, scaled to the batches that will run at once. Superseded by batch timings after two batches finish.
+      let estimate: LocalAgentProgress['estimate'];
+      const writing = batchDetails.filter(detail => detail.contentStreamed);
+      const batchSeconds = writing.reduce((sum, detail) => sum + Math.max(0, now - Date.parse(detail.startedAt)) / 1000, 0);
+      if (acceptedBatches < 2 && inFlightPersonas >= 2 && batchSeconds >= 3) {
+        const perBatch = inFlightPersonas / batchSeconds;
+        const left = request.size - acceptedPersonas - inFlightPersonas;
+        const parallel = Math.max(1, Math.min(CONCURRENT_BATCHES, batches - Math.max(1, acceptedBatches)));
+        const seconds = acceptedBatches === 0 && running.has(0)
+          ? Math.max(0, batchSizeOf(0) - inFlightPersonas) / perBatch + Math.max(0, request.size - batchSizeOf(0)) / (perBatch * parallel)
+          : left / (perBatch * Math.max(1, Math.min(CONCURRENT_BATCHES, batches - acceptedBatches)));
+        if (Number.isFinite(seconds) && seconds > 0) estimate = { seconds: Math.round(seconds), basis: 'streaming', at: new Date(now).toISOString() };
+      }
+      return { batchDetails: [...batchDetails, ...justAccepted], inFlightPersonas, estimate };
+    };
+    entry.describeBatches = describe;
+
     // Reports the batches in flight. Counts of accepted personas only change when a batch passes its checks.
     const publishRunning = (extra: Omit<Partial<LocalAgentProgress>, 'phase'> = {}) => {
       const active = [...running.entries()].sort((a, b) => a[0] - b[0]);
@@ -772,7 +827,7 @@ export class LocalAgentService {
       const latestRetry = [...retrying.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0];
       this.updateProgress(entry, 'generating', `Generating ${batchList(numbers)} of ${batches} (${acceptedPersonas}/${request.size} personas checked)…`, {
         batch: numbers[0], batchSize: batchSizeOf(active[0]![0]), batchStartedAt: oldest, activeBatches: numbers, maxConcurrentBatches: CONCURRENT_BATCHES, retries,
-        retry: latestRetry ? { batch: latestRetry[0] + 1, attempt: latestRetry[1], maxAttempts: 1 + BATCH_RETRIES } : undefined, ...extra,
+        retry: latestRetry ? { batch: latestRetry[0] + 1, attempt: latestRetry[1], maxAttempts: 1 + BATCH_RETRIES } : undefined, ...describe(), ...extra,
       });
     };
 
@@ -788,12 +843,15 @@ export class LocalAgentService {
       const firstStartedAt = new Date().toISOString();
       for (let attempt = 1; ; attempt++) {
         if (entry.cancelled || stopped) throw new StopBatch();
-        running.set(batchIndex, { firstStartedAt, attempt });
+        justAccepted = [];
+        entry.streamed.delete(batchIndex);
+        running.set(batchIndex, { firstStartedAt, attempt, attemptStartedAt: new Date().toISOString(), checking: false });
         publishRunning({ validation: undefined });
         try {
           const output = await this.requestDraft(entry, input, prompt, batchIndex);
           if (entry.cancelled || stopped) throw new StopBatch();
-          this.updateProgress(entry, entry.public.progress?.phase ?? 'generating', entry.public.message, { validation: { scope: 'batch', status: 'checking', checks: [], checkedPersonas: 0 } });
+          running.get(batchIndex)!.checking = true;
+          this.updateProgress(entry, entry.public.progress?.phase ?? 'generating', entry.public.message, { validation: { scope: 'batch', status: 'checking', checks: [], checkedPersonas: 0 }, ...describe() });
           const candidate = cohortSchema.parse(JSON.parse(output.documentJson)) as Cohort;
           if (candidate.id !== request.id || candidate.personas.length !== batchSize) throw Error();
           const candidateMetadata = Object.fromEntries(Object.entries(candidate).filter(([key]) => key !== 'personas' && key !== 'generationPrompt'));
@@ -819,7 +877,8 @@ export class LocalAgentService {
           for (const persona of accepted) segmentCounts.set(persona.segment, (segmentCounts.get(persona.segment) ?? 0) + 1);
           recent.push(...accepted);
           acceptedPersonas += accepted.length; acceptedBatches++;
-          running.delete(batchIndex); retrying.delete(batchIndex);
+          justAccepted = [{ index: batchIndex + 1, size: batchSize, state: 'accepted', attempt, maxAttempts: 1 + BATCH_RETRIES, streamingPersonas: batchSize, outputChars: entry.streamed.get(batchIndex)?.chars ?? 0, contentStreamed: entry.public.progress?.outputSource !== 'response', startedAt: running.get(batchIndex)!.attemptStartedAt }];
+          running.delete(batchIndex); retrying.delete(batchIndex); entry.streamed.delete(batchIndex);
           const validation: NonNullable<LocalAgentProgress['validation']> = { scope: 'batch', status: 'passed', checks: ['Required fields and adult ages', 'Expected cohort ID and batch size', ...(originalMetadata || batchIndex > 0 ? ['Saved cohort details unchanged'] : []), ...(targets.length ? ['Requested distribution targets'] : []), 'Workspace size limit'], checkedPersonas: batchSize };
           const done = {
             completedPersonas: acceptedPersonas, completedBatches: acceptedBatches,
@@ -828,7 +887,7 @@ export class LocalAgentService {
             latestAccepted: recent.slice(-3).map(({ id, label, age, segment }) => ({ id, label, age, segment })), validation, lastBatchChecks: [...validation.checks],
           };
           if (running.size) publishRunning(done);
-          else this.updateProgress(entry, 'validating', `Checked batch ${batchIndex + 1} of ${batches} (${acceptedPersonas}/${request.size} personas)…`, { ...done, activeBatches: [], retries, retry: undefined });
+          else this.updateProgress(entry, 'validating', `Checked batch ${batchIndex + 1} of ${batches} (${acceptedPersonas}/${request.size} personas)…`, { ...done, activeBatches: [], retries, retry: undefined, ...describe() });
           return;
         } catch (error) {
           if (entry.cancelled || stopped || error instanceof StopBatch || error instanceof FatalDraftFailure || attempt > BATCH_RETRIES) { running.delete(batchIndex); retrying.delete(batchIndex); throw error; }
@@ -875,6 +934,7 @@ export class LocalAgentService {
     let directory: string | undefined;
     const startedAt = new Date().toISOString();
     entry.slots.set(slot, { chars: 0 });
+    entry.streamed.set(slot, { personas: 0, chars: 0 });
     this.updateProgress(entry, 'generating', entry.public.message, { generationStartedAt: startedAt, activity: 'starting', lastActivityAt: startedAt, ...this.providerTotals(entry), outputSource: engineNeedsModel(input.engine) ? 'response' : 'cli-stdout' });
     try {
       let payload: unknown;
