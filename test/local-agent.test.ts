@@ -1343,7 +1343,7 @@ test('Claude stream-json deltas raise the persona count mid-batch; the repeated 
     child.stdout.write(claudeResult(child.input)); child.finish();
   }) }); t.after(() => service.close());
   const job = service.start({ engine: 'claude', prompt: 'Create 30 adults', revision: 0, document: empty, cohort: { id: 'customers', size: 30 } });
-  await waitFor(() => stateOf(service, job.id, 1)?.state === 'connecting');
+  await waitFor(() => first !== undefined && stateOf(service, job.id, 1)?.state === 'connecting');
   first.stdout.write(claudeDelta('{"documentJson": "{\\"personas\\":[{\\"label\\":\\"P0\\",\\"background') + 'not json at all\n');
   await waitFor(() => stateOf(service, job.id, 1)?.state === 'writing');
   assert.equal(stateOf(service, job.id, 1)!.streamingPersonas, 0, 'a key still being written is not yet counted');
@@ -1436,7 +1436,7 @@ test('a rough estimate appears from streaming speed before any batch completes a
     await writeFile(args[args.indexOf('--output-last-message') + 1]!, cohortBatchResponse(child.input)); child.finish();
   }) }); t.after(() => service.close());
   const job = service.start({ engine: 'codex', prompt: 'Create 1000 adults', revision: 0, document: empty, cohort: { id: 'customers', size: 1000 } });
-  await waitFor(() => stateOf(service, job.id, 1)?.state === 'connecting');
+  await waitFor(() => first !== undefined && stateOf(service, job.id, 1)?.state === 'connecting');
   assert.equal(service.get(job.id)!.progress!.estimate, undefined, 'nothing written yet, so no estimate');
   first.stdout.write(personaKey(4)); await waitFor(() => stateOf(service, job.id, 1)?.streamingPersonas === 4);
   t.mock.timers.tick(10000); first.stdout.write(personaKey(1));
