@@ -66,11 +66,12 @@ test('the Options stop shows one editable list once options exist, and the ways 
   const h = await harness();
   const html = h.flowInspector(h.study, h.poll);
   assert.match(html, /<textarea id="optionsBox"[^>]*data-options-box/);
-  assert.match(html, /One option per line\. Add a description after a colon or tab, e\.g\. <code>Orbital Empire: an empire, but in orbit<\/code>/);
+  assert.match(html, /One per line; add a description after a colon\. Probabilities 0–1, totaling 1\./);
+  assert.match(html, /data-options-box rows="6"/, 'a short list gets a six-row box');
   assert.match(html, /Alpha: Existing description\.\nBeta<\/textarea>/);
   assert.match(html, /id="optionsBoxStatus"[^>]*>2 options</);
   assert.doesNotMatch(html, /data-options-list|Edit option Alpha|Paste dialog|data-act="answer-list-open"|options-source"/, 'the options show once, in the box');
-  assert.match(html, /data-act="setup-input" data-source="choose">Import a file or draft with AI instead/);
+  assert.match(html, /data-act="setup-input" data-source="choose">Import or draft with AI/);
   h.S.sections['setup-input-study-ask-answer'] = 'choose';
   const choose = h.flowInspector(h.study, h.poll);
   assert.match(choose, /How do you want to add options\?/);
@@ -189,6 +190,16 @@ test('dropping a CSV with Name and Description columns fills the box and the lis
   assert.equal(Object.keys(h.q.criteria).length, 2);
   assert.deepEqual(plain(Object.values(h.q.criteria).at(-1)), { label: 'Orbital Empire', description: 'An empire in orbit' });
   assert.equal(h.S.dirty, true);
+});
+
+test('an imported list of a dozen or more options grows the box to show it whole, up to 24 rows', async () => {
+  const h = await harness();
+  const names = (n: number) => 'Name\n' + Array.from({ length: n }, (_, i) => 'Option ' + (i + 1)).join('\n');
+  await h.optionsBoxFile(csv(names(14)));
+  assert.equal(Object.keys(h.q.criteria).length, 14);
+  assert.match(h.flowInspector(h.study, h.poll), /data-options-box rows="15"/);
+  await h.optionsBoxFile(csv(names(40)));
+  assert.match(h.flowInspector(h.study, h.poll), /data-options-box rows="24"/);
 });
 
 test('dropping a JSON file reads names, pairs and objects, and a plain CSV column reads every value', async () => {

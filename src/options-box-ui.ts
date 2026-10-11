@@ -29,11 +29,19 @@ function optionsBoxFor(p,s,qid,q){
   return optionsBoxState[key]={text:optionsBoxText(q),pending:false,invalid:false,error:''};
 }
 function optionsBoxCount(count){return count===0?'No options yet':count===1?'1 option · add at least one more':count+' options'}
-function optionsBoxField(box){
+/** The box grows with its list, so an imported list of a dozen or two options shows whole instead of scrolling inside a short box. */
+function optionsBoxRows(text){return Math.min(24,Math.max(6,String(text).split(/\r?\n/).length+1))}
+/** Fits the box to its text, wrapped lines included; the CSS cap keeps very long lists from pushing the footer away. */
+function optionsBoxFit(box){
+  if(!box)return;box.rows=optionsBoxRows(box.value);
+  if(!box.style||!box.scrollHeight)return;
+  box.style.height='auto';box.rows=6;box.style.height=box.scrollHeight+box.offsetHeight-box.clientHeight+'px';
+}
+/** One editable list: the label row carries the secondary way in (import or draft), and one line under the box carries the count, the format and what the answers mean. */
+function optionsBoxField(box,action='',note=''){
   const count=optionsBoxRecords(box.text).length;
-  return '<div class="field options-box"><label for="optionsBox">Your options</label><textarea id="optionsBox" name="optionsBox" data-options-box rows="6" maxlength="262144" spellcheck="false" autocomplete="off" aria-describedby="optionsBoxHint optionsBoxStatus optionsBoxError" aria-invalid="'+!!box.error+'" placeholder="Orbital Empire: an empire, but in orbit&#10;Starfall&#10;Project Dawn: a new beginning">'+esc(box.text)+'</textarea>'+
-    '<small id="optionsBoxHint">One option per line. Add a description after a colon or tab, e.g. <code>Orbital Empire: an empire, but in orbit</code>.</small>'+
-    '<div class="options-box-meta"><strong id="optionsBoxStatus" role="status" aria-live="polite">'+esc(box.error?'':optionsBoxCount(count))+'</strong><span id="optionsBoxError" class="options-box-error" role="alert" '+(box.error?'':'hidden')+'>'+esc(box.error)+'</span></div></div>';
+  return '<div class="field options-box"><div class="options-box-head"><label for="optionsBox">Your options</label>'+action+'</div><textarea id="optionsBox" name="optionsBox" data-options-box rows="'+optionsBoxRows(box.text)+'" maxlength="262144" spellcheck="false" autocomplete="off" aria-describedby="optionsBoxStatus optionsBoxHint optionsBoxError" aria-invalid="'+!!box.error+'" placeholder="Orbital Empire: an empire, but in orbit&#10;Starfall&#10;Project Dawn: a new beginning">'+esc(box.text)+'</textarea>'+
+    '<p class="options-box-meta"><strong id="optionsBoxStatus" role="status" aria-live="polite">'+esc(box.error?'':optionsBoxCount(count))+'</strong><span id="optionsBoxError" class="options-box-error" role="alert" '+(box.error?'':'hidden')+'>'+esc(box.error)+'</span><span id="optionsBoxHint">One per line; add a description after a colon.'+(note?' '+note:'')+'</span></p></div>';
 }
 /** Keeps the compact list, count and Options tab in step with the box without redrawing it, so typing is never interrupted. */
 function optionsBoxRefresh(p,s,qid,q,state,count){
@@ -65,7 +73,7 @@ function optionsBoxCommit(text){
 function optionsBoxInput(el){
   const p=pipeline(),s=selectedStage(),entry=s?.kind==='poll'?setupQuestion(s):null;if(!p||!entry)return;
   const state=optionsBoxState[optionsBoxKey(p,s,entry[0])]||(optionsBoxState[optionsBoxKey(p,s,entry[0])]={text:'',pending:false,invalid:false,error:''});
-  state.text=el.value;state.pending=true;S.dirty=true;S.plan=null;if(typeof updateSaveState==='function')updateSaveState();
+  state.text=el.value;state.pending=true;optionsBoxFit(el);S.dirty=true;S.plan=null;if(typeof updateSaveState==='function')updateSaveState();
   clearTimeout(optionsBoxTimer);optionsBoxTimer=setTimeout(()=>{try{optionsBoxCommit()}catch(error){fail(error)}},250);
 }
 function optionsBoxMessage(message){const error=document.getElementById('optionsBoxError');if(error){error.textContent=message;error.hidden=!message}}
@@ -77,7 +85,7 @@ async function optionsBoxFile(file){
     const text=await file.text(),records=answerFileRecords(answerFileLayout(file.name,text,'choice'),'choice');
     if(!records.length)throw Error('That file has no options in it.');
     const next=records.map(record=>optionsBoxLine(optionsBoxFlat(record.label),record.description||'')).join('\n'),box=root.querySelector('[data-options-box]');
-    if(box)box.value=next;
+    if(box){box.value=next;optionsBoxFit(box)}
     const result=optionsBoxCommit(next);if(result&&!result.error)if(typeof say==='function')say(result.records.length+' options read from '+file.name+'.');
   }catch(error){optionsBoxMessage(error.message)}
 }
@@ -94,13 +102,11 @@ document.addEventListener('drop',event=>{
 
 export const OPTIONS_BOX_CSS = String.raw`
 .options-box{margin-bottom:0}
-.options-box textarea{min-height:140px;max-height:50dvh;resize:vertical;line-height:1.5}
+.options-box-head{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:4px 12px}
+.options-box-head .link-button{font-size:var(--text-sm)}
+.options-box textarea{max-height:60dvh;resize:vertical;line-height:1.5}
 .options-box textarea.dragging{border-color:var(--blue);background:var(--selection)}
-.options-box code{font-size:var(--text-xs);overflow-wrap:anywhere}
-.options-box-meta{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;min-height:20px;font-size:var(--text-sm)}
-.options-box-meta strong{font-weight:600}
+.options-box-meta{display:flex;align-items:baseline;flex-wrap:wrap;gap:2px 8px;margin:4px 0 0;font-size:var(--text-xs);color:var(--muted)}
+.options-box-meta strong{font-weight:600;color:var(--ink)}
 .options-box-error{color:var(--red)}
-.options-more{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:8px 0 4px}
-.options-more>span{font-size:var(--text-sm);color:var(--muted)}
-[data-options-list]:not(:empty){margin-top:8px}
 `;
