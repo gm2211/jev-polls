@@ -22,5 +22,5 @@ export const PROJECT_RENAME_CSS = String.raw`
 .project-list-row>.project-rename-open:hover{color:var(--ink)}
 .project-rename{gap:8px;padding:12px 12px 12px 20px}
 .project-rename-field{flex:1;min-width:0}
-.project-rename-field input{width:100%;font:inherit;font-size:18px;font-weight:600}
+.project-rename-field input{width:100%;font:inherit;font-size:var(--text-lg);font-weight:600}
 `;

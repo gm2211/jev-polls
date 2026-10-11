@@ -32,7 +32,7 @@ function optionsBoxCount(count){return count===0?'No options yet':count===1?'1 o
 function optionsBoxField(box){
   const count=optionsBoxRecords(box.text).length;
   return '<div class="field options-box"><label for="optionsBox">Your options</label><textarea id="optionsBox" name="optionsBox" data-options-box rows="6" maxlength="262144" spellcheck="false" autocomplete="off" aria-describedby="optionsBoxHint optionsBoxStatus optionsBoxError" aria-invalid="'+!!box.error+'" placeholder="Orbital Empire: an empire, but in orbit&#10;Starfall&#10;Project Dawn: a new beginning">'+esc(box.text)+'</textarea>'+
-    '<small id="optionsBoxHint">One option per line. Add a description after a colon or tab, e.g. <code>Orbital Empire: an empire, but in orbit</code>. You can drop a CSV or JSON file here.</small>'+
+    '<small id="optionsBoxHint">One option per line. Add a description after a colon or tab, e.g. <code>Orbital Empire: an empire, but in orbit</code>.</small>'+
     '<div class="options-box-meta"><strong id="optionsBoxStatus" role="status" aria-live="polite">'+esc(box.error?'':optionsBoxCount(count))+'</strong><span id="optionsBoxError" class="options-box-error" role="alert" '+(box.error?'':'hidden')+'>'+esc(box.error)+'</span></div></div>';
 }
 /** Keeps the compact list, count and Options tab in step with the box without redrawing it, so typing is never interrupted. */
@@ -96,11 +96,11 @@ export const OPTIONS_BOX_CSS = String.raw`
 .options-box{margin-bottom:0}
 .options-box textarea{min-height:140px;max-height:50dvh;resize:vertical;line-height:1.5}
 .options-box textarea.dragging{border-color:var(--blue);background:var(--selection)}
-.options-box code{font-size:11px;overflow-wrap:anywhere}
-.options-box-meta{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;min-height:20px;font-size:12px}
+.options-box code{font-size:var(--text-xs);overflow-wrap:anywhere}
+.options-box-meta{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;min-height:20px;font-size:var(--text-sm)}
 .options-box-meta strong{font-weight:600}
 .options-box-error{color:var(--red)}
 .options-more{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:8px 0 4px}
-.options-more>span{font-size:12px;color:var(--muted)}
+.options-more>span{font-size:var(--text-sm);color:var(--muted)}
 [data-options-list]:not(:empty){margin-top:8px}
 `;

@@ -1970,22 +1970,15 @@ test('changing an intermediate cohort keeps other phase cohorts and inputs indep
 });
 
 
-test('progress exposes observed activity, synthetic previews and real checks without changing draft fields', async () => {
+test('progress shows observed activity as one live line without changing draft fields', async () => {
   const browser = browserHarness(); await settle();
   const { S, draftProgress } = browser.client;
   const job = { id: 'streamed', status: 'running', engine: 'chatgpt', cohort: {size:100}, progress: { phase:'generating', totalPersonas:100, completedPersonas:25, batch:2, totalBatches:4, batchSize:25, activity:'receiving', outputChars:12500, lastActivityAt:new Date().toISOString(), latestAccepted:[{label:'Synthetic reader <script>',age:42}], validation:{scope:'batch',status:'passed',checks:['Required fields and adult ages','Expected batch size'],checkedPersonas:25} } };
   S.localJob=job; S.cohortComposer=true; S.cohortTarget='new'; S.sections['cohort-generation']='review';
   assert.match(draftProgress(job), /Response arriving/);
   assert.match(draftProgress(job), /12,500 characters received/);
-  assert.match(draftProgress(job), /synthetic draft/);
-  assert.match(draftProgress(job), /Synthetic reader &lt;script&gt;/);
+  assert.doesNotMatch(draftProgress(job), /draft-inspect|Activity<|What is checked/, 'progress is one readout, with no detail tabs');
   const before=JSON.stringify(S.doc);
-  browser.element('app').querySelectorAll=(selector:string)=>selector==='[data-form]'?[{reportValidity:()=>assert.fail('progress tab must not submit another form')}]:[];
-  browser.listeners.get('click')!({target:{closest:()=>({dataset:{act:'draft-progress-section',section:'checks'}})},preventDefault(){}});
-  const html=draftProgress(job);
-  assert.match(html,/Latest batch checks · passed/); assert.match(html,/Expected batch size/);
-  assert.match(html,/do not verify real-world facts/);
-  assert.match(draftProgress({...job,progress:{...job.progress,validation:undefined,lastBatchChecks:['Expected batch size']}}),/Latest batch checks · passed/);
   assert.equal(JSON.stringify(S.doc),before); assert.equal(browser.bodies.length,0);
   assert.match(draftProgress({...job,progress:{...job.progress,outputSource:'cli-stdout'}}),/CLI output arriving/);
 });
@@ -2249,8 +2242,8 @@ test('option comparisons preserve descriptions, stable keys and paginated answer
   S.pipelineId='study';S.stageId='panel';const p=S.doc.pipelines[0],s=p.stages[0],q=s.questions.answer;
   q.criteria={a:{label:'Afterlight',description:'A hopeful title about exploration.'},b:{label:'Project Dawn',description:'A bold title about a new beginning.'},c:'None of these',d:'Other',e:{label:'Hidden option',description:'Preserve this off-page description.'}};
   const html=stageForm(p,s);
-  assert.match(html,/data-options-box/);assert.match(html,/Probability distribution/);assert.doesNotMatch(html,/name="setupOption"|name="setupDescription"|>Rating</);
-  assert.match(html,/A hopeful title/);assert.doesNotMatch(html.slice(html.indexOf('data-options-list')),/Hidden option/,'the compact list pages four at a time; the box holds every option');assert.match(html,/Hidden option: Preserve this off-page description\./);
+  assert.match(html,/data-options-box/);assert.doesNotMatch(html,/name="setupOption"|name="setupDescription"|>Rating</);
+  assert.match(html,/A hopeful title/);assert.doesNotMatch(html,/data-options-list/,'the box is the one list');assert.match(html,/Hidden option: Preserve this off-page description\./);
   const beforeEditing=JSON.stringify(q);setupAction('setup-edit-option',{dataset:{key:'a'}});
   const editor=stageForm(p,s);assert.match(editor,/Option 1 name/);assert.match(editor,/Option 1 description/);assert.doesNotMatch(editor,/Option 2 name/);
   assert.equal(JSON.stringify(q),beforeEditing,'opening an option does not mutate criteria');
@@ -2472,7 +2465,7 @@ test('empty option setup starts with the options box and manual add opens only o
   const browser=browserHarness();await settle();const {S,stageForm,setupAction}=browser.client;
   S.pipelineId='study';S.stageId='panel';const p=S.doc.pipelines[0],s=p.stages[0];s.questions.answer.criteria={a:'',b:''};
   const before=JSON.stringify(s);let html=stageForm(p,s);
-  assert.match(html,/data-options-box/);assert.match(html,/data-act="answer-list-import"/);assert.doesNotMatch(html,/Unnamed option/);
+  assert.match(html,/data-options-box/);assert.match(html,/How do you want to add options\?/);assert.match(html,/data-source="file" aria-pressed="false"/);assert.doesNotMatch(html,/data-act="answer-list-import"|Unnamed option/);
   assert.doesNotMatch(html,/name="setupOption"|name="setupDescription"/);assert.equal(JSON.stringify(s),before);
   setupAction('setup-add-option',{dataset:{}});html=stageForm(p,s);
   assert.equal((html.match(/name="setupOption"/g)||[]).length,1);assert.equal((html.match(/name="setupDescription"/g)||[]).length,1);
@@ -2483,9 +2476,9 @@ test('provider change redraws distribution semantics without requiring a reviewe
   const browser = browserHarness(); await settle();
   const { S, render } = browser.client;
   S.tab='studies';S.pipelineId='study';S.stageId='panel';S.plan=null;S.sections['flow-inspector']='answers';render();
-  assert.match(browser.element('app').innerHTML,/Probability distribution/);
+  assert.match(browser.element('app').innerHTML,/Probabilities 0–1, totaling 1\./);
   await browser.listeners.get('change')!({target:{name:'evaluationProvider',value:'gliner'}});
-  assert.match(browser.element('app').innerHTML,/Normalized option scores/);
+  assert.match(browser.element('app').innerHTML,/not calibrated probabilities/);
   assert.doesNotMatch(browser.element('app').innerHTML,/Jev returns a probability/);
 });
 
@@ -2507,7 +2500,7 @@ test('option input tabs isolate sources and preserve drafts and reachable blank 
   applyStudySetup({dataset:{questionId:'answer'},values:{setupPrompt:'Choose a title'},querySelectorAll:()=>[row]});
   setupAction('setup-option-back',{dataset:{}});setupAction('setup-input',{dataset:{source:'file'}});setupAction('setup-input',{dataset:{source:'manual'}});
   assert.equal(q.label,'Choose a title');assert.equal(q.criteria.a.description,'A hopeful title.');assert.equal(q.criteria.b,'');
-  html=stageForm(p,s);assert.match(html,/Afterlight/);assert.match(html,/Unnamed option 2/);
+  html=stageForm(p,s);assert.match(html,/Afterlight: A hopeful title\./);assert.doesNotMatch(html,/How do you want to add options/,'once an option exists the box is the one list');
   const other={...s,id:'other',questions:{answer:{...q,criteria:{a:'',b:''}}}};
   setupAction('setup-input',{dataset:{source:'agent'}});assert.doesNotMatch(stageForm(p,other),/optionAgentPrompt/,'source selection belongs to one step');assert.match(stageForm(p,other),/data-options-box/);
 });
@@ -3329,7 +3322,8 @@ test('the study header always names one next action, from the first question to 
   const next = () => html().match(/<button type="button" class="button primary study-next" data-act="([a-z-]+)"[^>]*>([^<]*)<\/button>/)!.slice(1, 3).join('|');
   S.tab = 'studies'; S.pipelineId = 'study'; S.stageId = 'panel'; S.flowPanel = false;
   const stages = study.stages; study.stages = []; render();
-  assert.equal(next(), 'flow-add|Add your first question', 'an empty study points at the first-question target');
+  assert.doesNotMatch(html(), /study-next|data-act="draft-panel-open">Draft with assistant|data-act="flow-create-open"|flow-empty-hint/, 'an empty study offers its two ways in once, on the canvas');
+  assert.equal((html().match(/class="flow-empty-target"/g) || []).length, 2);
   study.stages = stages;
   render(); assert.equal(next(), 'next-review|Review run', 'a finished study offers the review');
   q.label = ''; render(); assert.equal(next(), 'flow-fix|Next: write the question');
