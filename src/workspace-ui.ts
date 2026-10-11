@@ -399,7 +399,8 @@ function reviewStep(p,item){
   const parts=[];
   if(s.kind==='poll'){
    for(const q of Object.values(s.questions))parts.push((Object.keys(s.questions).length>1||q.label!==title.title?'<h4>'+esc(q.label)+'</h4>':'<h4>Question</h4>')+'<p class="subtle">'+esc(answerName(q.type))+(q.instructions?' · '+esc(q.instructions):'')+'</p>'+(q.criteria&&Object.keys(q.criteria).length?'<ul>'+Object.entries(q.criteria).map(([key,value])=>'<li>'+esc(typeof value==='object'&&value!==null?value.label+(value.description?': '+value.description:''):value||key)+'</li>').join('')+'</ul>':''));
-   const inputs=s.inputs===undefined?s.dependsOn.map(id=>'Summary of step '+n(id)):Object.entries(s.inputs).map(([name,x])=>'Step '+n(x.stage)+' · '+({summary:'answer summary',responses:'each answer',winner:'leading option',mean:'mean score',probabilities:'distribution'}[x.select||'summary'])+' (as inputs.'+name+')');
+   const who=item.budget?.respondents||{},whoLine=k=>who[k]==='profiles'?' with who gave it':who[k]==='summary'?', plus an overview of who answered':'';
+   const inputs=s.inputs===undefined?s.dependsOn.map(id=>'Summary of step '+n(id)+whoLine(id)):Object.entries(s.inputs).map(([name,x])=>'Step '+n(x.stage)+' · '+({summary:'answer summary',responses:'each answer',winner:'leading option',mean:'mean score',probabilities:'distribution'}[x.select||'summary'])+whoLine(name)+' (as inputs.'+name+')');
    if(inputs.length)parts.push('<h4>Reads</h4><ul>'+inputs.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>');
    parts.push('<h4>Produces</h4><ul>'+Object.values(s.questions).map(q=>'<li>'+esc((Object.keys(s.questions).length>1?q.label+': ':'')+(q.type==='choice'?'a weighted share for each option':q.type==='score'?'a weighted mean score':'a weighted likelihood'))+'</li>').join('')+'</ul>');
    parts.push('<h4>Context sent with each request</h4><pre>'+esc(JSON.stringify({shared:p.context,step:s.context??null},null,2))+'</pre>');

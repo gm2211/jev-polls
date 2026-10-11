@@ -1,4 +1,5 @@
-import type { Answer, Cohort, Json, Persona, PollInputBinding, PollStage, Pipeline, Question, Stage } from './types.js';
+import type { Answer, Cohort, Json, Persona, PollInputBinding, PollStage, Pipeline, Question, Stage, Vote } from './types.js';
+import { respondentLookup, respondentProfile, respondentsSummary } from './respondents.js';
 import { resolveQuestion } from './engine-utils.js';
 import { batchedBinding, COMBINE_GUIDE, describeBatching, MAP_GUIDE, mapInput, reduceInput, verdictEntry, type BatchShape } from './batching.js';
 
@@ -20,7 +21,7 @@ function questionPayload(question: Question): unknown {
 }
 
 /** Builds the exact state object sent for one persona; engine and budget estimate share it so they cannot drift. */
-export function buildPollState(pipeline: Pipeline, cohort: Cohort, stage: PollStage, persona: Persona, upstream: { inputs?: Json; upstream?: Json; guide?: string }): Json {
+export function buildPollState(pipeline: Pipeline, cohort: Cohort, stage: PollStage, persona: Persona, upstream: { inputs?: Json; upstream?: Json; guide?: string; respondents?: Json }): Json {
   const state: Record<string, Json> = {
     pipelineContext: pipeline.context,
     cohort: { id: cohort.id, name: cohort.name, population: cohort.population, description: cohort.description },
@@ -30,6 +31,7 @@ export function buildPollState(pipeline: Pipeline, cohort: Cohort, stage: PollSt
   };
   if (upstream.inputs !== undefined) state.inputs = upstream.inputs;
   else state.upstream = upstream.upstream ?? [];
+  if (upstream.inputs !== undefined && upstream.respondents !== undefined) state.respondents = upstream.respondents;
   if (upstream.guide !== undefined) state.inputGuide = upstream.guide;
   return state;
 }
@@ -52,6 +54,12 @@ export function requestSize(state: Json, questions: Record<string, Question>): R
   const longestQuestionTokens = Math.max(0, ...each);
   const allQuestionsTokens = each.reduce((sum, value) => sum + value, 0);
   return { stateTokens, longestQuestionTokens, allQuestionsTokens, stateAndLongest: stateTokens + longestQuestionTokens, total: stateTokens + allQuestionsTokens };
+}
+
+/** Whether a request stays within the share of Jev's limits that automatic sizing aims for. */
+export function fitsWithHeadroom(state: Json, questions: Record<string, Question>): boolean {
+  const size = requestSize(state, questions);
+  return size.stateAndLongest <= BATCH_HEADROOM * JEV_STATE_AND_QUESTION_LIMIT && size.total <= BATCH_HEADROOM * JEV_REQUEST_LIMIT;
 }
 
 /** Runtime guard: returns a user-facing reason when an actual request would exceed a Jev limit. */
@@ -81,6 +89,8 @@ export interface StageBudget {
   largestPart: { name: string; tokens: number };
   /** Present when a `responses` input is read in batches and then combined. */
   batching?: BatchPlan;
+  /** Who answered each input (by input name, or earlier step id without named inputs): each respondent's profile with their response, or only a summary of the group. */
+  respondents?: Record<string, 'profiles' | 'summary'>;
 }
 
 interface SourceStats { votes: number; segments: string[]; repeats: number }
@@ -145,7 +155,7 @@ function placeholderSummary(question: Question, stats: SourceStats): Json {
 
 interface Resolved { value: Json; extraTokens: number; kind: 'responses' | 'other' }
 
-function placeholderInput(pipeline: Pipeline, cohorts: Record<string, Cohort>, binding: PollInputBinding, personaId: string, personaSegment: string): Resolved {
+function placeholderInput(pipeline: Pipeline, cohorts: Record<string, Cohort>, binding: PollInputBinding, personaId: string, personaSegment: string, profile?: Json): Resolved {
   const question = resolveQuestion(pipeline.stages, binding.stage, binding.question);
   if (!question) return { value: null, extraTokens: 0, kind: 'other' };
   const stats = sourceStats(pipeline, cohorts, binding.stage);
@@ -155,7 +165,8 @@ function placeholderInput(pipeline: Pipeline, cohorts: Record<string, Cohort>, b
   if (select === 'winner') return { value: longest(options), extraTokens: 0, kind: 'other' };
   if (select === 'mean') return { value: LONG_NUMBER, extraTokens: 0, kind: 'other' };
   if (select === 'probabilities') return { value: Object.fromEntries(options.map((key) => [key, LONG_NUMBER])), extraTokens: 0, kind: 'other' };
-  const entry = voteRecord(question, longest([personaId, LONG_ID]), longest([...stats.segments, personaSegment]), stats.repeats);
+  const record = voteRecord(question, longest([personaId, LONG_ID]), longest([...stats.segments, personaSegment]), stats.repeats);
+  const entry = profile === undefined ? record : { ...(record as Record<string, Json>), respondent: profile } as Json;
   // One representative entry stands in the array; the rest is added as bytes (entry plus comma) / 3.
   const extraBytes = Math.max(0, stats.votes - 1) * (Buffer.byteLength(JSON.stringify(entry), 'utf8') + 1);
   return { value: [entry], extraTokens: Math.ceil(extraBytes / 3), kind: 'responses' };
@@ -170,8 +181,37 @@ function placeholderUpstream(pipeline: Pipeline, cohorts: Record<string, Cohort>
       const question = resolveQuestion(pipeline.stages, id, source.outputQuestion);
       return question ? { [source.outputQuestion]: { ...question, label: source.label } as Question } : {};
     })();
-    return [{ stage: id, label: source.label, summaries: Object.fromEntries(Object.entries(questions).map(([qid, question]) => [qid, placeholderSummary(question, stats)])) } as unknown as Json];
+    const respondents = placeholderRespondents(pipeline, cohorts, id, Object.keys(questions));
+    return [{ stage: id, label: source.label, summaries: Object.fromEntries(Object.entries(questions).map(([qid, question]) => [qid, placeholderSummary(question, stats)])), ...(respondents !== null ? { respondents } : {}) } as unknown as Json];
   });
+}
+
+/** Every cohort whose personas can answer a step, following Final result and Combine answers steps to their sources. */
+function sourceCohorts(pipeline: Pipeline, cohorts: Record<string, Cohort>, stageId: string, seen = new Set<string>()): Cohort[] {
+  const stage = pipeline.stages.find((item) => item.id === stageId);
+  if (!stage || seen.has(stageId)) return [];
+  seen.add(stageId);
+  if (stage.kind === 'poll') return cohorts[stage.cohort] ? [cohorts[stage.cohort]!] : [];
+  if (stage.kind === 'decision') return sourceCohorts(pipeline, cohorts, stage.from.stage, seen);
+  return [...new Set(stage.inputs.flatMap((input) => sourceCohorts(pipeline, cohorts, input.stage, new Set(seen))))];
+}
+
+/** Stand-in for who answered a step that has not run: every eligible persona of its cohorts, with worst-case answers. */
+function placeholderRespondents(pipeline: Pipeline, cohorts: Record<string, Cohort>, stageId: string, questionIds: string[]): Json {
+  const sources = sourceCohorts(pipeline, cohorts, stageId);
+  const answers = Object.fromEntries(questionIds.flatMap((id) => { const question = resolveQuestion(pipeline.stages, stageId, id); return question ? [[id, representativeAnswer(question) as unknown as Answer]] : []; }));
+  const votes: Vote[] = sources.flatMap((cohort) => eligiblePersonas(cohort).map((persona) => ({ personaId: persona.id, cohortId: cohort.id, segment: persona.segment, repeat: 1, weight: persona.weight, answers, cacheHit: false, model: 'estimate' })));
+  return respondentsSummary(votes, questionIds, respondentLookup(sources));
+}
+
+/** The largest respondent profile a step's responses could carry. */
+function largestProfile(pipeline: Pipeline, cohorts: Record<string, Cohort>, stageId: string): Json | undefined {
+  let best: Json | undefined, size = -1;
+  for (const cohort of sourceCohorts(pipeline, cohorts, stageId)) for (const persona of eligiblePersonas(cohort)) {
+    const profile = respondentProfile(persona, cohort), bytes = bytesOf(profile);
+    if (bytes > size) { best = profile; size = bytes; }
+  }
+  return best;
 }
 
 /** Share of a Jev limit that automatic batching aims for, leaving room for estimate error. */
@@ -202,13 +242,13 @@ function verdictAnswers(stage: PollStage): Record<string, Answer> {
  * Decides how a batched `responses` input is split and combined, from the worst-case persona. Engine and review share it,
  * so the reviewed request count is the count the run uses. `others` are the step's other resolved inputs.
  */
-export function planBatching(pipeline: Pipeline, cohort: Cohort, stage: PollStage, alias: string, personas: Persona[], totalResponses: number, others: Record<string, Json>): BatchPlan | undefined {
+export function planBatching(pipeline: Pipeline, cohort: Cohort, stage: PollStage, alias: string, personas: Persona[], totalResponses: number, others: Record<string, Json>, handoff: { respondents?: Json; profileBytes?: number } = {}): BatchPlan | undefined {
   const binding = stage.inputs?.[alias];
   if (!binding || binding.batch === undefined || !personas.length) return undefined;
   const question = resolveQuestion(pipeline.stages, binding.stage, binding.question);
   if (!question) return undefined;
   const source = pipeline.stages.find((item) => item.id === binding.stage);
-  const stateOf = (persona: Persona, value: Json, guide: string): Json => buildPollState(pipeline, cohort, stage, persona, { inputs: { ...others, [alias]: value }, guide });
+  const stateOf = (persona: Persona, value: Json, guide: string): Json => buildPollState(pipeline, cohort, stage, persona, { inputs: { ...others, [alias]: value }, guide, ...(handoff.respondents !== undefined ? { respondents: handoff.respondents } : {}) });
   const emptyMap = (persona: Persona): RequestSize => requestSize(stateOf(persona, mapInput(totalResponses, totalResponses, totalResponses, []), MAP_GUIDE), stage.questions);
   let worst = personas[0]!, empty = emptyMap(worst);
   for (const persona of personas.slice(1)) {
@@ -216,7 +256,8 @@ export function planBatching(pipeline: Pipeline, cohort: Cohort, stage: PollStag
     if (size.stateTokens > empty.stateTokens) { worst = persona; empty = size; }
   }
   const room = (size: RequestSize): number => Math.min(BATCH_HEADROOM * JEV_STATE_AND_QUESTION_LIMIT - size.stateTokens - size.longestQuestionTokens, BATCH_HEADROOM * JEV_REQUEST_LIMIT - size.stateTokens - size.allQuestionsTokens);
-  const entryBytes = bytesOf(voteRecord(question, LONG_ID, LONG_ID, 1)) + 1;
+  // Each response may carry its respondent's profile: `,"respondent":` plus the largest profile.
+  const entryBytes = bytesOf(voteRecord(question, LONG_ID, LONG_ID, 1)) + 1 + (handoff.profileBytes ? handoff.profileBytes + 15 : 0);
   const explicit = binding.batch !== 'auto';
   const wanted = binding.batch === 'auto' ? Math.max(1, Math.floor(room(empty) * 3 / entryBytes)) : Math.max(1, Math.floor(binding.batch.size));
   const batchSize = Math.max(1, Math.min(wanted, Math.max(1, totalResponses)));
@@ -265,14 +306,37 @@ export function estimateStageBudget(pipeline: Pipeline, cohorts: Record<string, 
   if (!personas.length) return undefined;
   let worst: { persona: Persona; size: RequestSize; extra: number; parts: Array<{ name: string; tokens: number; responses?: string }> } | undefined;
   const longestId = longest(personas.map((persona) => persona.id)), longestSegment = longest(personas.map((persona) => persona.segment));
-  const inputs: Record<string, Resolved> = stage.inputs === undefined ? {} : Object.fromEntries(Object.entries(stage.inputs).map(([alias, binding]) => [alias, placeholderInput(pipeline, cohorts, binding, longestId, longestSegment)]));
-  const upstreamPlaceholder = stage.inputs === undefined ? placeholderUpstream(pipeline, cohorts, stage) : null;
+  const bindings = Object.entries(stage.inputs ?? {});
+  const profiles = Object.fromEntries(bindings.filter(([, binding]) => binding.select === 'responses').map(([alias, binding]) => [alias, largestProfile(pipeline, cohorts, binding.stage)]));
+  const summaries = Object.fromEntries(bindings.map(([alias, binding]) => [alias, placeholderRespondents(pipeline, cohorts, binding.stage, [binding.question])]).filter(([, summary]) => summary !== null)) as Record<string, Json>;
   const batched = batchedBinding(stage);
+  // Same rule as the run: responses carry profiles while the largest request fits; batched responses always do.
+  const profiled = new Set(Object.keys(profiles).filter((alias) => profiles[alias] !== undefined && summaries[alias] !== undefined));
+  const resolveInputs = (): Record<string, Resolved> => Object.fromEntries(bindings.map(([alias, binding]) => [alias, placeholderInput(pipeline, cohorts, binding, longestId, longestSegment, profiled.has(alias) ? profiles[alias] : undefined)]));
+  const respondentsState = (): Json | undefined => Object.keys(summaries).length ? Object.fromEntries(Object.entries(summaries).map(([alias, summary]) => [alias, stage.inputs![alias]!.select === 'responses' ? { ...(summary as Record<string, Json>), profiles: profiled.has(alias) ? 'with each response' : 'left out to fit the request limit' } : summary])) : undefined;
+  let inputs = resolveInputs();
+  const heaviest = personas.reduce((best, persona) => JSON.stringify(persona).length > JSON.stringify(best).length ? persona : best, personas[0]!);
+  for (;;) {
+    const unbatched = [...profiled].filter((alias) => alias !== batched?.alias);
+    if (!unbatched.length) break;
+    const state = buildPollState(pipeline, cohort, stage, heaviest, { inputs: Object.fromEntries(Object.entries(inputs).map(([alias, item]) => [alias, item.value])), respondents: respondentsState() });
+    const extra = Object.entries(inputs).filter(([alias]) => alias !== batched?.alias).reduce((sum, [, item]) => sum + item.extraTokens, 0);
+    const size = requestSize(state, stage.questions);
+    if (size.stateAndLongest + extra <= BATCH_HEADROOM * JEV_STATE_AND_QUESTION_LIMIT && size.total + extra <= BATCH_HEADROOM * JEV_REQUEST_LIMIT) break;
+    profiled.delete(unbatched.sort((a, b) => (inputs[b]!.extraTokens + tokensOf(inputs[b]!.value)) - (inputs[a]!.extraTokens + tokensOf(inputs[a]!.value)))[0]!);
+    inputs = resolveInputs();
+  }
+  const respondents = respondentsState();
+  const upstreamPlaceholder = stage.inputs === undefined ? placeholderUpstream(pipeline, cohorts, stage) : null;
+  const respondentDetail: Record<string, 'profiles' | 'summary'> = stage.inputs === undefined
+    ? Object.fromEntries((upstreamPlaceholder as Array<{ stage: string; respondents?: Json }>).filter((item) => item.respondents !== undefined).map((item) => [item.stage, 'summary' as const]))
+    : Object.fromEntries(Object.keys(summaries).map((alias) => [alias, profiled.has(alias) ? 'profiles' as const : 'summary' as const]));
   let batching: BatchPlan | undefined;
   if (batched) {
     const total = sourceStats(pipeline, cohorts, batched.binding.stage).votes;
     const others = Object.fromEntries(Object.entries(inputs).filter(([alias]) => alias !== batched.alias).map(([alias, item]) => [alias, item.value]));
-    batching = planBatching(pipeline, cohort, stage, batched.alias, personas, total, others);
+    const profile = profiled.has(batched.alias) ? profiles[batched.alias] : undefined;
+    batching = planBatching(pipeline, cohort, stage, batched.alias, personas, total, others, { respondents, profileBytes: profile === undefined ? 0 : bytesOf(profile) });
     const original = inputs[batched.alias];
     if (batching && original) {
       // One representative entry stands in the batch; the rest of the batch is added as bytes.
@@ -282,7 +346,7 @@ export function estimateStageBudget(pipeline: Pipeline, cohorts: Record<string, 
     }
   }
   for (const persona of personas) {
-    const state = buildPollState(pipeline, cohort, stage, persona, stage.inputs === undefined ? { upstream: upstreamPlaceholder! } : { inputs: Object.fromEntries(Object.entries(inputs).map(([alias, item]) => [alias, item.value])), ...(batching ? { guide: MAP_GUIDE } : {}) });
+    const state = buildPollState(pipeline, cohort, stage, persona, stage.inputs === undefined ? { upstream: upstreamPlaceholder! } : { inputs: Object.fromEntries(Object.entries(inputs).map(([alias, item]) => [alias, item.value])), ...(batching ? { guide: MAP_GUIDE } : {}), respondents });
     const extra = Object.values(inputs).reduce((sum, item) => sum + item.extraTokens, 0);
     const size = requestSize(state, stage.questions);
     if (worst && size.stateTokens + extra <= worst.size.stateTokens + worst.extra) continue;
@@ -290,11 +354,12 @@ export function estimateStageBudget(pipeline: Pipeline, cohorts: Record<string, 
       { name: `the profile of ${personaLabel(persona)} (background and details)`, tokens: tokensOf({ ...persona, attributes: undefined }) + tokensOf(persona.attributes) * 2 },
       { name: 'the shared and step context', tokens: tokensOf(pipeline.context) + tokensOf(stage.context ?? null) + tokensOf({ id: cohort.id, name: cohort.name, population: cohort.population, description: cohort.description }) },
     ];
-    if (stage.inputs === undefined) parts.push({ name: 'the results from earlier steps', tokens: tokensOf(upstreamPlaceholder) });
+    if (stage.inputs === undefined) parts.push({ name: 'the results from earlier steps and who answered them', tokens: tokensOf(upstreamPlaceholder) });
+    else if (respondents !== undefined) parts.push({ name: 'the summary of who answered the earlier steps', tokens: tokensOf(respondents) });
     for (const [alias, item] of Object.entries(inputs)) {
       const binding = stage.inputs![alias]!;
       const source = pipeline.stages.find((candidate) => candidate.id === binding.stage);
-      parts.push({ name: `the input "${alias}" (${item.kind === 'responses' ? (batching && alias === batching.alias ? `a batch of ${fmt(batching.batchSize)} individual responses` : 'every individual response') : `the ${binding.select ?? 'summary'}`} from ${source?.label ?? binding.stage})`, tokens: tokensOf(item.value) + item.extraTokens, ...(item.kind === 'responses' ? { responses: alias } : {}) });
+      parts.push({ name: `the input "${alias}" (${item.kind === 'responses' ? (batching && alias === batching.alias ? `a batch of ${fmt(batching.batchSize)} individual responses` : 'every individual response') + (profiled.has(alias) ? ' with who gave it' : '') : `the ${binding.select ?? 'summary'}`} from ${source?.label ?? binding.stage})`, tokens: tokensOf(item.value) + item.extraTokens, ...(item.kind === 'responses' ? { responses: alias } : {}) });
     }
     parts.push({ name: 'the longest question and its options', tokens: size.longestQuestionTokens });
     worst = { persona, size, extra, parts };
@@ -331,6 +396,7 @@ export function estimateStageBudget(pipeline: Pipeline, cohorts: Record<string, 
     ...(message ? { message } : {}),
     largestPart: { name: top.name, tokens: top.tokens },
     ...(batching ? { batching } : {}),
+    ...(Object.keys(respondentDetail).length ? { respondents: respondentDetail } : {}),
   };
 }
 

@@ -127,8 +127,12 @@ test('auto picks the largest batch size under the limit and every request respec
   const board_ = boardRequests(log);
   assert.equal(board_.length, 8 * plan.requestsPerRun);
   for (const request of board_) assert.ok(estimateRequestTokens(request.state as Json, request.questions).stateAndLongest <= JEV_STATE_AND_QUESTION_LIMIT * 0.85);
-  // one more response per batch would not fit
-  assert.ok(plan.mapLargest + 60 > JEV_STATE_AND_QUESTION_LIMIT * 0.85 - 1);
+  // one more response per batch (each with its respondent's profile) would not fit
+  const entries = ((board_[0]!.state as { inputs: { gamers1: { responses: Json[] } } }).inputs.gamers1.responses);
+  assert.ok(entries.every((entry) => (entry as { respondent?: Json }).respondent !== undefined));
+  const entryTokens = Math.ceil(Math.max(...entries.map((entry) => Buffer.byteLength(JSON.stringify(entry), 'utf8') + 1)) / 3);
+  // (the plan sizes each entry for the longest ids and numbers, so allow twice the real entry)
+  assert.ok(plan.mapLargest + 2 * entryTokens > JEV_STATE_AND_QUESTION_LIMIT * 0.85 - 1);
 });
 
 test('verdicts that do not fit one request are combined in more layers', async () => {
