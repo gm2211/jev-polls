@@ -190,3 +190,18 @@ test('throughput is a rolling 20 second rate and time left follows from it', () 
   assert.equal(arena.secondsLeft(10, null), null);
   assert.deepEqual([0.4, 12, 100, 6000].map(seconds => arena.duration(seconds)), ['under 1s', '12s', '2 min', '1.7 h']);
 });
+
+test('a tile tooltip follows the pointer or keyboard focus and never survives a click, leave, scroll, Esc, blur or selection change', () => {
+  const next = arena.tooltipNext;
+  assert.equal(next(null, { type: 'hover', key: 'a' }), 'a');
+  assert.equal(next('a', { type: 'hover', key: 'b' }), 'b');
+  assert.equal(next(null, { type: 'hover', key: 'a', touch: true }), null, 'touch never shows a hover tooltip');
+  assert.equal(next(null, { type: 'focus', key: 'a', keyboard: true }), 'a');
+  assert.equal(next(null, { type: 'focus', key: 'a', keyboard: false }), null, 'focus from a click does not bring the tooltip back');
+  for (const type of ['click', 'leave', 'scroll', 'escape', 'blur', 'select'] as const) assert.equal(next('a', { type }), null, type);
+  // hover, click (hides), pointer leaves, click's focus arrives pointer-driven: nothing is pinned.
+  let state: string | null = next(null, { type: 'hover', key: 'a' });
+  state = next(state, { type: 'click' });
+  state = next(state, { type: 'focus', key: 'a', keyboard: false });
+  assert.equal(state, null);
+});

@@ -506,7 +506,17 @@ export function createArenaModel() {
     return `${base}, but ${apart.length} of ${rated.length} segments prefer a different option.`;
   }
 
-  return { PALETTE, GROUP_LIMIT, tileCap, fitCap, tileFor, initials, memberKey, describeQuestions, answerFor, topPick, confidenceOf, tileVisual, optionColor, groupMembers, groupFields, leaderboard, fitLayout, fixedLayout, rate, smoothRate, commentary, segmentTops, resultSummary, secondsLeft, duration, signature, patchPlan, mergeMembers, replayOrder, replayMembers, replayRate, replayAdvance };
+  /**
+   * Which tile's hover tooltip is showing after an event. A tooltip belongs to a pointer resting on a tile or to keyboard focus, never to a
+   * click: clicking moves the detail to the side panel and focus stays on the tile, so a pointer-driven focus must not bring the tooltip back.
+   */
+  function tooltipNext(current: string | null, event: { type: 'hover' | 'focus' | 'click' | 'leave' | 'scroll' | 'escape' | 'blur' | 'select'; key?: string; touch?: boolean; keyboard?: boolean }): string | null {
+    if (event.type === 'hover') return event.touch || !event.key ? current : event.key;
+    if (event.type === 'focus') return event.keyboard && event.key ? event.key : current;
+    return null;
+  }
+
+  return { PALETTE, GROUP_LIMIT, tileCap, tooltipNext, fitCap, tileFor, initials, memberKey, describeQuestions, answerFor, topPick, confidenceOf, tileVisual, optionColor, groupMembers, groupFields, leaderboard, fitLayout, fixedLayout, rate, smoothRate, commentary, segmentTops, resultSummary, secondsLeft, duration, signature, patchPlan, mergeMembers, replayOrder, replayMembers, replayRate, replayAdvance };
 }
 
 export const arenaModel = createArenaModel();

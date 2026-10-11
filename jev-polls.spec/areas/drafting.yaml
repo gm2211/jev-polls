@@ -114,7 +114,14 @@ behaviors:
       requested audience's normal generation job in its step, one at a time.
     details: >-
       An audience request is a cohort entry with an audienceRequest and no personas; size is 1 to
-      20,000 and the description is required, and a cohort that has both personas and a request,
+      20,000 and the description is required. The description is a full generation brief, never a
+      one-liner: the population and its spread, the segments with rough shares, the structured
+      attributes every persona must carry (named), the backstory length, and the constraints from
+      the user's prompt quoted in the user's words. The request also carries optional attributes
+      (names) and segments (id, label, optional percent share), and the inline generation prompt
+      is built from the description, those attributes and segments, and the rule that personas
+      hold no preference for any option or name being compared, so people vary within a segment.
+      A cohort that has both personas and a request,
       reuses a saved id, or is used by no step rejects the proposal. The proposal review lists each
       one as "Will generate: name · N people". On apply the step keeps an unselected cohort; the
       job is the same one as Create the audience on the Who answers stop, so the user sees the
