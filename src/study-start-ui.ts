@@ -81,17 +81,17 @@ export const STUDY_START_CSS = String.raw`
 .empty-create-plus{display:grid;place-items:center;width:44px;height:44px;border-radius:50%;background:var(--action);color:var(--blue)}
 .empty-create:hover .empty-create-plus{background:var(--surface)}
 .empty-create-plus .ui-icon{width:22px;height:22px}
-.empty-create strong{font:600 18px/1.3 var(--display);letter-spacing:-.01em}
-.empty-create-hint{max-width:46ch;color:var(--muted);font-size:13px}
-.create-row{appearance:none;display:flex;align-items:center;gap:10px;width:100%;min-height:52px;padding:0 20px;border:0;background:transparent;color:var(--muted);font:inherit;font-size:14px;font-weight:600;text-align:left;cursor:pointer}
+.empty-create strong{font:600 var(--text-lg)/1.3 var(--display);letter-spacing:-.01em}
+.empty-create-hint{max-width:46ch;color:var(--muted);font-size:var(--text-md)}
+.create-row{appearance:none;display:flex;align-items:center;gap:10px;width:100%;min-height:52px;padding:0 20px;border:0;background:transparent;color:var(--muted);font:inherit;font-size:var(--text-md);font-weight:600;text-align:left;cursor:pointer}
 .create-row:hover{background:var(--hover);color:var(--ink)}.create-row .ui-icon{width:16px;height:16px}
 .create-row:focus-visible{outline:2px solid var(--focus,var(--blue));outline-offset:-2px}
 
 .study-title{grid-area:title;display:flex;align-items:center;gap:6px;min-width:0}
 .study-title h1{min-width:0}
 .study-title-edit{flex:none;background:transparent;border-color:transparent;color:var(--muted)}.study-title-edit:hover{color:var(--ink)}
-.study-title-form input{flex:1;min-width:0;font:600 18px/1.3 var(--display);letter-spacing:-.02em}
-.inline-edit-hint{flex:none;color:var(--faint);font-size:12px;white-space:nowrap}
+.study-title-form input{flex:1;min-width:0;font:600 var(--text-lg)/1.3 var(--display);letter-spacing:-.02em}
+.inline-edit-hint{flex:none;color:var(--faint);font-size:var(--text-sm);white-space:nowrap}
 @media(max-width:600px){.inline-edit-hint{display:none}}
 .visually-hidden{position:absolute!important;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
 `;
