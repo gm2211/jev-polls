@@ -2,7 +2,7 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type {
-  Answer, ChoiceQuestion, Cohort, Condition, Evaluation, EvaluationRequest, Json, Pipeline, PollInputBinding,
+  Answer, ChoiceQuestion, Cohort, Condition, Evaluation, EvaluationRequest, Json, Persona, Pipeline, PollInputBinding, PollStage,
   Question, QuestionSummary, RunOptions, RunRecord, Stage, StageLayer, StageResult, Vote,
 } from './types.js';
 import { summarizeVotes } from './analysis.js';
@@ -10,7 +10,8 @@ import { ProviderError, probabilitySumTolerance, scoreMeanTolerance, type Provid
 import { validateClassifierAnswer } from './gliner-provider.js';
 import { inputSelectCompatible } from './schema.js';
 import { CHOICE_WINNER_TOLERANCE, errorMessage, hashValue, isFiniteProbability, resolveQuestion, seededRandom, stableStringify } from './engine-utils.js';
-import { buildPollState, planBatching, requestSizeProblem } from './request-budget.js';
+import { buildPollState, fitsWithHeadroom, planBatching, requestSizeProblem } from './request-budget.js';
+import { respondentLookup, respondentProfile, respondentsSummary, type RespondentLookup } from './respondents.js';
 import { batchedBinding, chunk, describeBatching, COMBINE_GUIDE, mapInput, MAP_GUIDE, reduceInput, type Verdict } from './batching.js';
 
 interface CacheEntry { version: 1; key: string; request: EvaluationRequest; evaluation: Evaluation }
@@ -262,6 +263,7 @@ export async function runPipeline(pipeline: Pipeline, cohorts: Record<string, Co
   const warnings: string[] = [];
   if (options.provider.name === 'gliner') warnings.push('GLiNER local classifier: distributions are relative normalized independent sigmoid label scores, not calibrated probabilities or human observations. Native scores and logits are retained in each answer; confidence and token billing are unreported. Repeats are deterministic with this model.');
   let pending = new Set(order.map((stage) => stage.id));
+  const lookup = respondentLookup(Object.values(cohorts));
 
   const runStage = async (stage: Stage): Promise<StageResult> => {
     const startedAt = new Date().toISOString();
@@ -309,9 +311,17 @@ export async function runPipeline(pipeline: Pipeline, cohorts: Record<string, Co
       // A `responses` input read in batches: resolve it once, decide the batch size from the worst-case persona.
       const batched = stage.inputs ? batchedBinding(stage) : undefined;
       const batchSource = batched ? stages[batched.binding.stage] : undefined;
-      const responses = batched && batchSource?.status === 'completed' && batchSource.summaries[batched.binding.question] ? responseRecords(batched.binding, batchSource) : undefined;
-      const otherInputs = stage.inputs ? resolvePollInputs(Object.fromEntries(Object.entries(stage.inputs).filter(([alias]) => alias !== batched?.alias)), stages) as Record<string, Json> : {};
-      const batchPlan = batched && responses ? planBatching(pipeline, cohort, stage, batched.alias, cohort.personas.filter((persona) => segmentWeights.get(persona.segment)! > 0), responses.length, otherInputs) : undefined;
+      const eligible = cohort.personas.filter((persona) => segmentWeights.get(persona.segment)! > 0);
+      // Batched responses always carry each respondent's profile, since batching sizes the slices to fit.
+      const responses = batched && batchSource?.status === 'completed' && batchSource.summaries[batched.binding.question] ? responseRecords(batched.binding, batchSource, lookup) : undefined;
+      const handoff = stage.inputs ? resolveHandoff(pipeline, cohort, stage, eligible, stages, lookup, batched?.alias) : undefined;
+      const otherInputs = handoff?.inputs ?? {};
+      const profileBytes = responses ? Math.max(0, ...responses.map((record) => Buffer.byteLength(JSON.stringify((record as { respondent?: Json }).respondent ?? null), 'utf8'))) : 0;
+      const batchPlan = batched && responses ? planBatching(pipeline, cohort, stage, batched.alias, eligible, responses.length, otherInputs, { respondents: handoff?.respondents, profileBytes }) : undefined;
+      const upstreamHandoff = stage.inputs === undefined ? upstream.map((item) => {
+        const respondents = respondentsSummary(item.votes, Object.keys(item.summaries), lookup);
+        return { stage: item.id, label: item.label, summaries: item.summaries, ...(respondents !== null ? { respondents } : {}) };
+      }) as unknown as Json : undefined;
       const chunks = batchPlan && responses ? (responses.length ? chunk(responses, batchPlan.batchSize) : [[]]) : [];
 
       const evaluate = async (request: EvaluationRequest): Promise<{ evaluation: Evaluation; cacheHit: boolean }> => {
@@ -358,9 +368,9 @@ export async function runPipeline(pipeline: Pipeline, cohorts: Record<string, Co
           try {
             let final: { evaluation: Evaluation; cacheHit: boolean };
             if (!batchPlan || !batched) {
-              const state = buildPollState(pipeline, cohort, stage, job.persona, stage.inputs !== undefined
-                ? { inputs: resolvePollInputs(stage.inputs, stages) }
-                : { upstream: upstream.map((item) => ({ stage: item.id, label: item.label, summaries: item.summaries })) as unknown as Json });
+              const state = buildPollState(pipeline, cohort, stage, job.persona, handoff
+                ? { inputs: handoff.inputs, respondents: handoff.respondents }
+                : { upstream: upstreamHandoff });
               final = await evaluate({ model: options.model, seed: requestSeed, state, questions: questionsForSeed(stage.questions, requestSeed) });
             } else {
               const record = (key: string, batch: number, result: { evaluation: Evaluation; cacheHit: boolean }): void => {
@@ -370,7 +380,7 @@ export async function runPipeline(pipeline: Pipeline, cohorts: Record<string, Co
               };
               const ask = (suffix: string, value: Json, guide: string): Promise<{ evaluation: Evaluation; cacheHit: boolean }> => {
                 const seed = `${requestSeed}:${suffix}`;
-                const state = buildPollState(pipeline, cohort, stage, job.persona, { inputs: { ...otherInputs, [batched.alias]: value }, guide });
+                const state = buildPollState(pipeline, cohort, stage, job.persona, { inputs: { ...otherInputs, [batched.alias]: value }, guide, respondents: handoff?.respondents });
                 return evaluate({ model: options.model, seed, state, questions: questionsForSeed(stage.questions, seed) });
               };
               const total = responses!.length;
@@ -497,7 +507,37 @@ function stagesToSummaries(stages: StageResult[]): Record<string, Record<string,
   return Object.fromEntries(stages.map((stage) => [stage.id, stage.summaries]));
 }
 
-function resolvePollInputs(bindings: Record<string, PollInputBinding>, stages: Record<string, StageResult>): Json {
+/**
+ * What a step with named inputs receives from earlier steps: the inputs themselves, plus who answered them. Individual
+ * responses carry each respondent's profile while the largest request still fits; otherwise the profiles are dropped,
+ * largest input first, and only the weighted summary of who answered remains. `skip` is a batched input resolved apart.
+ */
+function resolveHandoff(pipeline: Pipeline, cohort: Cohort, stage: PollStage, personas: Persona[], stages: Record<string, StageResult>, lookup: RespondentLookup, skip?: string): { inputs: Record<string, Json>; respondents?: Json } {
+  const bindings = Object.fromEntries(Object.entries(stage.inputs ?? {}).filter(([alias]) => alias !== skip));
+  const summaries: Record<string, Record<string, Json>> = {};
+  for (const [alias, binding] of Object.entries(stage.inputs ?? {})) {
+    const result = stages[binding.stage];
+    if (result?.status !== 'completed' || !result.summaries[binding.question]) continue;
+    const summary = respondentsSummary(result.votes, [binding.question], lookup);
+    if (summary !== null) summaries[alias] = summary as Record<string, Json>;
+  }
+  const profiled = new Set(Object.entries(bindings).filter(([alias, binding]) => binding.select === 'responses' && summaries[alias]).map(([alias]) => alias));
+  const withDetail = (): Json | undefined => {
+    const entries = Object.entries(summaries).map(([alias, summary]) => [alias, stage.inputs![alias]!.select === 'responses' ? { ...summary, profiles: alias === skip || profiled.has(alias) ? 'with each response' : 'left out to fit the request limit' } : summary]);
+    return entries.length ? Object.fromEntries(entries) : undefined;
+  };
+  // The persona with the largest profile makes the largest request (it appears as persona and shared context).
+  const worst = personas.reduce<Persona | undefined>((best, persona) => !best || JSON.stringify(persona).length > JSON.stringify(best).length ? persona : best, undefined);
+  for (;;) {
+    const inputs = resolvePollInputs(bindings, stages, lookup, profiled) as Record<string, Json>;
+    const respondents = withDetail();
+    if (!profiled.size || !worst || fitsWithHeadroom(buildPollState(pipeline, cohort, stage, worst, { inputs, respondents }), stage.questions)) return { inputs, ...(respondents ? { respondents } : {}) };
+    const largest = [...profiled].sort((a, b) => JSON.stringify(inputs[b]).length - JSON.stringify(inputs[a]).length)[0]!;
+    profiled.delete(largest);
+  }
+}
+
+function resolvePollInputs(bindings: Record<string, PollInputBinding>, stages: Record<string, StageResult>, lookup?: RespondentLookup, profiled?: Set<string>): Json {
   const resolved: Record<string, Json> = {};
   for (const [alias, binding] of Object.entries(bindings)) {
     const result = stages[binding.stage];
@@ -511,16 +551,17 @@ function resolvePollInputs(bindings: Record<string, PollInputBinding>, stages: R
     else if (select === 'winner') resolved[alias] = summary.winner ?? null;
     else if (select === 'mean') resolved[alias] = summary.mean ?? null;
     else if (select === 'probabilities') resolved[alias] = summary.probabilities ? { ...summary.probabilities } : null;
-    else resolved[alias] = responseRecords(binding, result!);
+    else resolved[alias] = responseRecords(binding, result!, profiled?.has(alias) ? lookup : undefined);
   }
   return resolved;
 }
 
 /** Every individual answer to one question of a finished step, in the step's deterministic vote order. */
-function responseRecords(binding: PollInputBinding, result: StageResult): Json[] {
+function responseRecords(binding: PollInputBinding, result: StageResult, lookup?: RespondentLookup): Json[] {
   return result.votes.flatMap((vote) => {
     const answer = vote.answers[binding.question];
     if (!answer) return [];
+    const found = lookup?.find(vote.cohortId, vote.personaId);
     return [{
       personaId: vote.personaId,
       cohortId: vote.cohortId ?? null,
@@ -529,6 +570,7 @@ function responseRecords(binding: PollInputBinding, result: StageResult): Json[]
       weight: vote.weight,
       model: vote.model,
       answer: answer as unknown as Json,
+      ...(found ? { respondent: respondentProfile(found.persona, found.cohort) } : {}),
     } as unknown as Json];
   });
 }
