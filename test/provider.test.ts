@@ -167,6 +167,20 @@ test('TypeSafe accepts a choice that trails the rounded maximum by one rounding 
   await assert.rejects(createProvider('typesafe', { apiKey: 'fake-test-key', fetch: respond(0.5) }).evaluate(request), (error: unknown) => error instanceof ProviderError && error.responseIssue === 'choice_winner');
 });
 
+test('TypeSafe accepts a 7-level score whose mean drifts from two-decimal rounded probabilities', async () => {
+  const levels = ['1', '2', '3', '4', '5', '6', '7'];
+  const scaleRequest: EvaluationRequest = { ...request, questions: { scale: { type: 'score', label: 'Rate', criteria: levels } } as EvaluationRequest['questions'] };
+  const respond = (score: number) => async (): Promise<Response> => Response.json({
+    model: 'jev-test',
+    answers: { scale: { type: 'score', score, confidence: 0.4, legend: Object.fromEntries(levels.map((level, index) => [String(index), level])), probabilities: { '0': 0.01, '1': 0.02, '2': 0.07, '3': 0.2, '4': 0.35, '5': 0.25, '6': 0.1 } } },
+    usage: { input_tokens: 1, output_tokens: 1 },
+  });
+  // Rounded probabilities give a mean of 4.01; an unrounded mean of 4.08 is within rounding drift.
+  const result = await createProvider('typesafe', { apiKey: 'fake-test-key', fetch: respond(4.08) }).evaluate(scaleRequest);
+  assert.equal((result.answers.scale as { score: number }).score, 4.08);
+  await assert.rejects(createProvider('typesafe', { apiKey: 'fake-test-key', fetch: respond(4.5) }).evaluate(scaleRequest), (error: unknown) => error instanceof ProviderError && error.responseIssue === 'score_mean');
+});
+
 test('mock choice distributions remain normalized at the 255-option schema limit', async () => {
   const criteria = Object.fromEntries(Array.from({ length: 255 }, (_, index) => [`option-${index}`, `Option ${index}`]));
   const broadRequest: EvaluationRequest = {

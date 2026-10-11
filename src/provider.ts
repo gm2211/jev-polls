@@ -79,6 +79,10 @@ export function probabilitySumTolerance(options: number): number {
   return Math.max(1e-3, options * PROBABILITY_ROUNDING_STEP + 1e-9);
 }
 
+export function scoreMeanTolerance(levels: number): number {
+  return PROBABILITY_ROUNDING_STEP * levels * (levels - 1) / 2 + 0.01 + 1e-9;
+}
+
 function stableJson(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'undefined';
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
@@ -146,6 +150,7 @@ function validateAnswer(question: Question, value: unknown, id: string): Answer 
   }
   // Hosted Jev rounds each probability to two decimals, so long option lists drift from 1; renormalize rounding drift, reject real errors.
   if (Math.abs(sum - 1) > probabilitySumTolerance(expected.length)) throw invalidResponse('probability_total', `TypeSafe returned an unnormalized probability distribution for ${id}.`);
+  const rawValues = expected.map((key) => probabilities[key] as number);
   if (Math.abs(sum - 1) > 1e-9) for (const key of expected) probabilities[key] = (probabilities[key] as number) / sum;
   assertProbability(answer.confidence, `${id}.confidence`);
 
@@ -167,10 +172,10 @@ function validateAnswer(question: Question, value: unknown, id: string): Answer 
   if (!answer.legend || typeof answer.legend !== 'object' || stableJson(answer.legend) !== stableJson(expectedLegend)) {
     throw invalidResponse('score_legend', `TypeSafe returned an invalid score legend for ${id}.`);
   }
-  const values = expected.map((key) => probabilities[key] as number);
-  const expectedScore = values.reduce((sum, probability, index) => sum + probability * index, 0);
-  // The API may round its expected score; tolerate small display precision differences.
-  if (Math.abs(answer.score - expectedScore) > 0.01) throw invalidResponse('score_mean', `TypeSafe returned a score inconsistent with its distribution for ${id}.`);
+  // Compare with the returned (pre-renormalization) probabilities: each is rounded to two decimals, so
+  // level i can shift the mean by up to i rounding steps, and the score itself may be rounded too.
+  const expectedScore = rawValues.reduce((sum, probability, index) => sum + probability * index, 0);
+  if (Math.abs(answer.score - expectedScore) > scoreMeanTolerance(expected.length)) throw invalidResponse('score_mean', `TypeSafe returned a score inconsistent with its distribution for ${id} (score ${answer.score}, distribution mean ${expectedScore.toFixed(3)}).`);
   return { type: 'score', score: answer.score, probabilities: probabilities as Record<string, number>, confidence: answer.confidence, legend: expectedLegend };
 }
 
