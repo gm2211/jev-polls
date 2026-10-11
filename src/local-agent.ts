@@ -32,7 +32,9 @@ export interface LocalAgentProgress {
   /** Batch numbers being generated right now, and the most batches the job runs at once. */
   activeBatches?: number[]; maxConcurrentBatches?: number;
   /** Failed batch attempts so far, and the batch currently being tried again. */
-  retries?: number; retry?: { batch: number; attempt: number; maxAttempts: number };
+  retries?: number; retry?: { batch: number; attempt: number; maxAttempts: number; /** Set when the attempt failed because the AI was rate-limited, overloaded or unreachable, not because a check failed. */ cause?: BackoffCause };
+  /** Present only while a rate limit, overload or connection error holds new batch starts below maxConcurrentBatches. */
+  batchLimit?: { allowed: number; cause: BackoffCause };
   /** One entry per batch being drafted (plus a batch accepted since the last update). Streamed counts are never accepted personas. */
   batchDetails?: BatchDetail[];
   /** Personas seen in partial output of batches that are not yet accepted. Always at most the batch sizes combined, and never part of completedPersonas. */
@@ -42,13 +44,17 @@ export interface LocalAgentProgress {
   validation?: { scope: 'batch' | 'final' | 'persona' | 'workspace'; status: 'checking' | 'passed'; checks: string[]; checkedPersonas: number };
 }
 /** A step an audience will be assigned to once it is generated and accepted. */
-export type BatchState = 'connecting' | 'writing' | 'checking' | 'retrying' | 'accepted';
+export type BatchState = 'connecting' | 'writing' | 'checking' | 'retrying' | 'waiting' | 'accepted';
+/** Why the AI could not be reached: a transport, rate-limit or overload class error that waiting can clear. */
+export type BackoffCause = 'rate-limit' | 'overload' | 'connection';
 export interface BatchDetail {
   index: number; size: number; state: BatchState; attempt: number; maxAttempts: number;
   /** Persona objects seen so far in the partial output, capped at size. Zero for providers that stream no content. */
   streamingPersonas: number; outputChars: number; outputTokens?: number;
   /** False when the provider reports only counters (ChatGPT), so no persona count exists. */
   contentStreamed: boolean; startedAt: string;
+  /** Present while the batch waits before its next attempt; attempt is then the attempt about to start. */
+  wait?: { seconds: number; cause: BackoffCause };
 }
 export interface AudienceStep { pipelineId: string; stageId: string }
 /**
@@ -77,7 +83,7 @@ export type LocalAgentCommandResult =
   | { kind: 'draft'; target: 'project' | 'cohort' | 'study'; prompt: string; destination?: string; name?: string };
 export interface LocalAgentInput { projectId?: string; engine: LocalAgentEngine; model?: string; prompt: string; revision: number; document: WorkspaceDocument; cohort?: { id: string; size: number; step?: AudienceStep }; persona?: { cohortId: string; personaId: string }; options?: { pipelineId: string; stageId: string; questionId: string; material?: string }; material?: string; materialName?: string; command?: boolean; commandTargets?: CommandTarget[] }
 export type LocalAgentSpawner = (command: string, args: readonly string[], options: SpawnOptionsWithoutStdio) => ChildProcessWithoutNullStreams;
-export interface LocalAgentOptions { chatgpt?: ChatGptDraftClient; byos?: Pick<ByosConnections, 'engines' | 'generate'>; spawn?: LocalAgentSpawner; timeoutMs?: number; probeTimeoutMs?: number; maxOutputBytes?: number; temporaryRoot?: string; /** Receives one structured line for every failed batch attempt and failed job. The workspace server writes them to stderr as JSON lines. */ log?: (line: Record<string, unknown>) => void }
+export interface LocalAgentOptions { chatgpt?: ChatGptDraftClient; byos?: Pick<ByosConnections, 'engines' | 'generate'>; spawn?: LocalAgentSpawner; timeoutMs?: number; probeTimeoutMs?: number; maxOutputBytes?: number; temporaryRoot?: string; /** Receives one structured line for every failed batch attempt and failed job. The workspace server writes them to stderr as JSON lines. */ log?: (line: Record<string, unknown>) => void; /** Waits before a retry after a rate limit. Resolves early when the signal aborts. Tests pass a fake. */ sleep?: (ms: number, signal: AbortSignal) => Promise<void>; /** Jitter source in [0, 1). */ random?: () => number }
 export class LocalAgentError extends Error {
   constructor(readonly code: 'INVALID_AGENT_REQUEST' | 'AGENT_BUSY' | 'AGENT_SERVICE_CLOSED', message: string) { super(message); }
 }
@@ -103,6 +109,32 @@ function batchSpan(size: number, index: number): { offset: number; size: number 
 }
 /** A failed batch is retried this many more times before the whole generation fails. */
 const BATCH_RETRIES = 2;
+/** Waits before the retry of a batch that failed because the AI was rate-limited, overloaded or unreachable, by how many such failures the batch has had. */
+const BACKOFF_MS = [5_000, 20_000, 60_000];
+/** Jitter spread around each wait, as a fraction either way. */
+const BACKOFF_JITTER = 0.2;
+/** While such an error is live, no more than this many batches run at once. */
+const BACKOFF_WINDOW = 4;
+/** Accepted batches in a row that lift the window back to CONCURRENT_BATCHES. */
+const RECOVERY_SUCCESSES = 2;
+const defaultSleep = (ms: number, signal: AbortSignal): Promise<void> => new Promise(resolve => {
+  if (signal.aborted) { resolve(); return; }
+  const done = () => { clearTimeout(timer); signal.removeEventListener('abort', done); resolve(); };
+  const timer = setTimeout(done, ms);
+  signal.addEventListener('abort', done, { once: true });
+});
+/** Reads a CLI status or message as a rate limit, overload or connection error; anything else (a bad reply, a failed check) is undefined and keeps its immediate retry. */
+export function backoffCause(status: unknown, ...texts: unknown[]): BackoffCause | undefined {
+  const code = typeof status === 'number' ? status : typeof status === 'string' && /^\d{3}$/.test(status) ? Number(status) : undefined;
+  if (code === 429) return 'rate-limit';
+  if (code === 529) return 'overload';
+  if (code !== undefined && code >= 500 && code <= 599) return 'overload';
+  const text = texts.filter((value): value is string => typeof value === 'string').join(' ');
+  if (/rate[ _-]?limit|too many requests|\b429\b/i.test(text)) return 'rate-limit';
+  if (/overloaded|\b529\b|\b50[0234]\b|service unavailable|bad gateway|capacity/i.test(text)) return 'overload';
+  if (/ECONNRESET|ETIMEDOUT|ECONNREFUSED|EPIPE|EAI_AGAIN|socket hang up|fetch failed|network error|timed out|timeout/i.test(text)) return 'connection';
+  return undefined;
+}
 const MAX_BATCH_TIMINGS = 20;
 interface ProviderProgress { phase: 'starting' | 'generating' | 'receiving'; outputChars: number; outputTokens?: number; streamedPersonas?: number }
 /** A persona object carries a background key; the CLI envelope escapes it, so the quotes may be preceded by backslashes. */
@@ -316,13 +348,13 @@ function dumpCliCall(jobId: string | undefined, engine: string, slot: number, pr
     writeFileSync(`${base}.status.json`, JSON.stringify({ code: result.code, missing: result.missing, limited: result.limited }));
   } catch { /* Debug output never affects drafting. */ }
 }
-interface ProcessResult { code: number | null; stdout: string; stderr: string; missing: boolean; limited: boolean }
+interface ProcessResult { code: number | null; stdout: string; stderr: string; missing: boolean; limited: boolean; timedOut?: boolean }
 interface ProviderSlot { chars: number; tokens?: number }
 interface StreamedBatch { personas: number; chars: number; tokens?: number }
 interface Entry { public: LocalAgentJob; work?: Promise<void>; aborts: Set<() => void>; slots: Map<number, ProviderSlot>; streamed: Map<number, StreamedBatch>; cancelled: boolean; settled: boolean; command?: boolean; describeBatches?: () => { batchDetails: BatchDetail[]; inFlightPersonas: number; estimate?: LocalAgentProgress['estimate'] }; disposition?: 'applied' | 'discarded' }
 class DraftFailure extends Error {}
 /** The AI call itself failed or returned something unreadable; `reason` names what, `excerpt` is the start of the offending output. */
-class RequestFailure extends DraftFailure { constructor(message: string, readonly reason: string, readonly excerpt = '') { super(message); } }
+class RequestFailure extends DraftFailure { constructor(message: string, readonly reason: string, readonly excerpt = '', readonly cause?: BackoffCause) { super(message); } }
 /** A batch reply that failed one of the batch checks. The reason names the check and is shown to the user and sent back with the next attempt. */
 export class BatchRejected extends Error { constructor(message: string, readonly excerpt = '') { super(message); } }
 const GENERIC_DRAFT_FAILURE = 'Agent did not return a valid workspace draft. Try a smaller or more specific request. Workspace unchanged.';
@@ -478,6 +510,8 @@ export class LocalAgentService {
   private readonly maxOutputBytes: number;
   private readonly temporaryRoot: string;
   private readonly logLine: (line: Record<string, unknown>) => void;
+  private readonly sleep: (ms: number, signal: AbortSignal) => Promise<void>;
+  private readonly random: () => number;
   private closed = false;
   private status?: { at: number; value: LocalAgentAvailability };
   private probing?: Promise<LocalAgentAvailability>;
@@ -491,6 +525,8 @@ export class LocalAgentService {
     this.maxOutputBytes = Math.max(100, Math.min(options.maxOutputBytes ?? OUTPUT_BYTES, OUTPUT_BYTES));
     this.temporaryRoot = options.temporaryRoot ?? tmpdir();
     this.logLine = options.log ?? (() => undefined);
+    this.sleep = options.sleep ?? defaultSleep;
+    this.random = options.random ?? Math.random;
   }
 
   async availability(): Promise<LocalAgentAvailability> {
@@ -652,12 +688,12 @@ export class LocalAgentService {
       try { child = this.spawn(engine, args, { cwd, env: childEnvironment(), detached: process.platform !== 'win32', windowsHide: true }); }
       catch { resolve({ code: null, stdout: '', stderr: '', missing: true, limited: false }); return; }
       this.children.add(child);
-      const stdout: Buffer[] = []; const stdoutDecoder = new StringDecoder('utf8'); const stderr: Buffer[] = []; let bytes = 0; let outputChars = 0; let streamedPersonas = 0; let tail = ''; let lineBuffer = ''; let limited = false; let done = false; let killTimer: NodeJS.Timeout | undefined;
+      const stdout: Buffer[] = []; const stdoutDecoder = new StringDecoder('utf8'); const stderr: Buffer[] = []; let bytes = 0; let outputChars = 0; let streamedPersonas = 0; let tail = ''; let lineBuffer = ''; let limited = false; let timedOut = false; let done = false; let killTimer: NodeJS.Timeout | undefined;
       const stop = () => { if (done) return; limited = true; terminate(child); killTimer ??= setTimeout(() => { terminate(child, 'SIGKILL'); finish(null, false); }, 1000); killTimer.unref(); };
-      const timer = setTimeout(stop, timeoutMs); timer.unref();
+      const timer = setTimeout(() => { timedOut = true; stop(); }, timeoutMs); timer.unref();
       const finish = (code: number | null, missing: boolean) => {
         if (done) return; done = true; clearTimeout(timer); if (killTimer) clearTimeout(killTimer); this.children.delete(child); entry?.aborts.delete(stop);
-        const result = { code, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8'), missing, limited };
+        const result = { code, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8'), missing, limited, timedOut };
         dumpCliCall(entry?.public.id, engine, slot, input, result);
         resolve(result);
       };
@@ -681,6 +717,12 @@ export class LocalAgentService {
       child.stdin.end(input);
       if (entry?.cancelled || this.closed) { terminate(child); stop(); }
     });
+  }
+
+  /** Waits out a backoff. Cancelling the job or failing another batch ends the wait early. */
+  private async pause(entry: Entry, ms: number): Promise<void> {
+    const controller = new AbortController(); const abort = () => controller.abort(); entry.aborts.add(abort);
+    try { await this.sleep(ms, controller.signal); } finally { entry.aborts.delete(abort); }
   }
 
   private async generate(entry: Entry, input: LocalAgentInput): Promise<void> {
@@ -895,9 +937,17 @@ export class LocalAgentService {
     const results: Cohort['personas'][] = [];
     const segmentCounts = new Map<string, number>();
     const recent: Cohort['personas'] = [];
-    const running = new Map<number, { firstStartedAt: string; attempt: number; attemptStartedAt: string; checking: boolean }>();
+    const running = new Map<number, { firstStartedAt: string; attempt: number; attemptStartedAt: string; checking: boolean; waiting?: { seconds: number; cause: BackoffCause } }>();
     let justAccepted: BatchDetail[] = [];
-    const retrying = new Map<number, number>();
+    const retrying = new Map<number, { attempt: number; cause?: BackoffCause }>();
+    // Rate limits, overloads and connection errors shrink the window of batches started at once; two accepted batches in a row restore it.
+    let allowed = CONCURRENT_BATCHES;
+    let limitCause: BackoffCause | undefined;
+    let successStreak = 0;
+    let inFlight = 0;
+    const startWaiters: Array<() => void> = [];
+    const wakeStarts = () => { for (const wake of startWaiters.splice(0)) wake(); };
+    const batchLimit = () => limitCause ? { allowed, cause: limitCause } : undefined;
     let acceptedPersonas = 0;
     let acceptedBatches = 0;
     let retries = 0;
@@ -922,8 +972,8 @@ export class LocalAgentService {
         const size = batchSizeOf(index); const seen = entry.streamed.get(index) ?? { personas: 0, chars: 0 };
         const contentStreamed = entry.public.progress?.outputSource !== 'response';
         const wrote = seen.chars > 0 || seen.tokens !== undefined && seen.tokens > 0;
-        const batchState: BatchState = state.checking ? 'checking' : wrote ? 'writing' : state.attempt > 1 ? 'retrying' : 'connecting';
-        return { index: index + 1, size, state: batchState, attempt: state.attempt, maxAttempts: 1 + BATCH_RETRIES, streamingPersonas: contentStreamed ? Math.min(size, seen.personas) : 0, outputChars: seen.chars, ...(seen.tokens !== undefined ? { outputTokens: seen.tokens } : {}), contentStreamed, startedAt: state.attemptStartedAt };
+        const batchState: BatchState = state.waiting ? 'waiting' : state.checking ? 'checking' : wrote ? 'writing' : state.attempt > 1 ? 'retrying' : 'connecting';
+        return { index: index + 1, size, state: batchState, attempt: state.attempt, maxAttempts: 1 + BATCH_RETRIES, streamingPersonas: contentStreamed ? Math.min(size, seen.personas) : 0, outputChars: seen.chars, ...(seen.tokens !== undefined ? { outputTokens: seen.tokens } : {}), contentStreamed, startedAt: state.attemptStartedAt, ...(state.waiting ? { wait: state.waiting } : {}) };
       });
       const inFlightPersonas = batchDetails.reduce((sum, detail) => sum + detail.streamingPersonas, 0);
       // Rough pace from partial output: personas written per batch-second, scaled to the batches that will run at once. Superseded by batch timings after two batches finish.
@@ -949,10 +999,10 @@ export class LocalAgentService {
       if (!active.length) return;
       const numbers = active.map(([index]) => index + 1);
       const oldest = active.map(([, state]) => state.firstStartedAt).sort()[0]!;
-      const latestRetry = [...retrying.entries()].sort((a, b) => b[1] - a[1] || a[0] - b[0])[0];
+      const latestRetry = [...retrying.entries()].sort((a, b) => b[1].attempt - a[1].attempt || a[0] - b[0])[0];
       this.updateProgress(entry, 'generating', `Generating ${batchList(numbers)} of ${batches} (${acceptedPersonas}/${request.size} personas checked)…`, {
         batch: numbers[0], batchSize: batchSizeOf(active[0]![0]), batchStartedAt: oldest, activeBatches: numbers, maxConcurrentBatches: CONCURRENT_BATCHES, retries,
-        retry: latestRetry ? { batch: latestRetry[0] + 1, attempt: latestRetry[1], maxAttempts: 1 + BATCH_RETRIES } : undefined, ...describe(), ...extra,
+        retry: latestRetry ? { batch: latestRetry[0] + 1, attempt: latestRetry[1].attempt, maxAttempts: 1 + BATCH_RETRIES, ...(latestRetry[1].cause ? { cause: latestRetry[1].cause } : {}) } : undefined, batchLimit: batchLimit(), ...describe(), ...extra,
       });
     };
 
@@ -967,6 +1017,7 @@ export class LocalAgentService {
       const prompt = `${cohortGuidance} Prepare one bounded batch for cohort ${request.id}. Return documentJson as one cohort object matching the cohort schema, not a workspace. This is batch ${batchIndex + 1} of ${batches}, covering final positions ${offset + 1}–${offset + batchSize} of ${request.size}; return exactly ${batchSize} new personas. Keep every persona an adult and question-independent. Make this batch distinct from the listed recent examples while remaining plausible for the same population. ${original ? 'Copy originalCohortMetadata exactly, preserving sources, assumptions, segments, weights, weight provenance and distributionTargets.' : 'The first batch establishes cohort metadata, sources, assumptions, segments and weights. Later batches must copy that metadata exactly.'} Add only new personas. Include at least one persona for every positive-weight segment in the final complete cohort. Obey each distributionAssignments slot in the exact returned persona order. Numeric buckets include min and exclude max; categorical buckets require the exact value. Targets control unweighted synthetic persona counts, never study weights. Do not approximate quotas or invent missing evidence. No unrelated workspace data is provided or needed.\n\nCohort schema:\n${JSON.stringify(jsonSchema('cohort'))}\n\nRequest data:\n${JSON.stringify(requestData)}`;
       const firstStartedAt = new Date().toISOString();
       let feedback = '';
+      let transientFailures = 0;
       // The reason a previous attempt was rejected goes before the request data, which stays last and unchanged.
       const withFeedback = (text: string, note: string) => { const at = text.lastIndexOf('\n\nRequest data:\n'); return note && at >= 0 ? text.slice(0, at) + note + text.slice(at) : text; };
       for (let attempt = 1; ; attempt++) {
@@ -1003,6 +1054,7 @@ export class LocalAgentService {
           for (const persona of accepted) segmentCounts.set(persona.segment, (segmentCounts.get(persona.segment) ?? 0) + 1);
           recent.push(...accepted);
           acceptedPersonas += accepted.length; acceptedBatches++;
+          if (limitCause && ++successStreak >= RECOVERY_SUCCESSES) { allowed = CONCURRENT_BATCHES; limitCause = undefined; successStreak = 0; wakeStarts(); }
           justAccepted = [{ index: batchIndex + 1, size: batchSize, state: 'accepted', attempt, maxAttempts: 1 + BATCH_RETRIES, streamingPersonas: batchSize, outputChars: entry.streamed.get(batchIndex)?.chars ?? 0, contentStreamed: entry.public.progress?.outputSource !== 'response', startedAt: running.get(batchIndex)!.attemptStartedAt }];
           running.delete(batchIndex); retrying.delete(batchIndex); entry.streamed.delete(batchIndex);
           const validation: NonNullable<LocalAgentProgress['validation']> = { scope: 'batch', status: 'passed', checks: ['Required fields and adult ages', 'Expected cohort ID and batch size', ...(originalMetadata || batchIndex > 0 ? ['Saved cohort details unchanged'] : []), ...(targets.length ? ['Requested distribution targets'] : []), 'Workspace size limit'], checkedPersonas: batchSize };
@@ -1013,7 +1065,7 @@ export class LocalAgentService {
             latestAccepted: recent.slice(-3).map(({ id, label, age, segment }) => ({ id, label, age, segment })), validation, lastBatchChecks: [...validation.checks],
           };
           if (running.size) publishRunning(done);
-          else this.updateProgress(entry, 'validating', `Checked batch ${batchIndex + 1} of ${batches} (${acceptedPersonas}/${request.size} personas)…`, { ...done, activeBatches: [], retries, retry: undefined, ...describe() });
+          else this.updateProgress(entry, 'validating', `Checked batch ${batchIndex + 1} of ${batches} (${acceptedPersonas}/${request.size} personas)…`, { ...done, activeBatches: [], retries, retry: undefined, batchLimit: batchLimit(), ...describe() });
           return;
         } catch (error) {
           if (entry.cancelled || stopped || error instanceof StopBatch) { running.delete(batchIndex); retrying.delete(batchIndex); throw error; }
@@ -1025,8 +1077,19 @@ export class LocalAgentService {
             const what = error instanceof BatchRejected || error instanceof z.ZodError ? `failed its checks ${attempt} times` : `could not be drafted after ${attempt} attempts`;
             throw new DraftFailure(`Batch ${batchIndex + 1} ${what}: ${reason}. Workspace unchanged.`);
           }
-          feedback = `\n\nYour previous attempt at this batch was rejected: ${reason}. Return the complete batch again and fix exactly that.`;
-          retries++; retrying.set(batchIndex, attempt + 1);
+          const cause = error instanceof RequestFailure ? error.cause : undefined;
+          retries++; retrying.set(batchIndex, { attempt: attempt + 1, ...(cause ? { cause } : {}) });
+          if (!cause) { feedback = `\n\nYour previous attempt at this batch was rejected: ${reason}. Return the complete batch again and fix exactly that.`; continue; }
+          // The AI could not be reached or declined for load, so the same request goes again after a wait, and fewer batches start meanwhile.
+          feedback = '';
+          transientFailures++;
+          allowed = Math.min(allowed, BACKOFF_WINDOW); limitCause = cause; successStreak = 0;
+          const base = BACKOFF_MS[Math.min(transientFailures, BACKOFF_MS.length) - 1]!;
+          const waitMs = Math.round(base * (1 + BACKOFF_JITTER * (2 * this.random() - 1)));
+          const state = running.get(batchIndex)!;
+          state.attempt = attempt + 1; state.checking = false; state.waiting = { seconds: Math.round(waitMs / 1000), cause };
+          publishRunning({ validation: undefined });
+          await this.pause(entry, waitMs);
         }
       }
     };
@@ -1036,11 +1099,13 @@ export class LocalAgentService {
     let failure: { error: unknown } | undefined;
     const worker = async () => {
       while (!stopped && !entry.cancelled && nextBatch < batches) {
+        if (inFlight >= allowed) { await new Promise<void>(resolve => startWaiters.push(resolve)); continue; }
+        inFlight++;
         try { await attemptBatch(nextBatch++); }
         catch (error) {
           if (!stopped) { stopped = true; failure = { error }; for (const abort of [...entry.aborts]) abort(); }
           return;
-        }
+        } finally { inFlight--; wakeStarts(); }
       }
     };
     await Promise.all(Array.from({ length: Math.min(CONCURRENT_BATCHES, batches - 1) }, worker));
@@ -1137,8 +1202,8 @@ export class LocalAgentService {
         }
         if (entry.cancelled) throw Error();
         const tail = outcome.stdout.slice(-EXCERPT_CHARS);
-        if (outcome.limited) throw new RequestFailure('Agent reached its time or output limit. Try a smaller drafting request.', `the AI ran past its ${Math.round(this.timeoutMs / 1000)}-second time limit or its output size limit`, tail);
-        if (outcome.code !== 0) throw new RequestFailure('Agent could not finish. Check your CLI login and subscription availability, then try again. Workspace unchanged.', `the ${input.engine} CLI exited with status ${outcome.code ?? 'none'}`, excerptOf(outcome.stderr) || tail);
+        if (outcome.limited) throw new RequestFailure('Agent reached its time or output limit. Try a smaller drafting request.', `the AI ran past its ${Math.round(this.timeoutMs / 1000)}-second time limit or its output size limit`, tail, outcome.timedOut ? 'connection' : undefined);
+        if (outcome.code !== 0) throw new RequestFailure('Agent could not finish. Check your CLI login and subscription availability, then try again. Workspace unchanged.', `the ${input.engine} CLI exited with status ${outcome.code ?? 'none'}`, excerptOf(outcome.stderr) || tail, backoffCause(undefined, outcome.stderr, tail));
         if (input.engine === 'codex') {
           if ((await stat(resultPath)).size > this.maxOutputBytes) throw new RequestFailure('Agent reached its time or output limit. Try a smaller drafting request.', 'the reply was larger than the output limit');
           const text = await readFile(resultPath, 'utf8');
@@ -1146,7 +1211,7 @@ export class LocalAgentService {
         } else {
           let envelope: ReturnType<typeof claudeEnvelope>;
           try { envelope = claudeEnvelope(outcome.stdout); } catch { throw new RequestFailure(GENERIC_DRAFT_FAILURE, 'the CLI output had no readable result event', tail); }
-          if (envelope.is_error) throw new RequestFailure(GENERIC_DRAFT_FAILURE, `the CLI reported an error${envelope.subtype ? ` (${envelope.subtype}${envelope.api_error_status ? `, status ${envelope.api_error_status}` : ''})` : ''}`, excerptOf(envelope.result));
+          if (envelope.is_error) throw new RequestFailure(GENERIC_DRAFT_FAILURE, `the CLI reported an error${envelope.subtype ? ` (${envelope.subtype}${envelope.api_error_status ? `, status ${envelope.api_error_status}` : ''})` : ''}`, excerptOf(envelope.result), backoffCause(envelope.api_error_status, envelope.subtype, envelope.result));
           if (envelope.structured_output !== undefined && envelope.structured_output !== null) payload = envelope.structured_output;
           else { try { payload = JSON.parse(envelope.result ?? ''); } catch { throw new RequestFailure(GENERIC_DRAFT_FAILURE, 'the reply had no structured output', excerptOf(envelope.result)); } }
         }
@@ -1157,7 +1222,7 @@ export class LocalAgentService {
     } catch (error) {
       if (error instanceof DraftFailure) throw error;
       if (entry.cancelled) throw error;
-      throw new RequestFailure(GENERIC_DRAFT_FAILURE, error instanceof Error && error.message ? error.message.slice(0, 200) : 'the reply could not be read');
+      throw new RequestFailure(GENERIC_DRAFT_FAILURE, error instanceof Error && error.message ? error.message.slice(0, 200) : 'the reply could not be read', '', backoffCause((error as { status?: unknown } | undefined)?.status, error instanceof Error ? error.message : undefined, (error as { code?: unknown } | undefined)?.code));
     } finally {
       entry.slots.delete(slot);
       if (directory) await rm(directory, { recursive: true, force: true }).catch(() => undefined);

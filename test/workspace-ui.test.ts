@@ -3118,6 +3118,20 @@ test('concurrent batch progress names the running batches, the retry, and divide
   assert.match(html.replace(/retries/,''),/Generating/);
 });
 
+test('a rate-limited batch says how long it waits and the panel names the narrowed window', async () => {
+  const browser=browserHarness(); await settle(); const {draftProgress,S}=browser.client;
+  const detail=(index,state,extra={})=>({index,size:25,state,attempt:1,maxAttempts:3,streamingPersonas:0,outputChars:0,contentStreamed:true,startedAt:new Date().toISOString(),...extra});
+  const job={id:'p',engine:'claude',status:'running',startedAt:new Date().toISOString(),cohort:{id:'new',size:1000},progress:{phase:'generating',batch:2,batchSize:25,batchStartedAt:new Date().toISOString(),activeBatches:[2,3],maxConcurrentBatches:12,totalBatches:40,completedBatches:1,completedPersonas:10,totalPersonas:1000,retries:1,retry:{batch:2,attempt:2,maxAttempts:3,cause:'rate-limit'},batchLimit:{allowed:4,cause:'rate-limit'},batchDetails:[detail(2,'waiting',{attempt:2,wait:{seconds:20,cause:'rate-limit'}}),detail(3,'connecting')],outputChars:0}};
+  S.localJob=job;
+  const html=draftProgress(job);
+  assert.match(html,/Batch 2: waiting 20 s after a rate limit \(attempt 2 of 3\)/);
+  assert.match(html,/4 batches at once while the AI is rate-limited/);
+  assert.match(html,/Batch 2 hit a rate limit and is being tried again \(attempt 2 of 3\)/);
+  assert.doesNotMatch(html,/did not pass its checks/);
+  const calm=draftProgress({...job,progress:{...job.progress,batchLimit:undefined,retry:undefined,batchDetails:[detail(3,'connecting')]}});
+  assert.doesNotMatch(calm,/at once while/);
+});
+
 test('a new tab reattaches to a running cohort generation and offers it on the Cohorts list', async () => {
   const browser = browserHarness(); await settle();
   const { S, loadLocalAgents, cohortJobNotice, commandState } = browser.client;
