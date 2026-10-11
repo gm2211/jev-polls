@@ -133,7 +133,8 @@ behaviors:
       The Options stop is one light list and the only copy of the options: a row per option with
       its name, an optional description and a remove button, edited in place, then an "Add an
       option, or paste a list" row. Every option shows, unpaged, with the count ("14 options")
-      on one line underneath.
+      on one line underneath. What the step returns (a probability for each option) shows with the
+      step output on the flow card, not on this stop.
     details: >-
       Edits apply as you type and keep the option ID and custom fields; a plain name stays a plain
       string until it gets a description. Enter in the add row adds it and keeps focus there;

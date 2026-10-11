@@ -98,13 +98,12 @@ function choiceOptionSetup(p,s,qid,q,types){
   if(S.sections[formatKey])return '<div class="row"><button type="button" class="button small" data-act="setup-format-back">'+icon('left')+' Back to options</button></div>'+types;
   if(editing){const keys=Object.keys(q.criteria),i=keys.indexOf(selected),value=q.criteria[selected];return '<button type="button" class="button small" data-act="setup-option-back">'+icon('left')+' Back to options</button><div class="setup-option-editor" data-setup-option="'+attr(selected)+'"><label>Option name<input name="setupOption" aria-label="Option '+(i+1)+' name" value="'+attr(optionName(selected,value))+'"></label><label>Description (optional)<textarea name="setupDescription" rows="3" aria-label="Option '+(i+1)+' description">'+esc(optionDescription(value))+'</textarea></label></div>';}
   const sourceKey='setup-input-'+p.id+'-'+s.id+'-'+qid,mode=S.sections[sourceKey],named=Object.entries(q.criteria).some(([key,value])=>String(optionName(key,value)).trim());
-  const summaryText=S.evaluationProvider==='gliner'?'Relative scores 0–1, totaling 1; not calibrated probabilities.':'Probabilities 0–1, totaling 1.',summary='<p class="setup-answer-summary">'+summaryText+'</p>';
   // Once options exist the list is the one place to edit them; the ways to fill it come back only when asked for.
-  if(named&&!['file','agent','choose'].includes(mode))return optionsBoxField(p,s,qid,q,'<button type="button" class="link-button" data-act="setup-input" data-source="choose">Import or draft with AI</button>',summaryText);
+  if(named&&!['file','agent','choose'].includes(mode))return optionsBoxField(p,s,qid,q,'<button type="button" class="link-button" data-act="setup-input" data-source="choose">Import or draft with AI</button>');
   const picked=['file','agent'].includes(mode)?mode:'manual';
   const cards='<fieldset class="setup-type-choice options-source"><legend>How do you want to add options?</legend><div class="setup-type-cards">'+[['manual','Type a list','One row per option, with an optional description.'],['file','Import a file','A CSV or JSON file of names and descriptions.'],['agent','Draft with AI','Describe what you need and review the suggestions.']].map(([source,title,hint])=>'<button type="button" class="setup-type-card" data-act="setup-input" data-source="'+source+'" aria-pressed="'+(picked===source)+'"><strong>'+title+'</strong><span>'+hint+'</span></button>').join('')+'</div></fieldset>';
   const pane=picked==='agent'?'<div class="setup-input-pane">'+optionAgentInline(p,s,qid,q)+'</div>':picked==='file'?'<div class="options-import"><button type="button" class="button primary" data-act="answer-list-import">'+icon('upload')+' Choose a file</button><small>CSV: name and description columns. JSON: names, [name, description] pairs, or objects. 2–255 options.</small></div>':optionsBoxField(p,s,qid,q);
-  return cards+pane+summary;
+  return cards+pane;
 }
 function applyStudySetup(form){
   const s=selectedStage(),qid=form.dataset.questionId,q=s?.questions?.[qid];if(!q)return;

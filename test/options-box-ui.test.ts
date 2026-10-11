@@ -75,7 +75,7 @@ test('the Options stop is one light list of rows once options exist, and the way
   assert.match(html, /data-act="setup-remove-option" data-key="a" aria-label="Remove Alpha"[^>]*disabled/, 'two options cannot shrink further');
   assert.match(html, /<input data-option-add value="" placeholder="Add an option, or paste a list"/);
   assert.match(html, /id="optionsBoxStatus"[^>]*>2 options</);
-  assert.match(html, /Probabilities 0–1, totaling 1\./);
+  assert.doesNotMatch(html, /Probabilities 0–1|totaling 1/, 'the output format is not part of filling in options');
   assert.doesNotMatch(html, /Edit option Alpha|Paste dialog|data-act="answer-list-open"|options-source"|list-pager|listPage/, 'the options show once, unpaged');
   assert.match(html, /data-act="setup-input" data-source="choose">Import or draft with AI/);
   h.S.sections['setup-input-study-ask-answer'] = 'choose';
