@@ -63,7 +63,7 @@ function flowSampleNotice(p,s){
 function flowReadiness(p,s){
   if(s.kind==='poll'){
     if(!Object.values(s.questions||{}).length||Object.values(s.questions).some(q=>!q.label.trim()||(/^What should this (?:step|phase) decide\?$/).test(q.label)))return 'Needs question';
-    if(!poolForPhase(p,s)?.personas.length)return 'Needs cohort';
+    if(!poolForPhase(p,s)?.personas.length)return 'Needs an audience';
     if(Object.values(s.questions).some(q=>q.type==='choice'?Object.keys(q.criteria).length<2||Object.entries(q.criteria).some(([key,value])=>!String(optionName(key,value)).trim()):q.type==='score'?q.criteria.length<2||q.criteria.some(value=>!value.trim()):false))return 'Needs options';
     if(flowSampleShort(p,s))return 'Needs more personas';
   }else if(!flowInputs(p,s).length)return 'Needs input';
@@ -110,7 +110,7 @@ function flowNodeInputs(p,s,list){
 function flowNode(p,s,list){
   const pool=poolForPhase(p,s),outputs=phaseOutput(p,s),status=flowReadiness(p,s),pending=S.flowSource?.pipelineId===p.id?S.flowSource:null;
   const targetable=pending&&flowCanConnect(p,pending.stage,pending.question,s)&&!flowAlreadyConnected(p,s,pending.stage,pending.question);
-  const {title,sub}=flowNodeTitle(p,s),kind=s.kind==='poll'?'Ask cohort':s.kind==='aggregate'?'Combine':'Final result';
+  const {title,sub}=flowNodeTitle(p,s),kind=s.kind==='poll'?'Ask the audience':s.kind==='aggregate'?'Combine':'Final result';
   const downstream=p.stages.some(x=>x.dependsOn.includes(s.id)),short=s.kind==='poll'&&flowSampleShort(p,s);
   const who=s.kind!=='poll'?'':pool?.personas.length?'<button class="flow-who" data-act="flow-cohort-map" data-id="'+attr(s.id)+'" aria-label="Explore '+attr(pool.name)+' ('+flowPlural(pool.personas.length,'member')+')" title="Explore the cohort"><span class="flow-host-dots" aria-hidden="true">'+pool.personas.slice(0,8).map(()=>'<i></i>').join('')+'</span><span class="flow-who-text"><strong>'+esc(pool.name)+'</strong><span>'+(short?'<span class="flow-sample-short">'+short.asks.toLocaleString('en-US')+' of '+flowPlural(short.have,'persona')+'</span>':flowPlural(s.size??pool.personas.length,'persona'))+'</span></span></button>':'';
   return '<article class="flow-node" data-flow-node="'+attr(s.id)+'" data-stage-index="'+p.stages.indexOf(s)+'" data-selected="'+(S.stageId===s.id)+'" data-targetable="'+!!targetable+'" aria-label="'+attr(stepTitle(p,s))+'">'+
@@ -176,7 +176,7 @@ function flowTodo(p){
   }
   return todo;
 }
-/** The guided stops of an Ask cohort step, in order: what to ask, its options (Yes/no has none), who answers. Inputs sits outside the sequence. */
+/** The guided stops of an Ask the audience step, in order: what to ask, its options (Yes/no has none), who answers. Inputs sits outside the sequence. */
 const FLOW_STOP_LABEL={question:'What to ask',answers:'Options',cohort:'Who answers',connections:'Inputs'};
 function flowGuidedStops(s){
   if(s.kind!=='poll')return [];
@@ -204,7 +204,7 @@ function flowGuidedFooter(p,s,tab){
 function flowInspector(p,s){
   if(!s||S.flowPanel===false)return '';
   const tabs=flowRoundTabs(p,s),requested=S.sections['flow-inspector']==='answer'?'answers':S.sections['flow-inspector']||'question',tab=tabs.some(([key])=>key===requested)?requested:'question';
-  const kind=s.kind==='poll'?'Ask cohort · '+answerName(Object.values(s.questions||{})[0]?.type):s.kind==='aggregate'?'Combine answers':'Final result';
+  const kind=s.kind==='poll'?'Ask the audience · '+answerName(Object.values(s.questions||{})[0]?.type):s.kind==='aggregate'?'Combine answers':'Final result';
   const body=tab==='settings'?advancedStageForm(p,s):tab==='connections'?flowConnections(p,s):tab==='cohort'?flowSampleNotice(p,s)+flowCohortMap(p,s):s.kind==='poll'?stageForm(p,s,tab):stageForm(p,s,true);
   const error=S.sections['flow-inspector-error']?'<p class="setup-wizard-error" role="alert" tabindex="-1">'+esc(S.sections['flow-inspector-error'])+'</p>':'';
   const footer=inlineCohortTarget(p,s)&&tab==='cohort'?'':flowGuidedFooter(p,s,tab);
@@ -339,7 +339,7 @@ function drawFlowEdges(){
 
 /* Freeform canvas: drag steps, pan empty canvas, click empty canvas to add a step (Railway/Hex style). */
 const FLOW_KINDS=[
-  {kind:'poll',label:'Ask cohort',hint:'Ask one or more questions to a cohort',keys:'question poll ask survey',icon:'<path d="M5 5h14v10H9l-4 4z"/>'},
+  {kind:'poll',label:'Ask the audience',hint:'Ask one or more questions to an audience',keys:'question poll ask survey',icon:'<path d="M5 5h14v10H9l-4 4z"/>'},
   {kind:'aggregate',label:'Combine answers',hint:'Weight compatible answers together',keys:'aggregate merge weight join',icon:'<path d="M5 5c0 7 7 7 7 14M19 5c0 7-7 7-7 14"/>'},
   {kind:'decision',label:'Final result',hint:'Select the leading option from a Choice',keys:'decision winner outcome',icon:'<path d="M6 21V4h11l-2 4 2 4H6"/>'},
 ];

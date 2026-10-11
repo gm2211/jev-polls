@@ -41,7 +41,7 @@ test('tile colours: status is neutral until done, top pick uses the option slot,
   assert.ok(Math.abs(arena.tileVisual(member('4', { status: 'completed', answers: choice('a', 1 / 3) }), pick, 'confidence').value) < 1e-9);
   assert.equal(arena.tileVisual(member('5', { status: 'completed', answers: choice('a', 1) }), pick, 'confidence').value, 1);
   assert.equal(arena.optionColor(1), 'var(--lv-c1)');
-  assert.match(arena.optionColor(11), /^hsl\(/);
+  assert.match(arena.optionColor(20), /^hsl\(/);
 });
 
 test('a batched member fills as its map batches and combine round finish', () => {
@@ -180,7 +180,11 @@ test('throughput is a rolling 20 second rate and time left follows from it', () 
   const samples = [{ t: 0, done: 0 }, { t: 5000, done: 100 }, { t: 25000, done: 500 }, { t: 30000, done: 600 }];
   assert.equal(arena.rate(samples, 30000, 20000), (600 - 100) / 25, 'only samples within 20s of now count');
   assert.equal(arena.rate([{ t: 0, done: 0 }], 100), null);
-  assert.equal(arena.rate([{ t: 0, done: 0 }, { t: 500, done: 10 }], 600), null, 'too short to trust');
+  assert.equal(arena.rate([{ t: 0, done: 0 }, { t: 1000, done: 0 }, { t: 2000, done: 0 }], 2000), null, 'nothing has finished yet, so no speed is claimed');
+  assert.equal(arena.rate([{ t: 0, done: 0 }, { t: 1000, done: 0 }, { t: 2000, done: 30 }], 2000), 15, 'the window starts at the poll before the first event and never counts for under two seconds');
+  assert.equal(arena.rate([{ t: 0, done: 0 }, { t: 1000, done: 0 }, { t: 2000, done: 30 }, { t: 3000, done: 60 }], 3000), 30, 'then it follows the real rate without a 0 to 30 jump');
+  assert.equal(arena.smoothRate(null, 20), 20); assert.equal(arena.smoothRate(20, null), 20); assert.equal(arena.smoothRate(10, 20, 0.5), 15);
+  assert.equal(arena.fitCap(1000), 40); assert.ok(arena.fitCap(1000) > arena.tileCap(1000), 'full screen may use bigger tiles than the embedded map');
   assert.equal(arena.secondsLeft(400, 20), 20);
   assert.equal(arena.secondsLeft(0, null), 0);
   assert.equal(arena.secondsLeft(10, null), null);

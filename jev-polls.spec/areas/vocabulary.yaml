@@ -9,7 +9,7 @@ behaviors:
       The workspace, README, agent guide, and reports use Project, Study, Step, Question, Cohort,
       Persona, Segment, Input, and Run for user-facing concepts.
     details: >-
-      Study corresponds to the pipeline contract; Step to a stage; Ask cohort, Combine answers, and
+      Study corresponds to the pipeline contract; Step to a stage; Ask the audience (once "Ask cohort"; see audience-wording), Combine answers, and
       Final result to poll, aggregate, and decision stages; Yes/No to Noul.
   - id: documented-labels-exist
     description: Every control label named in the README or agent guide exists in the workspace with that wording.

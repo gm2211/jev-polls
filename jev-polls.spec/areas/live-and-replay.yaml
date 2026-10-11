@@ -14,11 +14,56 @@ behaviors:
         you must be able to produce a 1 minute demo that shows very simple, streamlined, almost
         guided process, without needing to jump between screens and with a compelling live voting view
       reference: 2026-10-10 jev-polls project thread, Giulio
+  - id: live-fullscreen
+    description: >-
+      A started run, an opened run and a replay take the whole window: the app sidebar and page
+      header are hidden, leaving a slim top bar with the study question, the status strip, Back to
+      study and, once saved, Open report. Esc is Back to study. Fit all sizes tiles from the window
+      (about 22px or more for a thousand tiles at 1440 by 900) and segment groups flow in a
+      responsive grid; on a phone the leaderboard stacks under the map.
+    details: >-
+      Fit computes the largest tile that fits from the measured map box, not from fixed steps; 1:1
+      and Large stay as overrides. Opening a run from the Runs list shows the same screen, and its
+      Back goes to the study. Esc does nothing while a dialog or the command palette is open.
+    source:
+      text: >-
+        a compelling live voting view, almost like a videogame ... at 1440x900 the map gets about
+        810x500 px beside the sidebar, header, page title and a 300 px leaderboard, so tiles are 14 px
+      reference: 2026-10-10 jev-polls project thread, Giulio
+  - id: live-commentary
+    description: >-
+      A commentary ticker lists short lines derived only from the counts so far: lead changes, a
+      segment's favourite changing, milestones at 25, 50, 75 and 100 percent, and segments that
+      finish split. It keeps the last four, newest first, each with a timestamp; Replay shows the
+      same lines in the same order.
+    details: >-
+      Lines come from walking the finished evaluations in finishing order, so a replay at any
+      position equals what the live run said. Live lines are stamped with the clock time the view
+      saw them; replay and finished runs show the vote count instead. Nothing is narrated beyond
+      the data.
+    source:
+      text: >-
+        Commentary ticker in the live view: short, data-derived lines as events happen ... no
+        invented narrative; keep the last 4 lines, newest first, with a timestamp. Replay replays
+        the same lines in order.
+      reference: 2026-10-10 jev-polls project thread, Giulio
+  - id: results-in-place
+    description: >-
+      When the run completes the live view becomes a results view without navigation: the
+      leaderboard is the final ranking, a panel lists each segment's top three options, and one
+      factual line says who leads overall and whether segments agree. Open report stays one click
+      away.
+    source:
+      text: >-
+        when the run completes, the live view turns into a results view without navigation ... a
+        single factual summary line computed from the data
+      reference: 2026-10-10 jev-polls project thread, Giulio
   - id: live-host-map
     description: >-
-      Live voting and Voting replay draw one small tile per persona evaluation (repeats are separate
+      Live voting and Voting replay draw one tile per persona evaluation (repeats are separate
       tiles) in a dense map grouped by segment, with group headers and counts. Fit all packs about
-      a thousand tiles into the window; 1:1 and Large keep a fixed size and scroll.
+      a thousand tiles into the window; 1:1 and Large keep a fixed size and scroll. Newly finished
+      tiles brighten for about a second and their group pulses once.
     details: >-
       Queued tiles are neutral, thinking tiles pulse, failed tiles are red with a cross, and finished
       tiles take the colour of the member's top pick (Choice) or a sequential colour for the Score
@@ -35,10 +80,14 @@ behaviors:
       reference: 2026-10-10 jev-polls project thread, Giulio
   - id: live-leaderboard
     description: >-
-      A leaderboard of options as racing horizontal bars shows each option's weighted share among
-      the members evaluated so far, highlights the leader and animates when ranks change; it doubles
-      as the colour legend.
+      A leaderboard of every option (fourteen fit the full-height column) as racing horizontal bars
+      shows each option's rank and weighted share to one decimal among the members evaluated so
+      far, highlights the leader and animates smoothly, with a brief flash, when ranks change; it
+      doubles as the colour legend.
     details: >-
+      Option colours are fourteen per theme, searched to stay apart for a deuteranope (and in
+      normal vision); options from the eighth on also carry a stripe or dot pattern as a second
+      cue. 
       The share is the report's own measure (weighted mean of answer probabilities), so the final
       leaderboard equals the report. Runs saved before weights were kept count members equally and
       say so. Score questions show the level distribution and mean; yes/no questions show likelihood
@@ -51,7 +100,8 @@ behaviors:
   - id: live-status-strip
     description: >-
       A strip shows evaluated of total, thinking, failed, evaluations per second over the last 20
-      seconds and time left, and a progress bar. Tiles pop when they finish. Motion stops under
+      seconds and time left, and a progress bar. Speed starts at the first finished evaluation
+      and is smoothed, so it ramps up instead of flickering from 0 to a burst. Tiles pop when they finish. Motion stops under
       prefers-reduced-motion.
     source:
       text: >-
@@ -96,8 +146,8 @@ behaviors:
       reference: 2026-10-10 jev-polls project thread, Giulio
   - id: live-narrow-screens
     description: >-
-      On a phone the map scrolls inside its own box, the leaderboard stacks above it, and every
-      control stays reachable without clipping.
+      On a phone the map scrolls inside its own box, the leaderboard stacks under it, and every
+      control stays reachable without clipping; the top bar stays pinned.
   - id: resilient-polling
     description: Live status survives transient fetch errors with a visible reconnecting notice.
   - id: replay-without-models
