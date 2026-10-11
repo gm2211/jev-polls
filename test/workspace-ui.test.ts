@@ -1449,6 +1449,12 @@ test('empty study cohort selection generates inline without losing question or c
   act(null, { dataset: { act: 'flow-inspector', section: 'cohort' } });
   assert.equal(browser.client.inlineCohortJobVisible(), true);
   assert.match(browser.element('app').innerHTML, /Virtual readers with varied experience/);
+  assert.doesNotMatch(browser.element('app').innerHTML, /Back to who answers|Cohort prompt<\/button>|generation-help/, 'the inline audience is one flat column');
+  S.localJob = { id: 'running-inline', status: 'running', engine: 'claude', cohort: { id: 'c-new', size: 17, prompt: S.cohortPrompt }, progress: { phase: 'generating', totalPersonas: 17, completedPersonas: 0 } };
+  render();
+  assert.match(browser.element('app').innerHTML, /Generating 17 personas/);
+  assert.doesNotMatch(browser.element('app').innerHTML, /Who are they\?|Choose a saved audience instead|role="tablist"[^>]*cohort-generation/, 'progress replaces the form in place');
+  S.localJob = null; render();
   S.sections.pipeline = 'phase';
   const wizard = stageForm(p,stage);
   assert.equal([...wizard.matchAll(/<form\b/g)].length, 1, 'inline generator does not nest forms in setup wizard');
