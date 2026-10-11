@@ -6,7 +6,7 @@ import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promise
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { ChildProcessWithoutNullStreams, SpawnOptionsWithoutStdio } from 'node:child_process';
-import { BatchRejected, LocalAgentError, LocalAgentService, checkCohortBatch, claudeEnvelope, takeAudienceRequests, type LocalAgentJob, type LocalAgentSpawner } from '../src/local-agent.js';
+import { BatchRejected, LocalAgentError, backoffCause, LocalAgentService, checkCohortBatch, claudeEnvelope, takeAudienceRequests, type LocalAgentJob, type LocalAgentSpawner } from '../src/local-agent.js';
 import type { ChatGptDraftClient } from '../src/chatgpt.js';
 import type { Cohort, DistributionTargetBucket, Persona } from '../src/types.js';
 import { validateWorkspaceDocument } from '../src/workspace-store.js';
@@ -1550,11 +1550,13 @@ test('a persona with a segment the cohort does not have is caught in its batch a
 
 test('Claude CLI failures are reported with what the CLI said, and the batch is named', async t => {
   const root = await setup(t); const lines: Record<string, unknown>[] = [];
-  const service = new LocalAgentService({ temporaryRoot: root, log: line => lines.push(line), spawn: fakeSpawner(async ({ child }) => {
+  const sleeps: number[] = [];
+  const service = new LocalAgentService({ temporaryRoot: root, log: line => lines.push(line), sleep: async ms => { sleeps.push(ms); }, random: () => 0.5, spawn: fakeSpawner(async ({ child }) => {
     child.stdout.write(JSON.stringify({ type: 'result', is_error: true, subtype: 'error_during_execution', api_error_status: 529, result: 'Overloaded' }) + '\n'); child.finish();
   }) });
   t.after(() => service.close());
   const done = await terminal(service, service.start({ engine: 'claude', prompt: 'Create 30 adults', revision: 0, document: empty, cohort: { id: 'customers', size: 30 } }));
+  assert.deepEqual(sleeps, [5000, 20000], 'an overload is waited out between the three attempts');
   assert.equal(done.status, 'failed');
   assert.equal(done.message, 'Batch 1 could not be drafted after 3 attempts: the CLI reported an error (error_during_execution, status 529). Workspace unchanged.');
   assert.equal(lines.filter(line => line.event === 'cohort-batch-failed').length, 3);
@@ -1587,4 +1589,134 @@ test('a Claude stream-json run may print more event bytes than the reply-size li
   assert.equal((await run(40)).status, 'completed', 'more than 4 KB of events passes a 4 KB reply limit');
   const runaway = await run(400);
   assert.equal(runaway.status, 'failed'); assert.match(runaway.message, /could not be drafted after 3 attempts: the AI ran past its \d+-second time limit or its output size limit/);
+});
+
+// Backoff when the drafting AI is rate-limited or overloaded.
+type ClaudeReply = 'ok' | 'invalid' | { status?: number | string; subtype?: string; result?: string };
+function claudeCohort(options: { reply?: (batch: number, attempt: number) => ClaudeReply; hold?: (batch: number, attempt: number) => Promise<void> | void; sleep?: (ms: number, signal: AbortSignal) => Promise<void> } = {}) {
+  const state = { running: 0, peak: 0, spawned: [] as number[], attempts: new Map<number, number>(), prompts: [] as string[], sleeps: [] as number[] };
+  const sleep = options.sleep ?? (async (ms: number) => { state.sleeps.push(ms); });
+  const spawn = fakeSpawner(async ({ child }) => {
+    const batch = batchNumberOf(child); const attempt = (state.attempts.get(batch) ?? 0) + 1; state.attempts.set(batch, attempt); state.spawned.push(batch);
+    if (batch === 3) state.prompts.push(child.input);
+    state.running++; state.peak = Math.max(state.peak, state.running);
+    try {
+      await options.hold?.(batch, attempt);
+      const reply = options.reply?.(batch, attempt) ?? 'ok';
+      if (reply === 'ok') child.stdout.write(claudeResult(child.input));
+      else if (reply === 'invalid') child.stdout.write(JSON.stringify({ type: 'result', is_error: false, structured_output: { documentJson: 'not json', explanation: 'x' } }) + '\n');
+      else child.stdout.write(JSON.stringify({ type: 'result', is_error: true, subtype: reply.subtype ?? 'error_during_execution', ...(reply.status !== undefined ? { api_error_status: reply.status } : {}), result: reply.result ?? 'failed' }) + '\n');
+    } finally { state.running--; }
+    child.finish();
+  });
+  return { state, spawn, sleep };
+}
+const claudeRequest = (size: number) => ({ engine: 'claude' as const, prompt: `Create ${size} adults`, revision: 0, document: empty, cohort: { id: 'customers', size } });
+
+test('rate-limited batches wait 5 s then 20 s, resend the same request, and say so in their status', async t => {
+  const root = await setup(t); const seen: Array<NonNullable<ReturnType<typeof stateOf>>> = [];
+  let service!: LocalAgentService; let jobId = ''; const limits: unknown[] = [];
+  const harness = claudeCohort({ reply: (batch, attempt) => batch === 3 && attempt < 3 ? { status: 429, result: 'Rate limited' } : 'ok' });
+  service = new LocalAgentService({ temporaryRoot: root, spawn: harness.spawn, random: () => 0.5, sleep: async ms => { harness.state.sleeps.push(ms); seen.push(structuredClone(stateOf(service, jobId, 3)!)); limits.push(service.get(jobId)!.progress!.batchLimit); } });
+  t.after(() => service.close());
+  const job = service.start(claudeRequest(10 + 25 * 2)); jobId = job.id;
+  const done = await terminal(service, job);
+  assert.equal(done.status, 'completed'); assert.equal(harness.state.attempts.get(3), 3);
+  assert.deepEqual(harness.state.sleeps, [5000, 20000]);
+  assert.deepEqual(seen.map(detail => [detail.state, detail.attempt, detail.maxAttempts, detail.wait]), [['waiting', 2, 3, { seconds: 5, cause: 'rate-limit' }], ['waiting', 3, 3, { seconds: 20, cause: 'rate-limit' }]]);
+  const [first, second, third] = harness.state.prompts as [string, string, string];
+  assert.deepEqual(requestData(second), requestData(first)); assert.deepEqual(requestData(third), requestData(first));
+  assert.ok(!second.includes('previous attempt') && !third.includes('previous attempt'), 'a rate limit is not a rejection, so no feedback is sent');
+  assert.equal(done.progress!.retries, 2); assert.deepEqual(limits, [{ allowed: 4, cause: 'rate-limit' }, { allowed: 4, cause: 'rate-limit' }]);
+});
+
+test('waits carry jitter, and a 503 is waited out like a rate limit', async t => {
+  const root = await setup(t); const sleeps: number[] = [];
+  const service = new LocalAgentService({ temporaryRoot: root, random: () => 0, sleep: async ms => { sleeps.push(ms); }, spawn: fakeSpawner(async ({ child }) => {
+    child.stdout.write(JSON.stringify({ type: 'result', is_error: true, subtype: 'error_during_execution', api_error_status: 503, result: 'Service unavailable' }) + '\n'); child.finish();
+  }) });
+  t.after(() => service.close());
+  const done = await terminal(service, service.start(claudeRequest(10)));
+  assert.equal(done.status, 'failed');
+  assert.deepEqual(sleeps, [4000, 16000], 'random() of 0 gives the low end, 20% under 5 s and 20 s');
+});
+
+test('a rate limit narrows new batch starts to four and two accepted batches in a row restore twelve', async t => {
+  const root = await setup(t); const gates = new Map<number, ReturnType<typeof deferred<void>>>(); const sleepGate = deferred<void>();
+  const gate = (batch: number) => { if (!gates.has(batch)) gates.set(batch, deferred<void>()); return gates.get(batch)!; };
+  const harness = claudeCohort({ hold: async batch => { if (batch > 1) await gate(batch).promise; }, reply: (batch, attempt) => batch === 2 && attempt === 1 ? { status: 429, result: 'Rate limited' } : 'ok',
+    sleep: async ms => { harness.state.sleeps.push(ms); await sleepGate.promise; } });
+  const service = new LocalAgentService({ temporaryRoot: root, spawn: harness.spawn, random: () => 0.5, sleep: harness.sleep }); t.after(() => service.close());
+  const job = service.start(claudeRequest(10 + 25 * 20));
+  await waitFor(() => harness.state.running === 12);
+  gate(2).resolve();
+  await waitFor(() => service.get(job.id)!.progress!.batchLimit !== undefined);
+  assert.deepEqual(service.get(job.id)!.progress!.batchLimit, { allowed: 4, cause: 'rate-limit' });
+  assert.equal(stateOf(service, job.id, 2)!.state, 'waiting');
+  gate(3).resolve();
+  await waitFor(() => harness.state.running === 10);
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.deepEqual([...harness.state.spawned].sort((a, b) => a - b), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], 'with one success and eleven batches in flight, the window of four starts nothing');
+  assert.deepEqual(service.get(job.id)!.progress!.batchLimit, { allowed: 4, cause: 'rate-limit' });
+  gate(4).resolve();
+  await waitFor(() => harness.state.spawned.length === 15);
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.deepEqual([...harness.state.spawned].sort((a, b) => a - b), [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15], 'the second success restores twelve, so the freed places fill');
+  assert.equal(service.get(job.id)!.progress!.batchLimit, undefined);
+  for (const [batch, held] of gates) if (batch > 4) held.resolve();
+  sleepGate.resolve();
+  await waitFor(() => harness.state.spawned.length > 15);
+  for (let i = 0; i < 40; i++) { for (let batch = 1; batch <= 22; batch++) gate(batch).resolve(); await new Promise(resolve => setTimeout(resolve, 10)); if (service.get(job.id)!.status !== 'running') break; }
+  const done = await terminal(service, job);
+  assert.equal(done.status, 'completed'); assert.equal(done.progress!.completedPersonas, 510); assert.ok(harness.state.peak <= 12);
+});
+
+test('a second rate limit while narrowed restarts the count of successes needed to recover', async t => {
+  const root = await setup(t); const gates = new Map<number, ReturnType<typeof deferred<void>>>(); const sleepGate = deferred<void>();
+  const gate = (batch: number) => { if (!gates.has(batch)) gates.set(batch, deferred<void>()); return gates.get(batch)!; };
+  const harness = claudeCohort({ hold: async batch => { if (batch > 1) await gate(batch).promise; }, reply: (batch, attempt) => (batch === 2 || batch === 4) && attempt === 1 ? { status: 429 } : 'ok',
+    sleep: async ms => { harness.state.sleeps.push(ms); await sleepGate.promise; } });
+  const service = new LocalAgentService({ temporaryRoot: root, spawn: harness.spawn, random: () => 0.5, sleep: harness.sleep }); t.after(() => service.close());
+  const job = service.start(claudeRequest(10 + 25 * 5));
+  await waitFor(() => harness.state.running === 5);
+  gate(2).resolve(); await waitFor(() => harness.state.sleeps.length === 1);
+  gate(3).resolve(); await waitFor(() => service.get(job.id)!.progress!.completedBatches === 2);
+  gate(4).resolve(); await waitFor(() => harness.state.sleeps.length === 2);
+  gate(5).resolve(); await waitFor(() => service.get(job.id)!.progress!.completedBatches === 3);
+  assert.deepEqual(service.get(job.id)!.progress!.batchLimit, { allowed: 4, cause: 'rate-limit' }, 'one success since the second rate limit is not enough, though two came in total');
+  sleepGate.resolve(); gate(6).resolve();
+  const done = await terminal(service, job);
+  assert.equal(done.status, 'completed'); assert.deepEqual(harness.state.sleeps, [5000, 5000]); assert.equal(done.progress!.batchLimit, undefined);
+});
+
+test('failed checks and non-rate-limit CLI errors retry at once, never wait, and never narrow the window', async t => {
+  const root = await setup(t); let limit: unknown = 'unset';
+  const harness = claudeCohort({ reply: (batch, attempt) => batch === 2 && attempt === 1 ? 'invalid' : batch === 3 && attempt === 1 ? { subtype: 'error_max_structured_output_retries', result: 'no schema' } : 'ok' });
+  const service = new LocalAgentService({ temporaryRoot: root, spawn: harness.spawn, sleep: harness.sleep }); t.after(() => service.close());
+  const job = service.start(claudeRequest(10 + 25 * 3));
+  await waitFor(() => { const current = service.get(job.id)!; if (current.progress?.retries) limit = current.progress.batchLimit; return current.status !== 'running'; });
+  const done = service.get(job.id)!;
+  assert.equal(done.status, 'completed'); assert.equal(done.progress!.retries, 2);
+  assert.deepEqual(harness.state.sleeps, []); assert.equal(limit, undefined); assert.equal(done.progress!.batchLimit, undefined);
+  assert.match(harness.state.prompts[1]!, /Your previous attempt at this batch was rejected/);
+});
+
+test('cancelling during a backoff wait ends the job at once', async t => {
+  const root = await setup(t);
+  const harness = claudeCohort({ reply: () => ({ status: 429 }) });
+  const service = new LocalAgentService({ temporaryRoot: root, spawn: harness.spawn, random: () => 0.5 }); t.after(() => service.close());
+  const job = service.start(claudeRequest(10));
+  await waitFor(() => stateOf(service, job.id, 1)?.state === 'waiting');
+  assert.equal(stateOf(service, job.id, 1)!.wait!.seconds, 5);
+  const started = Date.now();
+  assert.equal(service.cancel(job.id)?.status, 'cancelled');
+  await new Promise(resolve => setTimeout(resolve, 30));
+  assert.ok(Date.now() - started < 1000); assert.equal(service.get(job.id)!.status, 'cancelled'); assert.equal(harness.state.spawned.length, 1, 'no attempt follows the cancelled wait');
+});
+
+test('only rate-limit, overload and connection class failures are waited out', () => {
+  for (const [status, text, cause] of [[429, '', 'rate-limit'], ['429', '', 'rate-limit'], [529, '', 'overload'], [500, '', 'overload'], [503, '', 'overload'], [undefined, 'API Error: Overloaded', 'overload'], [undefined, 'You have hit a rate limit', 'rate-limit'], [undefined, 'read ECONNRESET', 'connection'], [undefined, 'request timed out', 'connection']] as const) {
+    assert.equal(backoffCause(status, text), cause, `${status} ${text}`);
+  }
+  for (const [status, text] of [[400, 'bad request'], [401, 'login'], [undefined, 'error_max_structured_output_retries'], [undefined, 'persona 3 has no segment'], [null, null]] as const) assert.equal(backoffCause(status, text), undefined, `${status} ${text}`);
 });

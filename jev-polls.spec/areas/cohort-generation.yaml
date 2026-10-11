@@ -41,6 +41,19 @@ behaviors:
       A batch that fails parsing or checks is retried with the same request data up to two more times,
       with the reason it was rejected added to the instructions, before the whole job fails with the
       workspace unchanged; cancellation never retries.
+    details: >-
+      Added 2026-10-11 (gap left by the per-batch failure reasons): a batch that fails because the AI
+      was rate-limited, overloaded or unreachable (a CLI error result with status 429, 529 or 5xx, an
+      "overloaded" or "rate limit" message, a connection reset or a timeout) is not a bad reply, so
+      the same request is sent again after an exponential wait with jitter (about 5 s, then 20 s,
+      then 60 s for a batch's later attempts, each 20% either way) and without a rejection note.
+      Failed checks and unreadable replies keep the immediate retry with the reason. While any such
+      error is live, no more than four batches are started at once; the limit lifts back to twelve
+      after two accepted batches in a row, and another such error restarts that count. The attempt
+      limit is still three, so only the first two waits occur before a batch fails the job. A waiting
+      batch shows "waiting 20 s after a rate limit (attempt 2 of 3)" and the panel says "4 batches at
+      once while the AI is rate-limited", so the displayed wait and window are the real ones.
+      Cancelling ends a wait at once. CLI and MCP behaviour is unchanged apart from the waits.
   - id: generation-failure-detail
     description: >-
       A failed generation says which batch failed and which check it failed ("Batch 7 failed its
