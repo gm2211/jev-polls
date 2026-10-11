@@ -90,7 +90,8 @@ behaviors:
       A failed generation says which batch failed and which check it failed ("Batch 7 failed its
       checks 3 times: persona 3 has no segment. Workspace unchanged."), the server logs one JSON line
       on stderr for every failed batch attempt and for the final failure, and the failed panel offers
-      Retry generation with the same brief and size.
+      Start again with the same brief and size, or Continue when checked personas were kept
+      (generation-survives-restart).
     details: >-
       Added 2026-10-11 after a 1,000-person run failed after about nine minutes with only "Agent did
       not return a valid workspace draft" and nothing in the server log. Every batch reply is now
@@ -152,6 +153,24 @@ behaviors:
       version leaves the workspace unchanged, and only the selected cohort can change.
   - id: stale-proposal-refused
     description: A proposal based on an older revision cannot be adopted and must be regenerated.
+  - id: generation-survives-restart
+    description: >-
+      A cohort run keeps its audience plan and every checked group of personas on disk, so after a
+      failure or an app restart it shows as stopped with how many personas were kept, and Continue
+      writes only the missing groups with the same plan, brief, size and persona IDs. A run the app no
+      longer knows is stated as stopped with nothing kept, never as still working or a connection
+      problem, and progress keeps checking on its own while the app cannot be reached.
+    details: >-
+      Added 2026-10-11 after a 1,000-person run showed "Assistant task was not found" with a
+      Reconnect button that could not work: runs lived only in memory, so an app restart erased
+      them. Checkpoints are JSON files in the workspace's drafts folder (mode 0600), replaced in one
+      step after the audience plan is set and after each accepted group, and removed when the run is
+      applied, discarded, cancelled or continued. Continue is refused unless the brief, size, audience
+      id and project match the stopped run. Start over writes everything again. Runs that stopped
+      before this change cannot be recovered.
+    source:
+      text: huh? also reconnect does not work
+      reference: 2026-10-11 jev-polls project thread, Giulio
   - id: cancel-generation
     description: Cancel generation stops the job and leaves the workspace unchanged.
   - id: regenerate-persona

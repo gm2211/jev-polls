@@ -28,6 +28,7 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
   const bodies: Array<{ path: string; body: unknown }> = [];
   const responses = new Map<string, unknown>([['/api/local-agents', { engines: [] }], ['/api/chatgpt/status', { connected: false, planEnabled: false }]]);
   const failures = new Map<string, string>();
+  const failureCodes = new Map<string, string>();
   const storage = new Map<string, string>();
   class TestFormData {
     constructor(private readonly form: any) {}
@@ -51,7 +52,8 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
       const found = responses.get(key) ?? responses.get(path) ?? snapshot;
       const data = await (typeof found === 'function' ? found(options?.body ? JSON.parse(options.body) : undefined) : found);
       const failure = failures.get(key) ?? failures.get(path);
-      return { ok: !failure, json: async () => JSON.parse(JSON.stringify(failure ? { error: { message: failure } } : data)) };
+      const code = failureCodes.get(key) ?? failureCodes.get(path);
+      return { ok: !failure, json: async () => JSON.parse(JSON.stringify(failure ? { error: { message: failure, ...(code ? { code } : {}) } } : data)) };
     },
     setTimeout: (fn: Function) => { timeouts.push(fn); return timeouts.length; }, clearTimeout() {}, setInterval: (fn: Function) => { intervals.push(fn); return 1; },
     navigator: {}, URL, URLSearchParams, Blob, TextEncoder, confirm: () => { throw new Error('Unexpected native confirmation'); },
@@ -59,7 +61,7 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={retryCohortJob,locationHash,plural,recoverDraftingJob,recoverableDraftingJob,loadLocalAgents,cohortJobNotice,cohortJobNoticeVisible,commandState,adoptCohortProposal,commandEntries,commandExecute,inlineCohortJobVisible,inlineCohortTarget,setupCohortPicker,runCaveats,beginRun,commandApplyProposal,commandJobVisible,S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,locationHash,restoreLocation,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,studies,review,say,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,studyQuestionList,validateSetupAnswers,upsertQuestion,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList,studyNextAction,studyReviewPanel,rememberRunSignature,ensureStudyQuestion,audienceNext,audienceAdd,audienceState,audienceResume,audienceNote,audienceProposalList};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={retryCohortJob,continueCohortJob,cohortFailedActions,locationHash,plural,recoverDraftingJob,recoverableDraftingJob,loadLocalAgents,cohortJobNotice,cohortJobNoticeVisible,commandState,adoptCohortProposal,commandEntries,commandExecute,inlineCohortJobVisible,inlineCohortTarget,setupCohortPicker,runCaveats,beginRun,commandApplyProposal,commandJobVisible,S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,locationHash,restoreLocation,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,studies,review,say,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,studyQuestionList,validateSetupAnswers,upsertQuestion,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList,studyNextAction,studyReviewPanel,rememberRunSignature,ensureStudyQuestion,audienceNext,audienceAdd,audienceState,audienceResume,audienceNote,audienceProposalList};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
   if (openExistingProject) (context as any).clientTest.S.projectId = 'existing-research';
@@ -68,7 +70,8 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
     element, listeners, intervals, timeouts, requests, bodies, storage,
     respond: (path: string, value: unknown, method?: string) => responses.set(method ? method + ' ' + path : path, value),
     echoSaves: () => responses.set('POST /api/workspace', (body: any) => ({ revision: body.revision + 1, document: body.document })),
-    fail: (path: string, message: string, method?: string) => failures.set(method ? method + ' ' + path : path, message),
+    fail: (path: string, message: string, method?: string, code?: string) => { failures.set(method ? method + ' ' + path : path, message); if (code) failureCodes.set(method ? method + ' ' + path : path, code); },
+    unfail: (path: string) => { failures.delete(path); failureCodes.delete(path); },
     setSnapshot: (value: typeof snapshot) => { snapshot = value; },
     snapshot: () => structuredClone(snapshot),
     document: context.document,
@@ -792,9 +795,12 @@ test('a failed cohort generation shows which batch failed and retries the same b
   S.localJob = failed;
   const review = cohortProposalReview(failed);
   assert.match(review, /Generation failed/); assert.match(review, /Batch 7 failed its checks 3 times: persona 3 has no segment\. Workspace unchanged\./);
-  assert.match(review, /data-act="cohort-retry">Retry generation</);
-  assert.doesNotMatch(cohortProposalReview({ ...failed, status: 'cancelled', message: 'Cancelled.' }), /Retry generation/);
-  assert.doesNotMatch(cohortProposalReview({ ...failed, cohort: undefined }), /Retry generation/);
+  assert.match(review, /data-act="cohort-retry">Start again</); assert.doesNotMatch(review, /cohort-continue/);
+  assert.doesNotMatch(cohortProposalReview({ ...failed, status: 'cancelled', message: 'Cancelled.' }), /Start again/);
+  assert.doesNotMatch(cohortProposalReview({ ...failed, cohort: undefined }), /Start again/);
+  const kept = cohortProposalReview({ ...failed, resumable: { keptPersonas: 420 } });
+  assert.match(kept, /data-act="cohort-continue">Continue · 580 to go</); assert.match(kept, /data-act="cohort-retry">Start over</);
+  assert.match(kept, /keeps the 420 checked personas/); assert.doesNotMatch(kept, /Nothing from the failed attempt/);
   browser.respond('/api/agent/jobs/failed-job/discard', { ...failed, settled: 'discarded' });
   browser.respond('/api/agent/jobs', { id: 'retry-job', engine: 'claude', revision: S.revision, status: 'running', cohort: failed.cohort });
   act(null, { dataset: { act: 'cohort-retry' } }); await settle();
@@ -1919,21 +1925,51 @@ test('generation progress reports accepted counts without inventing completion o
   assert.doesNotMatch(html, /progressbar|checked|elapsed/);
 });
 
-test('poll interruption stays visible in progress and can reconnect without another generation', async () => {
+test('progress keeps checking while the app is unreachable and says plainly when the app lost the run', async () => {
   const browser = browserHarness(); await settle();
   const { S, pollLocalJob, cohortGenerator } = browser.client;
   S.cohortComposer = true; S.cohortTarget = 'new'; S.sections['cohort-generation'] = 'review';
-  S.localJob = { id: 'interrupted', engine: 'codex', status: 'running', cohort: { id: 'new', size: 2 } };
+  S.localJob = { id: 'interrupted', engine: 'codex', status: 'running', cohort: { id: 'new', size: 2, prompt: 'Adults' } };
   browser.fail('/api/agent/jobs/interrupted', 'Local server unavailable');
-  const polling = pollLocalJob('interrupted'); browser.timeouts.at(-1)!(); await polling;
+  const polling = pollLocalJob('interrupted'); browser.timeouts.at(-1)!(); await settle();
   assert.equal(S.localJob.status, 'running');
-  assert.match(cohortGenerator(), /Status connection interrupted/);
-  assert.match(cohortGenerator(), /Reconnect progress/);
-  browser.element('app').querySelectorAll = (selector: string) => selector === '[data-form]' ? [{ reportValidity: () => assert.fail('reconnecting must not validate unrelated edits') }] : [];
-  browser.listeners.get('click')!({ target: { closest: () => ({ dataset: { act: 'assistant-status-retry' } }) }, preventDefault() {} });
-  assert.equal(S.localPollError, null);
-  assert.equal(browser.bodies.length, 0, 'reconnecting never submits a generation');
-  S.localJob.status = 'cancelled'; browser.timeouts.at(-1)!(); await settle();
+  let html = cohortGenerator();
+  assert.match(html, /Can’t reach the app right now\. Checking again every few seconds\./);
+  assert.doesNotMatch(html, /Reconnect|may still be running|Local server unavailable/);
+  const waits = browser.timeouts.length;
+  browser.timeouts.at(-1)!(); await settle();
+  assert.equal(browser.timeouts.length, waits + 1, 'keeps checking on its own');
+  browser.unfail('/api/agent/jobs/interrupted');
+  browser.respond('/api/agent/jobs/interrupted', { ...S.localJob, progress: { phase: 'generating', completedPersonas: 1, totalPersonas: 2 } });
+  browser.timeouts.at(-1)!(); await settle();
+  assert.equal(S.localPollError, null); assert.doesNotMatch(cohortGenerator(), /Can’t reach the app/);
+  browser.fail('/api/agent/jobs/interrupted', 'Assistant task was not found. Start a new task.', undefined, 'AGENT_JOB_NOT_FOUND');
+  browser.timeouts.at(-1)!(); await polling;
+  assert.equal(S.localJob.status, 'failed');
+  html = cohortGenerator();
+  assert.match(html, /stopped because the app restarted, and none of its personas were kept/);
+  assert.match(html, /Generation stopped/);
+  assert.match(html, /data-act="cohort-retry">Start again</);
+  assert.doesNotMatch(html, /still working|Can’t reach|not found/);
+  assert.equal(browser.bodies.length, 0, 'checking never submits a generation');
+});
+
+test('a stopped run with kept personas continues from them', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, act, cohortGenerator } = browser.client;
+  S.tab = 'studies'; S.pipelineId = 'study'; S.stageId = 'panel';
+  act(null, { dataset: { act: 'new-cohort' } }); await settle();
+  S.localEngine = 'claude'; S.localEngines = [{ id: 'claude', label: 'Claude Code', available: true }];
+  const stopped = { id: '0b5ad3f4-3c1e-4f3a-9b55-6b0e3d1a2f10', engine: 'claude', revision: S.revision, status: 'failed', message: 'This run stopped when the app restarted. 420 of 1,000 personas were checked and kept.', cohort: { id: 'gamers', size: 1000, prompt: 'Adult gamers' }, resumable: { keptPersonas: 420 } };
+  S.localJob = stopped; S.sections['cohort-generation'] = 'review';
+  assert.match(cohortGenerator(), /420 of 1,000 personas were checked and kept/); assert.match(cohortGenerator(), /Generation stopped/);
+  browser.respond('/api/agent/jobs', { id: 'continued', engine: 'claude', revision: S.revision, status: 'running', cohort: stopped.cohort, progress: { phase: 'checking', completedPersonas: 420, totalPersonas: 1000 } }, 'POST');
+  act(null, { dataset: { act: 'cohort-continue' } }); await settle();
+  const start = browser.bodies.find(x => x.path === '/api/agent/jobs')!.body;
+  assert.equal(start.resumeFrom, stopped.id); assert.equal(start.prompt, 'Adult gamers'); assert.equal(start.cohort.size, 1000); assert.equal(start.cohort.id, 'gamers');
+  assert.equal(browser.bodies.filter(x => x.path.endsWith('/discard')).length, 0, 'continuing keeps the stopped run’s personas');
+  assert.equal(S.localJob.id, 'continued');
+  S.localJob.status = 'cancelled'; for (const fn of browser.timeouts.splice(0)) fn(); await settle();
 });
 
 test('recovering active cohort generation selects Progress with actual server counts', async () => {
