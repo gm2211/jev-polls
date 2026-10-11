@@ -1,72 +1,113 @@
-/** Counts reflect accepted server output. Timers never advance generation. */
+/** Counts reflect server output. Timers never advance generation. */
 export const DRAFT_PROGRESS_CSS = `
-.panel.draft-progress{padding:28px;border-top:3px solid var(--blue);border-radius:8px}.draft-progress-heading{display:flex;justify-content:space-between;gap:16px;align-items:start}.draft-progress-actions{display:flex;align-items:center;justify-content:flex-end;gap:12px;flex-wrap:wrap}.draft-progress h2{font-size:var(--text-lg)}.draft-provider{margin:5px 0 0;color:var(--muted);font-size:var(--text-sm);overflow-wrap:anywhere}.draft-elapsed{color:var(--muted);font-size:var(--text-sm);white-space:nowrap;font-variant-numeric:tabular-nums}.draft-metrics{display:flex;align-items:end;justify-content:space-between;gap:24px;margin:28px 0 14px}.draft-count{color:var(--muted);font-size:var(--text-md)}.draft-count strong{display:block;font-size:clamp(32px,4vw,48px);line-height:1.15;font-weight:600;letter-spacing:-.05em;color:var(--ink);font-variant-numeric:tabular-nums}.draft-count strong span{font-size:.6em;color:var(--muted);letter-spacing:-.03em}.draft-estimate{text-align:right;color:var(--muted);font-size:var(--text-sm);max-width:220px}.draft-estimate strong{display:block;color:var(--ink);font-size:var(--text-xl);letter-spacing:-.02em}.draft-progress progress{display:block;width:100%;height:6px;border:0;border-radius:0;overflow:hidden;appearance:none;background:var(--line);accent-color:var(--teal)}.draft-progress progress::-webkit-progress-bar{background:var(--line)}.draft-progress progress::-webkit-progress-value{background:var(--teal)}.draft-progress progress::-moz-progress-bar{background:var(--teal)}.draft-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;list-style:none;padding:18px 0;margin:0}.draft-steps li{color:var(--muted);font-size:var(--text-sm)}.draft-steps li[data-state=done]{color:var(--teal)}.draft-steps li[data-state=current]{color:var(--blue);font-weight:600}.draft-live{border-block:1px solid var(--line);padding:20px 0;margin:2px 0 16px}.draft-live-heading{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap}.draft-progress-status{margin:0;font-size:var(--text-lg);font-weight:600;color:var(--ink)}.draft-batch-time{font-size:var(--text-sm);color:var(--muted);font-variant-numeric:tabular-nums}.draft-activity{display:flex;align-items:center;gap:8px;margin:10px 0 0;color:var(--teal);font-size:var(--text-md);flex-wrap:wrap}.draft-activity-dot{width:7px;height:7px;border-radius:50%;background:currentColor;flex:none}.draft-output{color:var(--ink);font-weight:600}.draft-inflight{display:block;margin-top:2px;color:var(--teal);font-size:13px;font-variant-numeric:tabular-nums}.draft-batch-states{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:2px 16px;list-style:none;padding:0;margin:10px 0 0;font-size:12px;color:var(--muted)}.draft-batch-states li[data-batch-state=writing]{color:var(--ink)}.draft-last-event{color:var(--muted);font-size:var(--text-sm)}.draft-inspect-tabs{display:flex;gap:6px;margin-bottom:14px}.draft-inspect-tabs .button{padding:7px 12px;min-height:34px;font-size:var(--text-sm)}.draft-progress .draft-inspect-tabs [aria-pressed=true]{background:var(--ink);color:var(--surface);border-color:var(--ink)}.draft-inspect h3{margin:0 0 8px;font-size:var(--text-md)}.draft-recent{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;list-style:none;padding:0;margin:0}.draft-recent li{border-left:2px solid var(--teal);padding-left:12px;min-width:0}.draft-recent strong{display:block;font-size:var(--text-md);overflow-wrap:anywhere}.draft-recent span,.draft-progress-note{color:var(--muted);font-size:var(--text-sm)}.draft-progress-note{margin:0}.draft-checks{display:flex;flex-wrap:wrap;gap:6px 24px;padding-left:18px;font-size:var(--text-sm);margin:8px 0 10px}.draft-progress-error{margin-top:16px}.draft-progress-error .button{margin-top:8px}@media(max-width:540px){.panel.draft-progress{padding:18px}.draft-progress-heading{flex-wrap:wrap}.draft-progress-actions{width:100%;justify-content:space-between}.draft-metrics{align-items:start;gap:12px;margin-top:22px;flex-wrap:wrap}.draft-estimate{text-align:left}.draft-steps{gap:8px}.draft-recent{grid-template-columns:1fr;gap:12px}}
+.panel.draft-progress{padding:24px 28px;border-top:3px solid var(--blue);border-radius:8px}.draft-progress-heading{display:flex;justify-content:space-between;gap:16px;align-items:start}.draft-progress-actions{display:flex;align-items:center;justify-content:flex-end;gap:12px;flex-wrap:wrap}.draft-progress h2{font-size:var(--text-lg)}.draft-provider{margin:4px 0 0;color:var(--muted);font-size:var(--text-sm);overflow-wrap:anywhere}.draft-elapsed{color:var(--muted);font-size:var(--text-sm);white-space:nowrap;font-variant-numeric:tabular-nums}
+.draft-metrics{display:flex;align-items:end;justify-content:space-between;gap:16px 24px;margin:22px 0 10px}.draft-count{margin:0;color:var(--muted);font-size:var(--text-md)}.draft-count strong{font-size:clamp(32px,4vw,44px);line-height:1.1;font-weight:600;letter-spacing:-.04em;color:var(--ink);font-variant-numeric:tabular-nums;margin-right:8px}.draft-estimate{margin:0;text-align:right;color:var(--ink);font-size:var(--text-md);font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums}
+.draft-bar{position:relative;height:8px;border-radius:4px;background:var(--line);overflow:hidden}.draft-bar span{position:absolute;inset:0 auto 0 0;border-radius:inherit;transition:width .6s ease}.draft-bar-written{background:var(--teal);opacity:.35}.draft-bar-checked{background:var(--teal)}
+.draft-progress-status{margin:16px 0 0;font-size:var(--text-md);color:var(--ink);line-height:1.45;min-height:1.45em}.draft-progress-detail{margin:2px 0 0;font-size:var(--text-sm);color:var(--muted);line-height:1.45;min-height:1.45em;font-variant-numeric:tabular-nums}
+.draft-progress-error{margin-top:16px}.draft-progress-error .button{margin-top:8px}
+@media(prefers-reduced-motion:reduce){.draft-bar span{transition:none}}
+@media(max-width:540px){.panel.draft-progress{padding:18px}.draft-progress-heading{flex-wrap:wrap}.draft-progress-actions{width:100%;justify-content:space-between}.draft-metrics{flex-wrap:wrap;align-items:baseline}.draft-estimate{text-align:left}}
 `;
 
+/*
+ * One readout that keeps its shape while a job runs: a count of personas
+ * written so far, a time estimate, a bar, one plain status line and one muted
+ * detail line. Polls patch the [data-slot] nodes in place instead of
+ * re-rendering the page, so nothing around the readout redraws or animates.
+ */
 export const DRAFT_PROGRESS_CLIENT = String.raw`
 function draftCancelButton(job){return job?.id&&job.status==='running'?'<button class="button" type="button" data-act="assistant-cancel">Cancel generation</button>':''}
 function draftDuration(ms){const seconds=Math.max(0,Math.floor(ms/1000));if(!Number.isFinite(seconds))return '';const minutes=Math.floor(seconds/60);return (minutes?minutes+'m ':'')+(seconds%60)+'s'}
 function draftElapsed(start,end){const duration=draftDuration((end?Date.parse(end):Date.now())-Date.parse(start));return duration?duration+' elapsed':''}
-function draftLastEvent(at){const seconds=Math.max(0,Math.floor((Date.now()-Date.parse(at))/1000));return Number.isFinite(seconds)?seconds<2?'Activity just now':'Last activity '+draftDuration(seconds*1000)+' ago':''}
+function draftLastEvent(at){const seconds=Math.max(0,Math.floor((Date.now()-Date.parse(at))/1000));if(!Number.isFinite(seconds))return '';return seconds<3?'updated just now':seconds<30?'updated '+seconds+'s ago':'no new output for '+draftDuration(seconds*1000)+', still working'}
+function draftRange(lowMs,highMs){
+  const unit=highMs<120000?'sec':'min',divisor=unit==='sec'?1000:60000;
+  const low=Math.max(1,Math.floor(lowMs/divisor)),high=Math.max(low+1,Math.ceil(highMs/divisor));
+  return 'About '+low+'–'+high+' '+unit+' left';
+}
 function draftEstimate(p){
   const durations=p.batchDurationsMs||[],sizes=p.completedBatchSizes||[];
   const rates=durations.map((ms,i)=>Number.isFinite(ms)&&ms>0&&Number.isFinite(sizes[i])&&sizes[i]>0?ms/sizes[i]:0).filter(n=>n>0);
   const remaining=p.totalPersonas-p.completedPersonas;
   if(!Number.isFinite(remaining)||remaining<=0)return '';
   if(rates.length<2&&p.estimate&&p.estimate.basis==='streaming'){
-    const left=Math.max(0,p.estimate.seconds-(Date.now()-Date.parse(p.estimate.at))/1000),lowS=left*.7,highS=left*1.6+5;
-    const unit=highS<120?'sec':'min',divisor=unit==='sec'?1:60;
-    const low=Math.max(1,Math.floor(lowS/divisor)),high=Math.max(low+1,Math.ceil(highS/divisor));
-    return '<strong>~'+low+'–'+high+' '+unit+' remaining (rough)</strong>From how fast personas are being written; firmer after two batches finish';
+    const left=Math.max(0,p.estimate.seconds-(Date.now()-Date.parse(p.estimate.at))/1000);
+    return draftRange(left*700,left*1600+5000);
   }
-  if(p.totalBatches<=2)return '';
-  if(rates.length<2)return '<strong>Estimating…</strong>After two completed batches';
-  if(p.batchStartedAt&&Date.now()-Date.parse(p.batchStartedAt)>Math.max(...durations)*1.5)return '<strong>Taking longer</strong>This batch exceeds recent timings';
+  if(rates.length<2)return p.totalBatches>2?'Estimating time left…':'';
+  if(p.batchStartedAt&&Date.now()-Date.parse(p.batchStartedAt)>Math.max(...durations)*1.5)return 'Taking longer than usual';
   const left=Number.isFinite(p.totalBatches)&&Number.isFinite(p.completedBatches)?Math.max(1,p.totalBatches-p.completedBatches):Infinity;
   const parallel=Math.max(1,Math.min(p.maxConcurrentBatches||1,left));
   const average=rates.reduce((a,b)=>a+b,0)/rates.length;
-  const lowMs=remaining*Math.min(average*.8,...rates)/parallel,highMs=remaining*Math.max(average*1.2,...rates)/parallel;
-  const unit=highMs<120000?'sec':'min',divisor=unit==='sec'?1000:60000;
-  const low=Math.max(1,Math.floor(lowMs/divisor)),high=Math.max(low+1,Math.ceil(highMs/divisor));
-  return '<strong>~'+low+'–'+high+' '+unit+' remaining</strong>At the pace of the last '+rates.length+' batches'+(parallel>1?', '+parallel+' at a time':'');
+  return draftRange(remaining*Math.min(average*.8,...rates)/parallel,remaining*Math.max(average*1.2,...rates)/parallel);
 }
-function draftBackoffCause(cause){return cause==='rate-limit'?'a rate limit':cause==='overload'?'the AI being overloaded':'a connection error'}
-function draftLimitNote(p){
-  const l=p.batchLimit;if(!l||!(l.allowed>0))return '';
-  return '<p class="draft-progress-note" role="status">'+l.allowed+(l.allowed===1?' batch':' batches')+' at once while '+(l.cause==='rate-limit'?'the AI is rate-limited':l.cause==='overload'?'the AI is overloaded':'the connection to the AI is unreliable')+'. Full speed returns after two batches succeed.</p>';
-}
-function draftBatchState(d){
-  const tries=d.maxAttempts>1?' (attempt '+d.attempt+' of '+d.maxAttempts+')':'';
-  if(d.state==='accepted')return 'accepted';
-  if(d.state==='checking')return 'checking batch';
-  if(d.state==='connecting')return 'connecting';
-  if(d.state==='waiting'&&d.wait)return 'waiting '+d.wait.seconds+' s after '+draftBackoffCause(d.wait.cause)+tries;
-  if(d.state==='retrying')return 'retrying after a failed check'+tries;
-  const again=d.attempt>1?', attempt '+d.attempt+' of '+d.maxAttempts:'';
-  if(!d.contentStreamed)return 'writing… ('+(d.outputTokens>0?d.outputTokens.toLocaleString('en-US')+' tokens so far':d.outputChars>0?d.outputChars.toLocaleString('en-US')+' characters so far':'waiting for the first output')+')'+again;
-  if(d.streamingPersonas>0)return 'writing persona '+d.streamingPersonas+' of '+d.size+again;
-  return 'writing'+(d.outputChars>0?' ('+d.outputChars.toLocaleString('en-US')+' characters so far)':'')+again;
-}
-function draftBatchLines(p){
-  const details=Array.isArray(p.batchDetails)?p.batchDetails:[];
-  if(!details.length)return '';
-  return '<ul class="draft-batch-states" aria-label="Batch status">'+details.map(d=>'<li data-batch-state="'+attr(d.state)+'">Batch '+d.index+': '+esc(draftBatchState(d))+'</li>').join('')+'</ul>';
-}
-function updateDraftClocks(){root.querySelectorAll('[data-draft-estimate]').forEach(node=>{try{node.innerHTML=draftEstimate(JSON.parse(node.dataset.draftEstimate))}catch{}});root.querySelectorAll('[data-draft-start]').forEach(node=>{node.textContent=draftElapsed(node.dataset.draftStart)});root.querySelectorAll('[data-batch-start]').forEach(node=>{node.textContent=draftDuration(Date.now()-Date.parse(node.dataset.batchStart))+(node.dataset.batchLabel||' this batch')});root.querySelectorAll('[data-draft-activity]').forEach(node=>{node.textContent=draftLastEvent(node.dataset.draftActivity)})}
-function draftProgress(job){
-  const p=job.progress||{},phase=p.phase||'generating',total=p.totalPersonas,completed=p.completedPersonas;
+function draftBackoffCause(cause){return cause==='rate-limit'?'a rate limit':cause==='overload'?'the AI being busy':'a connection problem'}
+function draftStatus(job){
+  const p=job.progress||{},phase=p.phase||'generating';
   const provider=job.engine==='chatgpt'?'ChatGPT':job.engine==='claude'?'Claude Code':'Codex';
-  const finishing=phase==='validating'&&(p.validation?.scope==='final'||!p.totalBatches||p.completedBatches===p.totalBatches);
-  const step=phase==='saving'||phase==='checking'?0:finishing?2:1;
+  if(phase==='saving')return 'Saving your latest edits first.';
+  if(phase==='checking')return 'Connecting to '+provider+'.';
+  if(phase==='validating'&&(p.validation?.scope==='final'||!p.totalBatches||p.completedBatches===p.totalBatches))return 'Checking the finished audience.';
+  if(!job.cohort)return job.persona?'Writing the replacement persona.':'Writing your proposal.';
+  const details=Array.isArray(p.batchDetails)?p.batchDetails:[];
+  const waiting=details.find(d=>d.state==='waiting'&&d.wait);
+  if(waiting)return 'Paused briefly after '+draftBackoffCause(waiting.wait.cause)+'. It picks up again on its own.';
+  if(p.batchLimit?.allowed>0)return 'Writing more slowly for now because of '+draftBackoffCause(p.batchLimit.cause)+'.';
+  if(p.retry&&!p.retry.cause)return 'Rewriting a few personas that did not pass the checks.';
+  const active=Array.isArray(p.activeBatches)?p.activeBatches.length:0;
+  if(!p.completedBatches&&!active&&!details.length){
+    if(/waiting/i.test(job.message||''))return 'Planning who is in the audience: paused briefly, it picks up again on its own.';
+    return p.activity==='starting'&&!p.outputChars?'Waiting for '+provider+' to start planning the audience.':'Planning who is in the audience. Personas start arriving after this.';
+  }
+  return active>1?'Writing personas, '+active+' groups at a time.':'Writing personas.';
+}
+function draftDetail(job){
+  const p=job.progress||{},checked=p.completedPersonas;
+  return Number.isFinite(checked)&&job.cohort?(checked?checked.toLocaleString('en-US')+' checked and saved':'None checked yet'):'';
+}
+function draftSlots(job){
+  const p=job.progress||{},total=p.totalPersonas,checked=p.completedPersonas;
+  const counted=Number.isFinite(total)&&Number.isFinite(checked);
+  const written=counted?Math.min(total,checked+(p.phase==='generating'||p.phase==='validating'?p.inFlightPersonas||0:0)):0;
+  const pct=n=>counted&&total>0?Math.min(100,Math.round(n/total*1000)/10):0;
+  const detail=draftDetail(job),activity=p.lastActivityAt?draftLastEvent(p.lastActivityAt):'';
+  return {
+    count:counted?'<strong>'+written.toLocaleString('en-US')+'</strong>of '+total.toLocaleString('en-US')+' personas written':'',
+    estimate:counted?esc(draftEstimate(p)):'',
+    estimateData:counted?JSON.stringify({totalPersonas:total,completedPersonas:checked,totalBatches:p.totalBatches,completedBatches:p.completedBatches,maxConcurrentBatches:p.maxConcurrentBatches,batchDurationsMs:p.batchDurationsMs,completedBatchSizes:p.completedBatchSizes,batchStartedAt:p.batchStartedAt,estimate:p.estimate}):'',
+    written:pct(written),checked:pct(checked),
+    status:esc(draftStatus(job)),
+    detail:esc(detail)+(detail&&activity?' · ':'')+(activity?'<span data-draft-activity="'+attr(p.lastActivityAt)+'">'+esc(activity)+'</span>':''),
+  };
+}
+function draftProgress(job){
+  const p=job.progress||{},slots=draftSlots(job);
+  const provider=job.engine==='chatgpt'?'ChatGPT':job.engine==='claude'?'Claude Code':'Codex';
   const title=job.cohort?'Generating '+plural(job.cohort.size,'persona'):job.persona?'Generating replacement persona':'Preparing your proposal';
-  const active=Array.isArray(p.activeBatches)?p.activeBatches:[],many=active.length>1&&phase==='generating';
-  const batchWords=active.length>1?'batches '+active.slice(0,-1).join(', ')+' and '+active[active.length-1]:'batch '+p.batch;
-  const status=phase==='saving'?'Saving your latest edits':phase==='checking'?'Checking AI connection':finishing?'Checking the complete draft':phase==='validating'?(p.batch?'Checking batch '+p.batch+' of '+p.totalBatches:'Checking the draft'):p.batch?'Generating '+batchWords+' of '+p.totalBatches:job.cohort&&p.totalBatches>1?'Setting up the audience: segments, weights and assumptions, then '+Math.min(p.maxConcurrentBatches||16,p.totalBatches)+' batches run at once':'Creating your draft';
-  const counts=Number.isFinite(total)&&Number.isFinite(completed)?'<div class="draft-metrics"><div class="draft-count"><strong>'+completed.toLocaleString('en-US')+' <span>/ '+total.toLocaleString('en-US')+'</span></strong>accepted'+(p.inFlightPersonas>0&&phase==='generating'?'<span class="draft-inflight">+'+p.inFlightPersonas.toLocaleString('en-US')+' being written'+(many?' across '+active.length+' batches':'')+'</span>':'')+'</div><div class="draft-estimate" data-draft-estimate="'+attr(JSON.stringify({totalPersonas:total,completedPersonas:completed,totalBatches:p.totalBatches,completedBatches:p.completedBatches,maxConcurrentBatches:p.maxConcurrentBatches,batchDurationsMs:p.batchDurationsMs,completedBatchSizes:p.completedBatchSizes,batchStartedAt:p.batchStartedAt,estimate:p.estimate}))+'">'+draftEstimate(p)+'</div></div><progress aria-label="Personas accepted" value="'+completed+'" max="'+total+'"></progress>':'';
-  const steps=['Prepare','Generate','Final checks'].map((label,i)=>'<li data-state="'+(i<step?'done':i===step?'current':'pending')+'"'+(i===step?' aria-current="step"':'')+'>'+(i<step?'✓ ':String(i+1)+'. ')+label+'</li>').join('');
-  const activity=phase==='validating'?'Validating draft structure':phase==='saving'?'Saving before generation':phase==='checking'?'Connecting':p.activity==='receiving'?(p.outputSource==='cli-stdout'?'CLI output arriving':'Response arriving'):p.activity==='generating'?'Model working':p.activity==='starting'?'Request started':'Request in progress';
-  const retryNote=p.retry?'<p class="draft-progress-note" role="status">Batch '+p.retry.batch+(p.retry.cause?' hit '+draftBackoffCause(p.retry.cause)+' and is being tried again':' did not pass its checks and is being tried again')+' (attempt '+p.retry.attempt+' of '+p.retry.maxAttempts+').</p>':p.retries>0?'<p class="draft-progress-note">'+p.retries+(p.retries===1?' batch was':' batches were')+' tried again after a failed check or a rate limit.</p>':'';
-  const live='<div class="draft-live"><div class="draft-live-heading"><p class="draft-progress-status" role="status">'+esc(status)+(p.batchSize&&!many?' · '+plural(p.batchSize,'persona'):'')+'</p>'+(p.batchStartedAt?'<span class="draft-batch-time" data-batch-start="'+attr(p.batchStartedAt)+'"'+(many?' data-batch-label="'+attr(' on the longest-running batch')+'"':'')+'>'+esc(draftDuration(Date.now()-Date.parse(p.batchStartedAt)))+(many?' on the longest-running batch':' this batch')+'</span>':'')+'</div><p class="draft-activity"><span class="draft-activity-dot" aria-hidden="true"></span>'+esc(many?active.length+' batches running at once · '+activity:activity)+(p.outputChars>0?' <span class="draft-output">· '+p.outputChars.toLocaleString('en-US')+' characters received</span>':'')+(p.lastActivityAt?'<span class="draft-last-event" data-draft-activity="'+attr(p.lastActivityAt)+'">'+esc(draftLastEvent(p.lastActivityAt))+'</span>':'')+'</p>'+draftLimitNote(p)+retryNote+draftBatchLines(p)+(p.inFlightPersonas>0?'<p class="draft-progress-note">Personas being written come from partial output. They count as accepted only after their batch passes its checks.</p>':'')+'</div>';
-  return '<section class="panel draft-progress" aria-label="Generation progress"><div class="draft-progress-heading"><div><h2>'+esc(title)+'</h2><p class="draft-provider">'+esc(provider+(job.model?' · '+job.model:''))+'</p></div><div class="draft-progress-actions">'+(job.startedAt?'<span class="draft-elapsed" data-draft-start="'+attr(job.startedAt)+'">'+esc(draftElapsed(job.startedAt))+'</span>':'')+draftCancelButton(job)+'</div></div>'+counts+'<ol class="draft-steps" aria-label="Generation steps">'+steps+'</ol>'+live+(S.localPollError?'<div class="warning draft-progress-error" role="alert">Status connection interrupted. Generation may still be running.<br>'+esc(S.localPollError)+'<br><button class="button" data-act="assistant-status-retry">Reconnect progress</button></div>':'')+'</section>';
+  const counts=slots.count?'<div class="draft-metrics"><p class="draft-count" data-slot="count">'+slots.count+'</p><p class="draft-estimate" data-slot="estimate" data-draft-estimate="'+attr(slots.estimateData)+'">'+slots.estimate+'</p></div><div class="draft-bar" role="progressbar" aria-label="Personas written" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+slots.written+'" data-slot="bar"><span class="draft-bar-written" style="width:'+slots.written+'%"></span><span class="draft-bar-checked" style="width:'+slots.checked+'%"></span></div>':'';
+  const shape=(slots.count?'counts':'plain')+(S.localPollError?' error':'');
+  return '<section class="panel draft-progress" aria-label="Generation progress" data-job="'+attr(job.id||'')+'" data-shape="'+shape+'"><div class="draft-progress-heading"><div><h2>'+esc(title)+'</h2><p class="draft-provider">'+esc(provider+(job.model?' · '+job.model:''))+'</p></div><div class="draft-progress-actions">'+(job.startedAt?'<span class="draft-elapsed" data-draft-start="'+attr(job.startedAt)+'">'+esc(draftElapsed(job.startedAt))+'</span>':'')+draftCancelButton(job)+'</div></div>'+counts+'<p class="draft-progress-status" role="status" data-slot="status">'+slots.status+'</p><p class="draft-progress-detail" data-slot="detail">'+slots.detail+'</p>'+(S.localPollError?'<div class="warning draft-progress-error" role="alert">Status connection interrupted. Generation may still be running.<br>'+esc(S.localPollError)+'<br><button class="button" data-act="assistant-status-retry">Reconnect progress</button></div>':'')+'</section>';
+}
+/* Updates every visible readout for this job in place. Returns false when a full render is needed. */
+function patchDraftProgress(job){
+  if(job?.status!=='running'||typeof document.createElement!=='function')return false;
+  const nodes=[...root.querySelectorAll('.draft-progress')];
+  if(!nodes.length||nodes.some(node=>node.dataset.job!==String(job.id||'')))return false;
+  const template=document.createElement('template');template.innerHTML=draftProgress(job);
+  const next=template.content.firstElementChild;
+  if(!next||nodes.some(node=>node.dataset.shape!==next.dataset.shape))return false;
+  for(const node of nodes)next.querySelectorAll('[data-slot]').forEach(slot=>{
+    const current=node.querySelector('[data-slot="'+slot.dataset.slot+'"]');if(!current)return;
+    if(slot.dataset.slot==='bar'){current.setAttribute('aria-valuenow',slot.getAttribute('aria-valuenow'));[...slot.children].forEach((bar,i)=>{if(current.children[i]&&current.children[i].style.width!==bar.style.width)current.children[i].style.width=bar.style.width});return}
+    if(slot.dataset.draftEstimate!==undefined)current.dataset.draftEstimate=slot.dataset.draftEstimate;
+    if(current.innerHTML!==slot.innerHTML)current.innerHTML=slot.innerHTML;
+  });
+  return true;
+}
+function updateDraftClocks(){
+  const set=(node,text)=>{if(node.textContent!==text)node.textContent=text};
+  root.querySelectorAll('[data-draft-estimate]').forEach(node=>{try{set(node,draftEstimate(JSON.parse(node.dataset.draftEstimate)))}catch{}});
+  root.querySelectorAll('[data-draft-start]').forEach(node=>set(node,draftElapsed(node.dataset.draftStart)));
+  root.querySelectorAll('[data-draft-activity]').forEach(node=>set(node,draftLastEvent(node.dataset.draftActivity)));
 }
 `;

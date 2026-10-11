@@ -55,11 +55,24 @@ behaviors:
       reference: 2026-10-11 jev-polls project chat, Giulio, on Who answers during generation
   - id: progress-fits-panel
     description: >-
-      Generation progress is one readout (title, count, stages, one live status line) that fits
+      Generation progress is one readout (title, count, estimate, bar, one plain status line and one muted detail line) that fits
       its panel without scrolling, with no detail tabs.
     source:
       text: this ui should not be scrollable
       reference: 2026-10-11 jev-polls project chat, Giulio, on cohort generation progress
+  - id: progress-steady
+    description: >-
+      While a generation runs, status polls update the readout's numbers and text in place; the
+      page and the step panel are not redrawn, nothing slides or fades, and the readout keeps the
+      same height. Its text uses the app's normal type and contrast, with no link-coloured, bold or
+      explainer lines.
+    details: >-
+      Before, each one-second poll re-rendered the whole page, replaying the step panel's slide-in
+      animation (21 replays in 21 s in a browser check); after, none. The panel animates only when it
+      first opens.
+    source:
+      text: it flashes almost like a glitch and still very unclear progress report
+      reference: 2026-10-11 jev-polls project thread, Giulio, with a screenshot of the Who answers progress; followed by "very thin and messy text"
   - id: reachable-actions
     description: Navigation, save actions, and page controls stay easy to reach.
   - id: responsive-no-clipping
