@@ -6,7 +6,7 @@ import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promise
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { ChildProcessWithoutNullStreams, SpawnOptionsWithoutStdio } from 'node:child_process';
-import { BatchRejected, LocalAgentError, backoffCause, batchSizes, LocalAgentService, checkCohortBatch, checkCohortSetup, checkPersonaBatch, segmentSequence, claudeEnvelope, takeAudienceRequests, type LocalAgentJob, type LocalAgentSpawner } from '../src/local-agent.js';
+import { BatchRejected, LocalAgentError, backoffCause, batchSizes, LocalAgentService, checkCohortBatch, checkCohortSetup, checkPersonaBatch, concurrentBatches, personasFromTable, segmentSequence, claudeEnvelope, takeAudienceRequests, type LocalAgentJob, type LocalAgentSpawner } from '../src/local-agent.js';
 import type { ChatGptDraftClient } from '../src/chatgpt.js';
 import type { Cohort, DistributionTargetBucket, Persona } from '../src/types.js';
 import { validateWorkspaceDocument } from '../src/workspace-store.js';
@@ -108,7 +108,7 @@ test('cohort progress reports connection checking, the setup call, and only acce
     const data = requestData(input);
     assert.equal(data.cohortMetadata.id, 'customers'); assert.equal(data.originalCohortMetadata, undefined);
     assert.deepEqual(data.segmentMix, { customers: 10 });
-    assert.match(input, /Return personas as an array of exactly 10 persona objects/); assert.doesNotMatch(input, /Include source IDs and syntheticFields/);
+    assert.match(input, /rows holds exactly 10 arrays, one per persona/); assert.doesNotMatch(input, /Include source IDs and syntheticFields/);
   }
   replies[2]!.resolve(cohortBatchResponse(batchInputs[1]));
   await waitFor(() => service.get(job.id)!.progress!.completedBatches === 1);
@@ -466,14 +466,14 @@ test('ChatGPT cohort drafts batch 100 and 101 personas with a custom model and r
   assert.ok(calls.every(call => call.model === 'gpt-6.1-sol'));
   assert.match(calls[0]?.input ?? '', /Set up cohort customers before its 100 personas are written/);
   assert.match(calls[1]?.input ?? '', /batch 1 of 10/);
-  assert.match(calls[4]?.input ?? '', /exactly 10 persona objects/);
+  assert.match(calls[4]?.input ?? '', /rows holds exactly 10 arrays/);
 
   const hundredOne = await terminal(service, service.start({ engine: 'chatgpt', model: 'gpt-6.1-sol', prompt: 'Create one hundred and one adults', document: empty, revision: 13, cohort: { id: 'customers', size: 101 } }));
   assert.equal(hundredOne.status, 'completed');
   assert.equal(hundredOne.proposal?.document.cohorts[0]?.personas.length, 101);
   assert.ok(calls.slice(11).every(call => call.model === 'gpt-6.1-sol'));
   assert.equal(calls.length, 11 + 12, 'a setup call, then eleven batches of nine or ten');
-  assert.ok(calls.slice(12).some(call => /exactly 9 persona objects/.test(call.input)));
+  assert.ok(calls.slice(12).some(call => /exactly 9 arrays/.test(call.input)));
   assert.throws(
     () => service.start({ engine: 'chatgpt', model: 'gpt-6.1-sol', prompt: 'Too many', document: empty, revision: 14, cohort: { id: 'customers', size: 20_001 } }),
     (error: unknown) => error instanceof LocalAgentError && error.code === 'INVALID_AGENT_REQUEST',
@@ -1528,27 +1528,74 @@ test('Claude falls back to the single JSON result when the CLI rejects the strea
   assert.equal(seen[0], 'stream-json'); assert.ok(seen.includes('json'));
 });
 
-test('Claude writes persona batches as real JSON at low effort, and drops --effort for a CLI without it', async t => {
+test('Claude writes persona batches as a table on Sonnet with thinking off, and drops --model and --effort for a CLI without them', async t => {
   for (const effortSupported of [true, false]) {
     const root = await setup(t); const batchArgs: string[][] = [];
-    const service = new LocalAgentService({ temporaryRoot: root, spawn: fakeSpawner(async ({ args, child }) => {
+    const service = new LocalAgentService({ temporaryRoot: root, spawn: fakeSpawner(async ({ args, child, options }) => {
       const schema = JSON.parse(args[args.indexOf('--json-schema') + 1]!) as { properties: Record<string, unknown> };
       const reply = JSON.parse(cohortBatchResponse(child.input)) as { documentJson: string };
-      if (!schema.properties.personas) { assert.ok(!args.includes('--effort'), 'the setup call keeps the default effort'); child.stdout.write(JSON.stringify({ type: 'result', is_error: false, structured_output: { documentJson: reply.documentJson, explanation: 'ok' } }) + '\n'); child.finish(); return; }
+      if (!schema.properties.rows) { assert.equal(args[args.indexOf('--model') + 1], 'sonnet', 'the setup call also writes on the audience model'); child.stdout.write(JSON.stringify({ type: 'result', is_error: false, structured_output: { documentJson: reply.documentJson, explanation: 'ok' } }) + '\n'); child.finish(); return; }
       batchArgs.push([...args]);
       if (!effortSupported && args.includes('--effort')) { child.finish(1); return; }
-      // Only the fields that differ between people: the app fills id, weight, sourceIds and syntheticFields.
-      const personas = (JSON.parse(reply.documentJson) as Cohort).personas.map(({ label, segment, age, background, attributes }) => ({ label, segment, age, background, attributes }));
-      child.stdout.write(JSON.stringify({ type: 'result', is_error: false, structured_output: { personas } }) + '\n'); child.finish();
+      // A table of only the fields that differ between people: the app fills id, weight, sourceIds and syntheticFields.
+      const rows = (JSON.parse(reply.documentJson) as Cohort).personas.map(({ label, segment, age, background, attributes }, index) => [index + 1, label, segment, age, background, ...Object.values(attributes)]);
+      const fields = ['position', 'label', 'segment', 'age', 'background', ...Object.keys(proposed.cohorts[0]!.personas[0]!.attributes).map(name => `attributes.${name}`)];
+      assert.equal(options.env?.MAX_THINKING_TOKENS, '0', 'persona batches turn thinking off');
+      child.stdout.write(JSON.stringify({ type: 'result', is_error: false, structured_output: { fields, rows } }) + '\n'); child.finish();
     }) }); t.after(() => service.close());
     const done = await terminal(service, service.start({ engine: 'claude', prompt: 'Create 30 adults', revision: 0, document: empty, cohort: { id: 'customers', size: 30 } }));
     assert.equal(done.status, 'completed', done.message); assert.equal(done.progress!.completedPersonas, 30);
     const persona = done.proposal!.document.cohorts[0]!.personas[0]!;
     assert.equal(persona.id, 'persona-00001'); assert.equal(persona.weight, 1); assert.deepEqual(persona.sourceIds, []); assert.deepEqual(persona.syntheticFields, ['label', 'age', 'background', 'attributes']);
-    assert.equal(batchArgs[0]![batchArgs[0]!.indexOf('--effort') + 1], 'low');
+    assert.equal(batchArgs[0]![batchArgs[0]!.indexOf('--effort') + 1], 'low'); assert.equal(batchArgs[0]![batchArgs[0]!.indexOf('--model') + 1], 'sonnet');
+    assert.deepEqual(persona.attributes, proposed.cohorts[0]!.personas[0]!.attributes);
     if (effortSupported) assert.equal(batchArgs.length, 3);
-    else assert.equal(batchArgs.filter(args => !args.includes('--effort')).length, 3, 'each batch is drafted again without --effort');
+    else assert.equal(batchArgs.filter(args => !args.includes('--effort') && !args.includes('--model')).length, 3, 'each batch is drafted again without --model and --effort');
   }
+});
+
+test('Claude Code persona batch processes start during the setup call, hold the prompt head, and stop when unused', async t => {
+  for (const cancel of [false, true]) {
+    const root = await setup(t); const invocations: Invocation[] = []; const setupGate = deferred<void>();
+    const isBatch = (args: readonly string[]) => args.includes('--json-schema') && (JSON.parse(args[args.indexOf('--json-schema') + 1]!) as { properties: Record<string, unknown> }).properties.rows !== undefined;
+    const service = new LocalAgentService({ temporaryRoot: root, spawn: fakeSpawner(async ({ args, child }) => {
+      const reply = JSON.parse(cohortBatchResponse(child.input)) as { documentJson: string };
+      if (!isBatch(args)) { await setupGate.promise; child.stdout.write(JSON.stringify({ type: 'result', is_error: false, structured_output: { documentJson: reply.documentJson, explanation: 'ok' } }) + '\n'); child.finish(); return; }
+      const fields = ['position', 'label', 'segment', 'age', 'background', ...Object.keys(proposed.cohorts[0]!.personas[0]!.attributes).map(name => `attributes.${name}`)];
+      const rows = (JSON.parse(reply.documentJson) as Cohort).personas.map(({ label, segment, age, background, attributes }, index) => [index + 1, label, segment, age, background, ...Object.values(attributes)]);
+      child.stdout.write(JSON.stringify({ type: 'result', is_error: false, structured_output: { fields, rows } }) + '\n'); child.finish();
+    }, invocations) }); t.after(() => service.close());
+    const job = service.start({ engine: 'claude', prompt: 'Create 30 adults', revision: 0, document: empty, cohort: { id: 'customers', size: 30 } });
+    await waitFor(() => invocations.filter(({ args }) => isBatch(args)).length === 3);
+    const warm = invocations.filter(({ args }) => isBatch(args));
+    assert.ok(warm.every(({ child, options }) => child.input.length > 0 && !child.input.includes('Request data') && options.env?.MAX_THINKING_TOKENS === '0'), 'a warm process holds only the prompt head while setup runs');
+    if (cancel) {
+      service.cancel(job.id);
+      await waitFor(() => warm.every(({ child }) => child.signals.length > 0));
+      setupGate.resolve(); continue;
+    }
+    setupGate.resolve();
+    const done = await terminal(service, job);
+    assert.equal(done.status, 'completed', done.message); assert.equal(done.progress!.completedPersonas, 30);
+    assert.equal(invocations.filter(({ args }) => isBatch(args)).length, 3, 'every batch ran in a warm process');
+    assert.ok(warm.every(({ child }) => child.input.includes('Write batch') && child.input.includes('Request data')), 'each warm process received the rest of its prompt');
+  }
+});
+
+test('a persona table becomes persona objects, and a row with the wrong number of values is rejected', () => {
+  assert.deepEqual(personasFromTable({ fields: ['position', 'label', 'age', 'attributes.city', 'income'], rows: [[1, 'Ana', 34, 'Lyon', 'middle']] }), [{ label: 'Ana', age: 34, attributes: { city: 'Lyon', income: 'middle' } }]);
+  assert.equal(personasFromTable({ fields: ['label', 'age'], rows: [['Ana', 34], ['Ben']] }), 'row 2 has 1 values for 2 fields');
+  assert.match(String(personasFromTable({ rows: [] })), /not a persona table/);
+});
+
+test('Claude Code runs more persona batches at once on a larger machine, within sixteen and 48', t => {
+  const saved = process.env.JEV_CONCURRENT_BATCHES; t.after(() => { if (saved === undefined) delete process.env.JEV_CONCURRENT_BATCHES; else process.env.JEV_CONCURRENT_BATCHES = saved; });
+  delete process.env.JEV_CONCURRENT_BATCHES;
+  const claude = concurrentBatches('claude'); assert.ok(claude >= 16 && claude <= 48, String(claude));
+  assert.equal(concurrentBatches('codex'), 16);
+  process.env.JEV_CONCURRENT_BATCHES = '200'; assert.equal(concurrentBatches('claude'), 48);
+  process.env.JEV_CONCURRENT_BATCHES = '24'; assert.equal(concurrentBatches('codex'), 24);
+  assert.equal(batchSizes(1000, 48).length, 48); assert.equal(batchSizes(1000).length, 48);
 });
 
 test('a persona batch may leave id, weight, sources and synthetic fields to the app, and cited sources are still checked', () => {
