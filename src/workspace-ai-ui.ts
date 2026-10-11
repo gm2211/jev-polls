@@ -84,7 +84,7 @@ function draftProviderChoice(){
   if(!draftReady())S.draftProviderInline=true;
   if(!S.draftProviderInline)return '';
   const options=draftingProviderOptions(),provider=S.localEngines?.find(e=>e.id===S.localEngine),busy=S.localLoading||S.localStarting||S.localJob?.status==='running';
-  return '<fieldset class="draft-provider" data-inline-provider '+(busy?'disabled':'')+'>'+select('localEngine',options.length?options:[{value:S.localEngine,label:'Checking providers…'}],S.localEngine,'Which AI drafts them?','inline')+draftControlsBody(provider)+'<div class="toolbar"><button type="button" class="button small" data-act="assistant-refresh" '+(S.localLoading?'disabled':'')+'>Refresh connections</button></div></fieldset>';
+  return '<fieldset class="draft-provider" data-inline-provider '+(busy?'disabled':'')+'>'+select('localEngine',options.length?options:[{value:S.localEngine,label:'Checking providers…'}],S.localEngine,'Which AI drafts them?','inline')+draftControlsBody(provider)+(provider?.available?'':'<div class="toolbar"><button type="button" class="button small" data-act="assistant-refresh" '+(S.localLoading?'disabled':'')+'>Refresh connections</button></div>')+'</fieldset>';
 }
 function aiSettingsContent(){
   const options=draftingProviderOptions();

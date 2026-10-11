@@ -3080,9 +3080,11 @@ test('a selected step opens a closable panel with one row of tabs marking unfini
   assert.match(html(), /<aside class="flow-inspector round-panel"/);
   assert.deepEqual(tabs(), ['question', 'answers', 'cohort', 'settings'], 'a lone step shows the three guided stops and Settings; Inputs appears once there is something to connect');
   assert.match(html(), /data-act="flow-panel-close" aria-label="Close step panel"/);
+  assert.doesNotMatch(html(), /class="button primary study-next"/, 'the panel footer carries the one Next while a guided stop is open');
+  assert.match(html(), /class="button primary" data-act="flow-next"/);
   act(null, { dataset: { act: 'flow-inspector', section: 'answers' } });
   assert.match(html(), /data-inspector-tab="answers"/);
-  assert.match(html(), /Later steps can use/);
+  assert.doesNotMatch(html(), /Later steps can use/, 'outputs are listed under Inputs, not on the Options tab');
   assert.doesNotMatch(html(), /name="setupPrompt"/, 'the question field stays on its own tab');
   const stage = S.doc.pipelines[0].stages[0]; const q: any = Object.values(stage.questions)[0];
   const label = q.label; q.label = ''; render();
