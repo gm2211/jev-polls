@@ -189,6 +189,18 @@ behaviors:
     source:
       text: needs a cohort assigned that I can create right there and then and navigate back to pipeline
       reference: jev-polls project thread "Rethink the main user flow", Giulio, 2026-10-09
+  - id: orphaned-audience-draft
+    description: >-
+      An audience draft whose step was deleted or replaced never blocks Who answers: the notice
+      says its step no longer exists and offers "Use draft for this step" or Discard version.
+    details: >-
+      Using it moves the draft (generated people kept) to the step on screen, so accepting it
+      assigns the audience there; with no question step on screen it opens in the cohort library.
+      Previously "Review existing draft" failed with "The original step no longer exists" and
+      Who answers stayed locked.
+    source:
+      text: error
+      reference: jev-polls project thread, Giulio, 2026-10-11 (screenshot of the locked Who answers tab)
   - id: review-run-to-fix
     description: >-
       Superseded by single-next-action: the header no longer counts unfinished steps ("Review run

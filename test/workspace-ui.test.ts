@@ -1615,6 +1615,40 @@ test('inline cohort adoption preserves generated work if original step was remov
   assert.match(browser.element('toast').textContent, /original step no longer exists/);
 });
 
+test('an audience draft whose step was replaced moves to the step on screen instead of dead-ending', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, act, adoptCohortProposal, setupCohortPicker } = browser.client;
+  S.tab = 'studies'; S.pipelineId = 'study'; S.stageId = 'panel';
+  act(null, { dataset: { act: 'new-cohort' } }); await settle();
+  const candidate = { ...structuredClone(S.doc.cohorts[0]), id: 'new-audience', name: 'New audience' };
+  S.localJob = { id: 'orphan-job', status: 'completed', revision: S.revision, cohort: { id: candidate.id, prompt: 'Gamers', size: 1 }, proposal: { document: { cohorts: [candidate] }, explanation: 'Synthetic assumptions' } };
+  const p = S.doc.pipelines[0];
+  p.stages[0].id = 'replacement'; S.stageId = 'replacement'; S.cohortComposer = false;
+  const picker = setupCohortPicker(p, p.stages[0]);
+  assert.match(picker, /step that no longer exists/);
+  assert.match(picker, /Use draft for this step/);
+  assert.match(picker, /data-act="assistant-discard"/);
+  act(null, { dataset: { act: 'cohort-resume' } });
+  assert.doesNotMatch(browser.element('app').innerHTML, /original step no longer exists/);
+  assert.deepEqual(JSON.parse(JSON.stringify(S.cohortInlineTarget)), { pipelineId: 'study', stageId: 'replacement' });
+  assert.equal(S.localJob.id, 'orphan-job', 'the generated people are kept');
+  assert.equal(JSON.parse(browser.storage.get('jev-local-job-target:http://127.0.0.1:4180:existing-research')!).stageId, 'replacement');
+  adoptCohortProposal();
+  assert.equal(p.cohorts[p.stages[0].cohort], candidate.id);
+  assert.equal(S.stageId, 'replacement'); assert.equal(S.localJob, null);
+});
+
+test('an orphaned audience draft opened away from any step goes to the cohort library', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, act } = browser.client;
+  S.tab = 'studies'; S.pipelineId = 'study'; S.stageId = 'panel';
+  act(null, { dataset: { act: 'new-cohort' } }); await settle();
+  S.localJob = { id: 'orphan-job', status: 'completed', cohort: { id: 'new-audience', prompt: 'Gamers', size: 1 } };
+  S.doc.pipelines[0].stages = []; S.stageId = null;
+  act(null, { dataset: { act: 'cohort-resume' } });
+  assert.equal(S.tab, 'cohorts'); assert.equal(S.cohortInlineTarget, null); assert.equal(S.cohortComposer, true);
+});
+
 test('phase cohort entry returns to the same pipeline stage while direct cohort entry clears that context', async () => {
   const browser = browserHarness(); await settle();
   const { S, act } = browser.client;
