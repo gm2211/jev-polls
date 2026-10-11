@@ -30,8 +30,8 @@ behaviors:
     description: >-
       A cohort of more than 25 personas first gets its details (segments, weights, sources,
       assumptions) from one setup call that writes no personas; then every persona batch can start at
-      once, sixteen at a time, each writing only personas, and persona IDs and order follow batch
-      position, never completion order.
+      once, sixteen at a time (up to 48 on Claude Code, by the machine's cores and memory), each
+      writing only personas, and persona IDs and order follow batch position, never completion order.
     details: >-
       Changed 2026-10-11 (second time that day) after a 1,000-person run still showed about 7 to 18
       minutes left. Measured with Claude Code on 400 personas: before, a 10-persona first batch ran
@@ -74,6 +74,33 @@ behaviors:
     source:
       text: also still too slow, please have a deep investigation thread to explain why it takes this long to generate 1000 json things
       reference: 2026-10-11 jev-polls project thread, Giulio
+  - id: audience-speed
+    description: >-
+      On Claude Code, audience generation (the setup call and persona batches) runs on Sonnet at low
+      effort with thinking off, persona batches come back as a table (fields named once, one row of
+      values per persona), up to 48 batches run at once by machine size, and the first round's batch
+      processes are started during the setup call so they need only the rest of their prompt.
+    details: >-
+      Added 2026-10-11 after "this is still too slow - it should take no longer than 30 seconds" (a
+      1,000-person run took 1 min 59 s). Writing speed per stream is fixed by the model (Sonnet about
+      150 to 170 output tokens/s, Opus about 117), so the levers are fewer tokens and more streams.
+      Opus took 3 min 16 s against Sonnet's 1 min 52 s with the same code, and Haiku thought for
+      1,700 to 6,000 tokens a batch with no way to turn it off, so Sonnet is pinned for audience calls
+      (a CLI or account without --model or --effort is asked again without both, and later calls skip
+      them). MAX_THINKING_TOKENS=0 cut thinking to about 250 tokens a batch. The table cut a 21-person
+      batch from 3,921 to 2,634 written tokens. 48 Sonnet streams at once hit no rate limit, but each
+      Claude Code batch is its own process (about 240 MB and 1.6 CPU-seconds), so concurrency is four
+      per core and half the memory, between 16 and 48 (JEV_CONCURRENT_BATCHES overrides it); other
+      engines keep sixteen until their limits are measured. Warm processes start at niceness 10 so
+      they do not slow the setup call, and unused ones are stopped when the job ends or is
+      cancelled. The setup reply is kept short (one-sentence segments and description, at most four
+      assumptions), since every persona waits for it. Measured on a 4-core, 16 GB container with
+      1,000 people: 1 min 59 s before; 62.6 s with 48 at once; 55.2 s with warm processes (setup
+      15.6 s, then 12.6 s median for 48 CLIs to send their request, then about 19 s writing). The
+      remaining CLI time is CPU contention, so a machine with more cores is faster.
+    source:
+      text: this is still too slow - it should take no longer than 30 seconds
+      reference: 2026-10-11 jev-polls project thread, Giulio
   - id: slow-batch-second-request
     description: >-
       A batch attempt running far longer than the accepted batches gets one second, identical request;
@@ -83,8 +110,8 @@ behaviors:
       speed and took 3 min 24 s while its fifteen peers took about 50 s, holding up the finish. A
       second request starts only after three batches are accepted, once an attempt has run 1.5 times
       the median accepted time per persona for its size and at least 30 s, only in a place the
-      concurrency window leaves free (so the bulk of a job never sends more than sixteen requests at
-      once), and never while a rate limit, overload or connection error has narrowed the window. The
+      concurrency window leaves free (so the bulk of a job never sends more requests at once than its
+      concurrency), and never while a rate limit, overload or connection error has narrowed the window. The
       batch shows as hedged, its progress is the further of the two requests, and the server logs a
       cohort-batch-hedged line. The setup call and every first batch also check distribution targets
       the way the final check does: a real setup reply named a target field "country" instead of
@@ -104,8 +131,8 @@ behaviors:
       the same request is sent again after an exponential wait with jitter (about 5 s, then 20 s,
       then 60 s for a batch's later attempts, each 20% either way) and without a rejection note.
       Failed checks and unreadable replies keep the immediate retry with the reason. While any such
-      error is live, no more than four batches are started at once; the limit lifts back to sixteen
-      after two accepted batches in a row, and another such error restarts that count. The attempt
+      error is live, no more than four batches are started at once; the limit lifts back to the job's
+      full concurrency after two accepted batches in a row, and another such error restarts that count. The attempt
       limit is still three, so only the first two waits occur before a batch fails the job. A waiting
       batch shows "waiting 20 s after a rate limit (attempt 2 of 3)" and the panel says "4 batches at
       once while the AI is rate-limited", so the displayed wait and window are the real ones.
