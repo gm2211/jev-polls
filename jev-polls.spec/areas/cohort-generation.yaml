@@ -68,7 +68,9 @@ behaviors:
       (77.9 s to 43.6 s for the same batch). After: 190,000 output tokens and 1 min 52 s for 1,000
       Sonnet personas, about 28 s per batch. Codex keeps the documentJson string because its output
       schema needs named properties. A CLI that rejects --effort is asked again without it, and later
-      batches skip it. The setup call keeps the default effort, since it decides segments and weights.
+      batches skip it. The setup call keeps the default effort, since it decides segments and weights;
+      its instructions now spell out the distribution-target bucket rules, because a real Opus setup
+      reply gave a numeric bucket a value, failed its check, and cost a serial 29 s retry.
     source:
       text: also still too slow, please have a deep investigation thread to explain why it takes this long to generate 1000 json things
       reference: 2026-10-11 jev-polls project thread, Giulio
