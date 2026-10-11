@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createProvider, ProviderError } from '../src/provider.js';
+import { validateEvaluation } from '../src/engine.js';
 import type { EvaluationRequest } from '../src/types.js';
 
 const request: EvaluationRequest = {
@@ -178,6 +179,7 @@ test('TypeSafe accepts a 7-level score whose mean drifts from two-decimal rounde
   // Rounded probabilities give a mean of 4.01; an unrounded mean of 4.08 is within rounding drift.
   const result = await createProvider('typesafe', { apiKey: 'fake-test-key', fetch: respond(4.08) }).evaluate(scaleRequest);
   assert.equal((result.answers.scale as { score: number }).score, 4.08);
+  validateEvaluation(result, scaleRequest.questions);
   await assert.rejects(createProvider('typesafe', { apiKey: 'fake-test-key', fetch: respond(4.5) }).evaluate(scaleRequest), (error: unknown) => error instanceof ProviderError && error.responseIssue === 'score_mean');
 });
 
