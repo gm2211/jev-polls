@@ -2918,7 +2918,7 @@ test('one breadcrumb trail covers creation, cohorts, personas, settings and live
   act(null,{dataset:{act:'back-cohorts'}});S.cohortComposer=true;S.cohortTarget='new-id';trail(['Projects','Existing research','Cohorts','New cohort']);
   act(null,{dataset:{act:'project-settings'}});trail(['Projects','Existing research','Project settings']);
   S.snap.runs=[{id:'run-1',projectId:S.projectId,pipelineName:'Original study',status:'running',message:'Working',createdAt:new Date().toISOString(),liveMembers:[]}];
-  act(null,{dataset:{act:'tab',tab:'runs'}});trail(['Projects','Existing research','Runs','Original study']);
+  act(null,{dataset:{act:'tab',tab:'runs'}});render();assert.match(browser.element('app').innerHTML,/data-full="true"/,'an active run takes the whole window');assert.doesNotMatch(browser.element('app').innerHTML,/app-sidebar|workspace-breadcrumbs/);
   act(null,{dataset:{act:'live-close'}});trail(['Projects','Existing research','Runs']);
   assert.equal(S.doc.cohorts[0].personas[0].background,'Unsaved background');assert.equal(S.dirty,true);
   S.doc.projects.find((p:any)=>p.id===S.projectId).pipelineIds=[];
@@ -2967,7 +2967,7 @@ test('run review explains real questions, data flow, conditions and cohort termi
   pipeline.stages[0].when = { stage: 'panel', question: 'answer', metric: 'margin', op: 'lt', value: 0.1 };
   S.plan = { ...runReviewPlan(), stages: [{ id: 'panel', label: 'First question', kind: 'poll', dependsOn: [], cohort: 'audience', profiles: 24, repeats: 2, requests: 48 }] };
   const html = review();
-  for (const text of ['Ask cohort', 'Starts first', 'Original cohort · 24 personas × 2', '<strong>48</strong> requests', 'What this step asks and reads', 'Which option fits?', 'Choose an option.', 'a weighted share for each option', 'lead margin less than 0.1', '&lt;unsafe&gt; game brief']) assert.ok(html.includes(text), text);
+  for (const text of ['Ask the audience', 'Starts first', 'Original cohort · 24 personas × 2', '<strong>48</strong> requests', 'What this step asks and reads', 'Which option fits?', 'Choose an option.', 'a weighted share for each option', 'lead margin less than 0.1', '&lt;unsafe&gt; game brief']) assert.ok(html.includes(text), text);
   assert.doesNotMatch(html, /24 profiles|<unsafe>|data-section-panel/);
   assert.equal(html.replace(/<p class="review-rule">.*?<\/p>/, '').match(/Which option fits\?/g)!.length, 1, 'the question text appears once per step');
   pipeline.stages.push({ id: 'combined', label: 'Combine', kind: 'aggregate', dependsOn: ['panel'], inputs: [{ stage: 'panel', question: 'answer', weight: 2 }], outputQuestion: 'combined_answer' });
@@ -3421,4 +3421,31 @@ test('list pages carry no Save button, Projects offers a New project tile, and R
     assert.doesNotMatch(html(), /data-act="save"/, tab + ' list has no Save');
   }
   assert.doesNotMatch(html(), /data-act="refresh"/);
+});
+
+test('a run takes the whole window: no sidebar or page chrome, Esc and Back return, and phones keep the controls', async () => {
+  const browser=browserHarness();await settle();const {S,act,render}=browser.client;
+  S.tab='studies';S.pipelineId='study';S.stageId='panel';S.studyLibrary=false;
+  const members=[{stage:'panel',personaId:'a',label:'Ada',repeat:1,status:'running',segment:'Audience',age:30},{stage:'panel',personaId:'b',label:'Bo',repeat:1,status:'queued',segment:'Audience',age:41}];
+  S.snap.runs=[{id:'run-full',projectId:S.projectId,pipelineId:'study',pipelineName:'My study',createdAt:'2026-10-10T12:00:00Z',status:'completed',message:'Done',reportUrl:'/report.html',liveMembers:members}];
+  render();assert.match(browser.element('app').innerHTML,/app-sidebar/,'the study page keeps its sidebar');
+  act(null,{dataset:{act:'live-study-open',id:'run-full'}});
+  let html=browser.element('app').innerHTML;
+  assert.match(html,/class="live-full"/);assert.match(html,/data-full="true"/);
+  assert.doesNotMatch(html,/app-sidebar|workspace-breadcrumbs|study-workspace-header|project-navigation/,'sidebar and header chrome are hidden');
+  assert.match(html,/<h1 tabindex="-1">/);assert.match(html,/data-act="live-back">Back to study/);assert.match(html,/Open report/);
+  const esc={key:'Escape',defaultPrevented:false,prevented:false,preventDefault(){this.prevented=true}};
+  (browser.document as any).querySelector=()=>null;
+  const app=browser.element('app'),querySelector=app.querySelector;
+  app.querySelector=(selector:string)=>selector==='.lv-back'?{click(){act(null,{dataset:{act:'live-back'}})}}:null;
+  browser.listeners.get('keydown')!(esc);app.querySelector=querySelector;
+  assert.equal(S.liveInline,false,'Esc is Back to study');
+  act(null,{dataset:{act:'live-study-open',id:'run-full'}});
+  assert.equal(esc.prevented,true,'Esc is handled by the live view');
+  act(null,{dataset:{act:'live-back'}});
+  assert.equal(S.liveInline,false);html=browser.element('app').innerHTML;
+  assert.match(html,/app-sidebar/);assert.doesNotMatch(html,/data-full="true"/,'Back to study restores the page chrome');
+  // Opened from Runs: Back goes to the study the run belongs to.
+  S.tab='runs';S.liveRunId='run-full';render();html=browser.element('app').innerHTML;
+  assert.match(html,/data-full="true"/);assert.match(html,/data-act="run-open-study" data-id="study">Back to study/);
 });

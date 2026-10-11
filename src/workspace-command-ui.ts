@@ -146,7 +146,7 @@ document.addEventListener('drop',e=>{if(!e.target.closest?.('.draft-drop'))retur
 document.addEventListener('keydown',e=>{
   if((e.metaKey||e.ctrlKey)&&!e.altKey&&!e.shiftKey&&e.key.toLowerCase()==='s'){e.preventDefault();if(S.dirty&&!S.loading)void save();return}
   if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();try{if(commandState.open)commandClose();else commandOpen()}catch(error){fail(error)}return}
-  if(!commandState.open){if(e.key==='Escape'&&commandJobVisible()&&!document.querySelector('dialog[open]')){e.preventDefault();try{flushForms();commandAction('draft-panel-close',{dataset:{}})}catch(error){fail(error)}}return}
+  if(!commandState.open){if(arenaEscape(e))return;if(e.key==='Escape'&&commandJobVisible()&&!document.querySelector('dialog[open]')){e.preventDefault();try{flushForms();commandAction('draft-panel-close',{dataset:{}})}catch(error){fail(error)}}return}
   if(e.key==='Escape'){e.preventDefault();commandClose();return}
   if(e.isComposing)return;
   if(e.target.id==='commandSearch'&&['ArrowDown','ArrowUp','Enter','Home','End'].includes(e.key)){

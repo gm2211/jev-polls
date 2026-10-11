@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runInNewContext } from 'node:vm';
 import { createArenaModel } from '../src/workspace-arena-model.js';
+import { ARENA_CONTROLS_CLIENT } from '../src/workspace-arena-controls.js';
 import { createLiveVotingView, WORKSPACE_LIVE_UI_CLIENT, WORKSPACE_LIVE_UI_CSS } from '../src/workspace-live-ui.js';
 
 const model = createArenaModel();
@@ -134,4 +135,137 @@ test('the serialized browser build renders exactly what the tests see, and style
   assert.match(WORKSPACE_LIVE_UI_CSS, /prefers-reduced-motion:reduce\)\{\.live-voting \*\{animation:none!important;transition:none!important\}/);
   assert.match(WORKSPACE_LIVE_UI_CSS, /\[data-theme=dark\]\{--lv-c0/);
   assert.match(WORKSPACE_LIVE_UI_CSS, /@media\(max-width:900px\)\{\.lv-body\{grid-template-columns:1fr\}/);
+});
+
+// ---- full screen, 14 options, commentary and results --------------------------------------------------------
+
+const fourteen = model.describeQuestions({ pick: { type: 'choice', label: 'Which name?', criteria: Object.fromEntries(Array.from({ length: 14 }, (_, index) => [`o${index}`, { label: `Name ${index}`, description: '' }])) } })[0]!;
+const crowd = (count: number, segments = ['strategy', 'casual'], pick = (index: number): number => index % 14): Member[] => Array.from({ length: count }, (_, index) => {
+  const chosen = pick(index), probabilities = Object.fromEntries(Array.from({ length: 14 }, (_, option) => [`o${option}`, option === chosen ? 0.7 : 0.3 / 13]));
+  return { stage: 'poll', personaId: `p${index}`, label: `P${index}`, segment: segments[index % segments.length]!, age: 30, repeat: 1, status: 'completed' as const, weight: 1, order: index, answers: { pick: { type: 'choice', choice: `o${chosen}`, probabilities } } };
+});
+
+test('the full-screen view carries the question, status strip, back and report actions, and shows every option', () => {
+  const html = view.html(input({ full: true, studyTitle: 'Which name will sell?', reportUrl: '/report.html', backLabel: 'Back to study', backAct: 'live-back' }));
+  assert.match(html, /data-full="true"/);
+  assert.match(html, /<h1 tabindex="-1">Which name will sell\?<\/h1>/);
+  assert.match(html, /data-act="live-back"[^>]*>Back to study<kbd aria-hidden="true">Esc<\/kbd>/);
+  assert.match(html, /<a class="lv-report" href="\/report.html"[^>]*aria-label="Open report \(new tab\)">Open report<\/a>/);
+  assert.match(html, /data-lv="strip"/);
+  assert.doesNotMatch(view.html(input()), /data-full="true"|lv-back|lv-report/, 'the embedded map has no full-screen chrome');
+  const shown = crowd(280), board = model.leaderboard(shown, fourteen);
+  const all = view.boardRows(board, fourteen, 'pick');
+  assert.equal((all.match(/<li class="lv-row"/g) ?? []).length, 14, 'all fourteen options are listed');
+  assert.equal((all.match(/data-hidden="true"/g) ?? []).length, 0);
+  assert.match(all, /<span class="lv-rank" aria-hidden="true">1<\/span>/);
+  assert.match(all, /data-leader="true"/);
+  assert.match(all, /class="lv-pct">\d+\.\d%/, 'one decimal');
+  assert.match(all, /data-p="stripes"|data-p="dots"/, 'later options get a pattern as a second cue');
+});
+
+test('option colours stay apart for a deuteranope and later options also carry a pattern', () => {
+  const simulate = ([r, g, b]: number[]): number[] => {
+    const lin = (c: number): number => { c /= 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+    const gamma = (c: number): number => 255 * (c <= 0.0031308 ? c * 12.92 : 1.055 * c ** (1 / 2.4) - 0.055);
+    const v = [lin(r!), lin(g!), lin(b!)], M = [[0.367322, 0.860646, -0.227968], [0.280085, 0.672501, 0.047413], [-0.011820, 0.042940, 0.968881]];
+    return M.map(row => gamma(Math.max(0, Math.min(1, row[0]! * v[0]! + row[1]! * v[1]! + row[2]! * v[2]!))));
+  };
+  const lab = (rgb: number[]): number[] => {
+    const lin = (c: number): number => { c /= 255; return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4; };
+    const [R, G, B] = rgb.map(lin) as [number, number, number];
+    const f = (t: number): number => t > 0.008856 ? Math.cbrt(t) : 7.787 * t + 16 / 116;
+    const x = f((0.4124 * R + 0.3576 * G + 0.1805 * B) / 0.95047), y = f(0.2126 * R + 0.7152 * G + 0.0722 * B), z = f((0.0193 * R + 0.1192 * G + 0.9505 * B) / 1.08883);
+    return [116 * y - 16, 500 * (x - y), 200 * (y - z)];
+  };
+  const rgb = (hex: string): number[] => [1, 3, 5].map(at => parseInt(hex.slice(at, at + 2), 16));
+  const blocks = [WORKSPACE_LIVE_UI_CSS.match(/:root\{([^}]*)\}/)![1]!, WORKSPACE_LIVE_UI_CSS.match(/\[data-theme=dark\]\{([^}]*)\}/)![1]!];
+  for (const block of blocks) {
+    const colours = Array.from({ length: 14 }, (_, index) => block.match(new RegExp(`--lv-c${index}:(#[0-9a-f]{6})`))![1]!);
+    assert.equal(new Set(colours).size, 14);
+    let closest = Infinity;
+    for (let a = 0; a < 14; a++) for (let b = a + 1; b < 14; b++) {
+      const x = lab(simulate(rgb(colours[a]!))), y = lab(simulate(rgb(colours[b]!)));
+      closest = Math.min(closest, Math.hypot(x[0]! - y[0]!, x[1]! - y[1]!, x[2]! - y[2]!));
+    }
+    assert.ok(closest >= 15, `closest pair under deuteranopia is ΔE ${closest.toFixed(1)}`);
+  }
+  assert.match(WORKSPACE_LIVE_UI_CSS, /\.lv-tile\[data-s=done\]\[data-c="7"\][^{]*\{background-image:(repeating-linear-gradient|radial-gradient)/);
+  assert.equal(model.PALETTE, 14);
+});
+
+test('tiles fill the viewport: a thousand members reach 22px at 1440 by 900 and bigger screens get bigger tiles', () => {
+  const groups = [249, 302, 202, 247];
+  const desktop = model.fitLayout(groups, 1087 - 24, 730 - 28, { max: model.fitCap(1000), header: 22, padding: 8, groupGap: 10 });
+  assert.ok(desktop.tile >= 22 && desktop.fits, `desktop tile ${desktop.tile}`);
+  const large = model.fitLayout(groups, 1900 - 24, 1000 - 28, { max: model.fitCap(1000), header: 22, padding: 8, groupGap: 10 });
+  assert.ok(large.tile > desktop.tile, 'computed from the space, not a fixed step');
+  assert.ok(model.fitLayout([4], 1000, 700, { max: model.fitCap(4) }).tile <= model.fitCap(4));
+});
+
+test('commentary is derived from counts only, replays in order and hits 25, 50, 75 and 100 percent', () => {
+  const shown = crowd(200, ['strategy', 'casual'], index => index < 40 ? 0 : 1);
+  const labels = { strategy: 'Strategy players', casual: 'Casual players' };
+  const lines = model.commentary(shown, fourteen, labels);
+  assert.deepEqual(lines.filter(line => line.kind === 'milestone').map(line => line.n), [50, 100, 150, 200]);
+  assert.match(lines.find(line => line.n === 100 && line.kind === 'milestone')!.text, /^Half of the 200 evaluations are in · Name \d+ leads at \d+(\.\d)?%$/);
+  assert.match(lines.find(line => line.kind === 'lead')!.text, /^Name 0 leads early at/);
+  assert.ok(lines.some(line => /takes the lead/.test(line.text)), 'a lead change is reported');
+  assert.ok(lines.every((line, index) => index === 0 || line.n >= lines[index - 1]!.n), 'lines are in finishing order');
+  assert.deepEqual(model.commentary(model.replayMembers(shown, 120), fourteen, labels), lines.filter(line => line.n <= 120), 'a replay at any point shows the same lines the live run did');
+  assert.ok(model.commentary(shown, undefined).every(line => line.kind === 'milestone' && !line.text.includes(' · ')), 'no question means no invented lead');
+  assert.equal(model.commentary([], fourteen).length, 0);
+  const html = view.newsHtml([...lines].reverse().slice(0, 6).map(line => ({ ...line, time: `vote ${line.n}` })));
+  assert.equal((html.match(/<li /g) ?? []).length, 4, 'only the last four lines are kept');
+  assert.match(html, /<ol data-lv="news"[^>]*><li data-kind="milestone"><time>vote 200<\/time>/, 'newest first, stamped');
+});
+
+test('a finished run turns into results: final ranking, top three per segment and one factual summary line', () => {
+  const shown = crowd(280, ['strategy', 'casual', 'sim'], index => index % 3 === 0 ? 0 : index % 3 === 1 ? 3 : 7);
+  const labels = { strategy: 'Strategy players', casual: 'Casual players', sim: 'Sim players' };
+  const board = model.leaderboard(shown, fourteen), tops = model.segmentTops(shown, fourteen, labels);
+  assert.equal(tops.length, 3);
+  assert.ok(tops.every(entry => entry.top.length === 3));
+  assert.equal(tops[0]!.top[0]!.label, 'Name 0');
+  const summary = model.resultSummary(board, tops);
+  assert.match(summary, /^Name \d+ leads overall at \d+(\.\d)?%, but each segment prefers a different option\.$/);
+  assert.match(model.resultSummary(board, tops.slice(0, 1)), /leads overall at \d+(\.\d)?%\.$/);
+  assert.match(model.resultSummary(board, tops.map(entry => ({ ...entry, top: [{ id: board.leader!, label: '', share: 1 }] }))), /and tops every segment\.$/);
+  assert.equal(model.resultSummary({ rows: [], leader: null, evaluated: 0 }, []), '');
+  const done = view.html(input({ status: 'completed', members: shown, groups: model.groupMembers(shown, 'segment', () => undefined, labels), question: fourteen, board, results: { summary, segments: tops }, full: true }, shown));
+  assert.match(done, /<h3>Final ranking<\/h3>/);
+  assert.match(done, /<section class="lv-results" aria-label="Results"><h3>Results<\/h3><p class="lv-summary">Name \d+ leads overall/);
+  assert.equal((done.match(/class="lv-seg-row"/g) ?? []).length, 3);
+  assert.doesNotMatch(done, /aria-label="Commentary"/, 'results replace the ticker once the run is done');
+  const replaying = view.html(input({ status: 'completed', question: fourteen, board, results: { summary, segments: tops }, replay: { cursor: 10, total: 280, playing: false, speed: 1, ordered: true }, news: [] }, shown));
+  assert.match(replaying, /aria-label="Commentary"/); assert.doesNotMatch(replaying, /lv-results/);
+});
+
+test('motion cues: new tiles brighten for about a second, groups pulse, ranks flash, and reduced motion removes them', () => {
+  assert.match(WORKSPACE_LIVE_UI_CSS, /\.lv-tile\.is-pop\{animation:lv-pop \.4s[^}]*,lv-fresh 1\.2s/);
+  assert.match(WORKSPACE_LIVE_UI_CSS, /\.lv-group\.is-wave\{animation:lv-wave/);
+  assert.match(WORKSPACE_LIVE_UI_CSS, /\.lv-row\.is-moved/);
+  assert.match(WORKSPACE_LIVE_UI_CSS, /transition:transform \.35s cubic-bezier/);
+  assert.match(WORKSPACE_LIVE_UI_CSS, /\.live-voting\[data-full=true\]\{position:fixed;inset:0/);
+  assert.match(WORKSPACE_LIVE_UI_CSS, /max-width:900px\)\{[^@]*\.live-voting\[data-full=true\] \.lv-side\{display:flex/, 'phones stack the leaderboard under the map');
+});
+
+test('leaderboard rows always sit in their rank slot: one row per slot, in board order, whatever moved', () => {
+  const shown = crowd(300, ['a', 'b'], index => (index * 7 + (index > 150 ? 5 : 0)) % 14);
+  for (const cursor of [20, 80, 150, 220, 300]) {
+    const board = model.leaderboard(model.replayMembers(shown, cursor), fourteen);
+    const slots = view.rowSlots(board.rows, board.leader);
+    assert.deepEqual(slots.map(slot => slot.slot), board.rows.map((_, index) => index), 'slot n holds the nth ranked option');
+    assert.equal(new Set(slots.map(slot => slot.slot)).size, board.rows.length, 'no two rows share a slot');
+    assert.deepEqual(slots.map(slot => slot.id), board.rows.map(row => row.id));
+    assert.equal(slots.filter(slot => slot.leader).length, 1);
+    assert.ok(slots.every(slot => !slot.hidden));
+    const html = view.boardRows(board, fourteen, 'pick');
+    board.rows.forEach((row, rank) => assert.match(html, new RegExp(`data-opt="${row.id}"[^>]*data-rank="${rank}"[^>]*style="--rank:${rank};`)));
+  }
+});
+test('the client places rows together at most every 500ms and drops stale placements', () => {
+  const controls = ARENA_CONTROLS_CLIENT;
+  assert.match(controls, /function arenaPlaceRows\(board\)/);
+  assert.match(controls, /now-A\.placedAt>=500/);
+  assert.doesNotMatch(controls.slice(controls.indexOf('for(const row of rows)'), controls.indexOf('const now=lvNow()')), /--rank|dataset\.rank|lv-rank/, 'a poll updates shares only; ranks move in arenaPlaceRows');
 });
