@@ -28,8 +28,14 @@ behaviors:
       is published.
   - id: concurrent-batches
     description: >-
-      The first batch runs alone to set cohort metadata; later batches run with bounded concurrency
-      (six at a time), and persona IDs and order follow batch position, never completion order.
+      The first batch is a small metadata batch that runs alone; later batches run with bounded
+      concurrency (twelve at a time), and persona IDs and order follow batch position, never
+      completion order.
+    details: >-
+      Changed 2026-10-11 from a 25-persona first batch and six concurrent batches. A cohort of up to
+      25 personas is one batch; a larger one opens with a 10-persona batch that sets metadata, so the
+      parallel phase starts after about 40 seconds, then 25-persona batches run twelve at a time. At
+      110 seconds per 25-persona batch, 1,000 personas take about 8 minutes instead of about 15.
   - id: batch-retry
     description: >-
       A batch that fails parsing or checks is retried with the same inputs up to two more times

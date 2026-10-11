@@ -89,7 +89,7 @@ test('cohort progress reports connection checking and only accepted batches befo
   const first = await entered[0]!.promise;
   const starting = service.get(job.id)!.progress!;
   assert.equal(starting.phase, 'generating'); assert.equal(starting.completedPersonas, 0); assert.equal(starting.completedBatches, 0);
-  assert.equal(starting.batch, 1); assert.equal(starting.batchSize, 25); assert.deepEqual(starting.activeBatches, [1]);
+  assert.equal(starting.batch, 1); assert.equal(starting.batchSize, 10); assert.deepEqual(starting.activeBatches, [1]);
   assert.equal(starting.outputChars, 0); assert.equal(starting.activity, 'starting'); assert.equal(starting.validation, undefined);
   assert.equal(starting.lastBatchChecks, undefined);
   assert.ok(Date.parse(starting.generationStartedAt!) >= Date.parse(starting.batchStartedAt!));
@@ -98,12 +98,12 @@ test('cohort progress reports connection checking and only accepted batches befo
   await Promise.all([entered[1]!.promise, entered[2]!.promise]);
   const running = service.get(job.id)!;
   assert.equal(running.status, 'running'); assert.equal(running.proposal, undefined);
-  assert.equal(running.progress?.completedPersonas, 25); assert.equal(running.progress?.completedBatches, 1);
+  assert.equal(running.progress?.completedPersonas, 10); assert.equal(running.progress?.completedBatches, 1);
   assert.deepEqual(running.progress?.activeBatches, [2, 3]); assert.equal(running.progress?.batch, 2);
-  assert.match(running.message, /batches 2 and 3 of 3 \(25\/51 personas checked\)/);
+  assert.match(running.message, /batches 2 and 3 of 3 \(10\/51 personas checked\)/);
   assert.equal(running.progress?.validation, undefined);
   assert.ok(running.progress?.lastBatchChecks?.includes('Expected cohort ID and batch size'));
-  assert.equal(running.progress?.batchDurationsMs?.length, 1); assert.deepEqual(running.progress?.completedBatchSizes, [25]);
+  assert.equal(running.progress?.batchDurationsMs?.length, 1); assert.deepEqual(running.progress?.completedBatchSizes, [10]);
   assertJobTimes(running, false);
   replies[2]!.resolve(cohortBatchResponse(await entered[2]!.promise));
   await new Promise(resolve => setTimeout(resolve, 20));
@@ -116,7 +116,7 @@ test('cohort progress reports connection checking and only accepted batches befo
   assert.equal(completed.progress?.completedBatches, 3);
   assert.deepEqual(completed.proposal?.document.cohorts[0]?.personas.map(persona => persona.id).slice(24, 27), ['persona-00025', 'persona-00026', 'persona-00027']);
   assert.equal(completed.proposal?.document.cohorts[0]?.personas[50]?.label, 'Persona 51');
-  assert.deepEqual(completed.progress?.completedBatchSizes, [25, 1, 25]);
+  assert.deepEqual(completed.progress?.completedBatchSizes, [10, 16, 25]);
   assert.equal(completed.progress?.batchDurationsMs?.length, 3);
   assert.ok(completed.progress?.batchDurationsMs?.every(duration => duration >= 0));
   assert.equal(completed.progress?.validation?.scope, 'final');
@@ -153,8 +153,8 @@ test('provider activity reports response receipt without inventing completed per
   replies[0]!.resolve(cohortBatchResponse(first));
   const second = await entered[1]!.promise;
   const next = service.get(job.id)!;
-  assert.equal(next.progress!.completedPersonas, 25); assert.equal(next.progress!.outputChars, 0);
-  assert.equal(next.progress!.outputTokens, undefined); assert.equal(next.progress!.batchSize, 5);
+  assert.equal(next.progress!.completedPersonas, 10); assert.equal(next.progress!.outputChars, 0);
+  assert.equal(next.progress!.outputTokens, undefined); assert.equal(next.progress!.batchSize, 20);
   assert.equal(next.progress!.activity, 'starting'); assert.equal(next.progress!.validation, undefined);
   assert.equal(next.progress!.latestAccepted!.length, 3);
   assert.deepEqual(Object.keys(next.progress!.latestAccepted![0]!).sort(), ['age', 'id', 'label', 'segment']);
@@ -171,7 +171,7 @@ test('accepted batch timings stay bounded and pair with their actual persona cou
   const completed = await terminal(service, service.start({ engine: 'chatgpt', model: 'draft-model', prompt: 'Create 501 adults', revision: 0, document: empty, cohort: { id: 'customers', size: 501 } }));
   assert.equal(completed.status, 'completed'); assert.equal(completed.progress!.completedPersonas, 501);
   assert.equal(completed.progress!.batchDurationsMs!.length, 20);
-  assert.deepEqual(completed.progress!.completedBatchSizes, [...Array.from({ length: 19 }, () => 25), 1]);
+  assert.deepEqual([...completed.progress!.completedBatchSizes!].sort((a, b) => a - b), [16, ...Array.from({ length: 19 }, () => 25)]);
   assert.ok(completed.progress!.batchDurationsMs!.every(duration => Number.isFinite(duration) && duration >= 0));
 });
 
@@ -209,7 +209,7 @@ test('failed and cancelled progress retains checked batches and never counts inv
     t.after(() => service.close());
     const job = service.start({ engine: 'chatgpt', model: 'draft-model', prompt: 'Create 30 adults', revision: 3, document: empty, cohort: { id: 'customers', size: 30 } });
     const input = await entered.promise;
-    assert.equal(service.get(job.id)?.progress?.completedPersonas, 25);
+    assert.equal(service.get(job.id)?.progress?.completedPersonas, 10);
     let cancelledSnapshot: LocalAgentJob | undefined;
     if (outcome === 'cancelled') cancelledSnapshot = service.cancel(job.id);
     // The failure response is syntactically valid, but contains only one of five required personas.
@@ -219,7 +219,7 @@ test('failed and cancelled progress retains checked batches and never counts inv
     const result = service.get(job.id)!;
     if (outcome === 'cancelled') assert.deepEqual(result, cancelledSnapshot, 'late provider output must not alter cancelled progress or timestamps');
     assert.equal(result.status, outcome); assert.equal(result.progress?.phase, outcome);
-    assert.equal(result.progress?.completedPersonas, 25);
+    assert.equal(result.progress?.completedPersonas, 10);
     assert.equal(result.proposal, undefined);
     assert.equal(result.progress?.completedBatches, 1); assertJobTimes(result, true);
   }
@@ -452,16 +452,16 @@ test('ChatGPT cohort drafts batch 100 and 101 personas with a custom model and r
   assert.equal(hundred.proposal?.document.cohorts[0]?.personas.length, 100);
   assert.equal(hundred.proposal?.document.cohorts[0]?.generationPrompt, 'Create one hundred adults');
   assert.equal(hundred.proposal?.document.cohorts[0]?.personas[99]?.id, 'persona-00100');
-  assert.equal(calls.slice(0, 4).length, 4);
-  assert.ok(calls.slice(0, 4).every(call => call.model === 'gpt-6.1-sol'));
-  assert.match(calls[0]?.input ?? '', /batch 1 of 4/);
+  assert.equal(calls.slice(0, 5).length, 5);
+  assert.ok(calls.slice(0, 5).every(call => call.model === 'gpt-6.1-sol'));
+  assert.match(calls[0]?.input ?? '', /batch 1 of 5/);
   assert.match(calls[3]?.input ?? '', /exactly 25 new personas/);
 
   const hundredOne = await terminal(service, service.start({ engine: 'chatgpt', model: 'gpt-6.1-sol', prompt: 'Create one hundred and one adults', document: empty, revision: 13, cohort: { id: 'customers', size: 101 } }));
   assert.equal(hundredOne.status, 'completed');
   assert.equal(hundredOne.proposal?.document.cohorts[0]?.personas.length, 101);
-  assert.ok(calls.slice(4).every(call => call.model === 'gpt-6.1-sol'));
-  assert.match(calls[8]?.input ?? '', /exactly 1 new personas/);
+  assert.ok(calls.slice(5).every(call => call.model === 'gpt-6.1-sol'));
+  assert.match(calls[9]?.input ?? '', /exactly 16 new personas/);
   assert.throws(
     () => service.start({ engine: 'chatgpt', model: 'gpt-6.1-sol', prompt: 'Too many', document: empty, revision: 14, cohort: { id: 'customers', size: 20_001 } }),
     (error: unknown) => error instanceof LocalAgentError && error.code === 'INVALID_AGENT_REQUEST',
@@ -500,7 +500,7 @@ test('cohort batch failures and cancellation never publish partial proposals', a
   } as ChatGptDraftClient });
   const job = cancelling.start({ engine: 'chatgpt', model: 'gpt-6.1-sol', prompt: 'Create 30 adults', document: empty, revision: 2, cohort: { id: 'customers', size: 30 } });
   await secondBatch;
-  assert.match(cancelling.get(job.id)?.message ?? '', /25\/30 personas/);
+  assert.match(cancelling.get(job.id)?.message ?? '', /10\/30 personas/);
   assert.equal(cancelling.get(job.id)?.proposal, undefined);
   assert.equal(cancelling.cancel(job.id)?.status, 'cancelled');
   await cancelling.close();
@@ -661,7 +661,7 @@ test('targeted cohort regeneration never publishes partial quotas after later pr
   let started!: () => void; const ready = new Promise<void>(resolve => { started = resolve; }); let cancelCalls = 0;
   const cancelled = new LocalAgentService({ chatgpt: nativeDraft((input, signal) => { cancelCalls++; if (cancelCalls === 1) return targetedBatchResponse(input); started(); return new Promise(resolve => signal!.addEventListener('abort', () => resolve(targetedBatchResponse(input)), { once: true })); }) });
   const job = cancelled.start({ ...personaRequest, persona: undefined, document, cohort: { id: 'customers', size: 30 } }); await ready;
-  assert.match(cancelled.get(job.id)!.message, /25\/30 personas/); cancelled.cancel(job.id); await cancelled.close();
+  assert.match(cancelled.get(job.id)!.message, /10\/30 personas/); cancelled.cancel(job.id); await cancelled.close();
   assert.equal(cancelled.get(job.id)?.status, 'cancelled'); assert.equal(cancelled.get(job.id)?.proposal, undefined); assert.equal(cancelCalls, 2);
 });
 
@@ -984,20 +984,39 @@ function countingDraft(options: { size?: number; hold?: (batch: number, attempt:
 const batchRequest = (size: number) => ({ engine: 'chatgpt' as const, model: 'draft-model', prompt: `Create ${size} adults`, revision: 1, document: empty, cohort: { id: 'customers', size } });
 async function waitFor(check: () => boolean) { for (let i = 0; i < 400 && !check(); i++) await new Promise(resolve => setTimeout(resolve, 5)); assert.ok(check(), 'condition was not met in time'); }
 
-test('batches after the first run concurrently up to the limit and the first batch runs alone', async t => {
+test('a small first batch runs alone, then batches run twelve at a time', async t => {
   let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
   const { state, client } = countingDraft({ hold: async batch => { if (batch > 1) await gate; } });
   const service = new LocalAgentService({ chatgpt: client }); t.after(() => service.close());
-  const job = service.start(batchRequest(25 * 10));
-  await waitFor(() => state.running === 6);
-  assert.deepEqual(state.calls, [1, 2, 3, 4, 5, 6, 7], 'batch 1 ran alone, then six started together');
+  const job = service.start(batchRequest(1000));
+  assert.equal(job.progress?.totalBatches, 41, 'one 10-persona batch and forty 25-persona batches');
+  await waitFor(() => state.running === 12);
+  assert.deepEqual(state.calls, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], 'batch 1 ran alone, then twelve started together');
   await new Promise(resolve => setTimeout(resolve, 30));
-  assert.equal(state.running, 6, 'no more than six run at once');
+  assert.equal(state.running, 12, 'no more than twelve run at once');
   const progress = service.get(job.id)!.progress!;
-  assert.equal(progress.maxConcurrentBatches, 6); assert.deepEqual(progress.activeBatches, [2, 3, 4, 5, 6, 7]); assert.equal(progress.completedBatches, 1);
+  assert.equal(progress.maxConcurrentBatches, 12); assert.deepEqual(progress.activeBatches, [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
+  assert.equal(progress.completedBatches, 1); assert.equal(progress.completedPersonas, 10);
+  assert.match(service.get(job.id)!.message, /batches 2, 3.* and 13 of 41 \(10\/1000 personas checked\)/);
   release();
   const done = await terminal(service, job);
-  assert.equal(done.status, 'completed'); assert.equal(state.peak, 6); assert.equal(done.progress?.completedPersonas, 250);
+  assert.equal(done.status, 'completed'); assert.equal(state.peak, 12); assert.equal(done.progress?.completedPersonas, 1000);
+  assert.equal(done.progress?.completedBatches, 41);
+});
+
+test('cohorts of 25 or fewer personas are one batch and larger ones open with ten', async t => {
+  const sizes = new Map<number, number[]>();
+  const client = nativeDraft(input => { const { batch } = requestData(input); sizes.set(sizes.size, [batch.number, batch.total, batch.size, batch.firstPosition]); return cohortBatchResponse(input); });
+  const service = new LocalAgentService({ chatgpt: client }); t.after(() => service.close());
+  for (const size of [1, 25]) {
+    sizes.clear();
+    const done = await terminal(service, service.start(batchRequest(size)));
+    assert.equal(done.status, 'completed'); assert.deepEqual([...sizes.values()], [[1, 1, size, 1]]);
+  }
+  sizes.clear();
+  const done = await terminal(service, service.start(batchRequest(36)));
+  assert.equal(done.status, 'completed'); assert.equal(done.proposal!.document.cohorts[0]!.personas.length, 36);
+  assert.deepEqual([...sizes.values()].sort((a, b) => a[0]! - b[0]!), [[1, 3, 10, 1], [2, 3, 25, 11], [3, 3, 1, 36]]);
 });
 
 test('persona order and IDs follow position even when batches finish out of order', async t => {
@@ -1038,8 +1057,8 @@ test('cancelling stops every in-flight concurrent batch and starts no more', asy
   let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
   const { state, client } = countingDraft({ hold: async batch => { if (batch > 1) await gate; } });
   const service = new LocalAgentService({ chatgpt: client }); t.after(() => service.close());
-  const job = service.start(batchRequest(25 * 12));
-  await waitFor(() => state.running === 6);
+  const job = service.start(batchRequest(25 * 20));
+  await waitFor(() => state.running === 12);
   assert.equal(service.cancel(job.id)?.status, 'cancelled');
   await service.close();
   release();

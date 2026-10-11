@@ -61,8 +61,17 @@ const OUTPUT_BYTES = 1_000_000;
 const TIMEOUT_MS = 240_000;
 const MAX_JOBS = 20;
 const PERSONAS_PER_BATCH = 25;
+/** The first batch of a larger cohort is small: it only has to establish the metadata, so the parallel phase starts sooner. */
+const FIRST_BATCH_PERSONAS = 10;
 /** Batches after the first run this many provider calls at once. */
-const CONCURRENT_BATCHES = 6;
+const CONCURRENT_BATCHES = 12;
+/** Cohorts of at most PERSONAS_PER_BATCH are one batch; larger ones open with a small metadata batch, then full batches. */
+function batchCount(size: number): number { return size <= PERSONAS_PER_BATCH ? 1 : 1 + Math.ceil((size - FIRST_BATCH_PERSONAS) / PERSONAS_PER_BATCH); }
+function batchSpan(size: number, index: number): { offset: number; size: number } {
+  if (size <= PERSONAS_PER_BATCH) return { offset: 0, size };
+  const offset = index === 0 ? 0 : FIRST_BATCH_PERSONAS + (index - 1) * PERSONAS_PER_BATCH;
+  return { offset, size: Math.min(index === 0 ? FIRST_BATCH_PERSONAS : PERSONAS_PER_BATCH, size - offset) };
+}
 /** A failed batch is retried this many more times before the whole generation fails. */
 const BATCH_RETRIES = 2;
 const MAX_BATCH_TIMINGS = 20;
@@ -368,7 +377,7 @@ export class LocalAgentService {
     }
     while (this.jobs.size >= MAX_JOBS) this.jobs.delete(this.jobs.keys().next().value!);
     const startedAt = new Date().toISOString();
-    const progress: LocalAgentProgress = { phase: 'checking', ...(parsed.cohort ? { completedPersonas: 0, totalPersonas: parsed.cohort.size, completedBatches: 0, totalBatches: Math.ceil(parsed.cohort.size / PERSONAS_PER_BATCH) } : parsed.persona ? { completedPersonas: 0, totalPersonas: 1 } : {}) };
+    const progress: LocalAgentProgress = { phase: 'checking', ...(parsed.cohort ? { completedPersonas: 0, totalPersonas: parsed.cohort.size, completedBatches: 0, totalBatches: batchCount(parsed.cohort.size) } : parsed.persona ? { completedPersonas: 0, totalPersonas: 1 } : {}) };
     const job: LocalAgentJob = { ...(parsed.projectId ? { projectId: parsed.projectId } : {}), id: randomUUID(), engine: parsed.engine, revision: parsed.revision, status: 'running', message: 'Checking your AI connection…', startedAt, updatedAt: startedAt, progress, ...(parsed.engine === 'chatgpt' ? { model: parsed.model } : {}), ...(parsed.options ? { options: { pipelineId: parsed.options.pipelineId, stageId: parsed.options.stageId, questionId: parsed.options.questionId } } : {}), ...(parsed.persona ? { persona: parsed.persona } : {}), ...(parsed.material !== undefined && parsed.materialName ? { materialName: parsed.materialName } : {}), ...(parsed.cohort ? { cohort: { ...parsed.cohort, prompt: parsed.prompt } } : {}) };
     const entry: Entry = { public: job, aborts: new Set(), slots: new Map(), cancelled: false, settled: false, ...(parsed.command ? { command: true } : {}) };
     this.jobs.set(job.id, entry);
@@ -678,13 +687,13 @@ export class LocalAgentService {
     let firstExplanation = '';
     let stopped = false;
     let nextBatch = 1;
-    const batches = Math.ceil(request.size / PERSONAS_PER_BATCH);
+    const batches = batchCount(request.size);
     const baseDocument = original
       ? { ...input.document, cohorts: input.document.cohorts.map(cohort => cohort.id === request.id ? { ...cohort, personas: [] } : cohort) }
       : input.document;
     const originalPlaceholderBytes = original ? Buffer.byteLength(JSON.stringify({ ...original, personas: [] })) : 0;
     const unchangedBytes = Buffer.byteLength(JSON.stringify(baseDocument)) - originalPlaceholderBytes + (original ? 0 : (baseDocument.cohorts.length ? 1 : 0));
-    const batchSizeOf = (batchIndex: number) => Math.min(PERSONAS_PER_BATCH, request.size - batchIndex * PERSONAS_PER_BATCH);
+    const batchSizeOf = (batchIndex: number) => batchSpan(request.size, batchIndex).size;
     const batchList = (numbers: number[]) => numbers.length < 2 ? `batch ${numbers[0]}` : `batches ${numbers.slice(0, -1).join(', ')} and ${numbers[numbers.length - 1]}`;
 
     // Reports the batches in flight. Counts of accepted personas only change when a batch passes its checks.
@@ -701,7 +710,7 @@ export class LocalAgentService {
     };
 
     const attemptBatch = async (batchIndex: number): Promise<void> => {
-      const offset = batchIndex * PERSONAS_PER_BATCH;
+      const offset = batchSpan(request.size, batchIndex).offset;
       const batchSize = batchSizeOf(batchIndex);
       // Retries reuse these exact inputs.
       const recentExamples = recent.slice(-10).map(({ label, background, segment }) => ({ label: label.slice(0, 80), background: background.slice(0, 240), segment }));
