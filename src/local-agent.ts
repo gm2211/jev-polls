@@ -13,7 +13,7 @@ import { cohortSchema, jsonSchema, parseCohort } from './schema.js';
 import { MAX_COHORT_PERSONAS, MAX_WORKSPACE_BYTES } from './limits.js';
 import { validateWorkspaceDocument } from './workspace-store.js';
 import type { Cohort, Persona } from './types.js';
-import { createCohortInsights, getPersonaFieldValue, matchesDistributionBucket } from './cohort-insights.js';
+import { createCohortInsights, getPersonaFieldValue, matchesDistributionBucket, validateTargets } from './cohort-insights.js';
 import type { WorkspaceDocument } from './workspace-types.js';
 
 export type LocalAgentEngine = 'codex' | 'claude' | 'chatgpt' | ByosEngine;
@@ -55,6 +55,8 @@ export interface BatchDetail {
   contentStreamed: boolean; startedAt: string;
   /** Present while the batch waits before its next attempt; attempt is then the attempt about to start. */
   wait?: { seconds: number; cause: BackoffCause };
+  /** True once this attempt fell far behind accepted batches and a second, identical request for it was started; the first reply wins. */
+  hedged?: boolean;
 }
 export interface AudienceStep { pipelineId: string; stageId: string }
 /**
@@ -83,7 +85,7 @@ export type LocalAgentCommandResult =
   | { kind: 'draft'; target: 'project' | 'cohort' | 'study'; prompt: string; destination?: string; name?: string };
 export interface LocalAgentInput { projectId?: string; engine: LocalAgentEngine; model?: string; prompt: string; revision: number; document: WorkspaceDocument; cohort?: { id: string; size: number; step?: AudienceStep }; persona?: { cohortId: string; personaId: string }; options?: { pipelineId: string; stageId: string; questionId: string; material?: string }; material?: string; materialName?: string; command?: boolean; commandTargets?: CommandTarget[] }
 export type LocalAgentSpawner = (command: string, args: readonly string[], options: SpawnOptionsWithoutStdio) => ChildProcessWithoutNullStreams;
-export interface LocalAgentOptions { chatgpt?: ChatGptDraftClient; byos?: Pick<ByosConnections, 'engines' | 'generate'>; spawn?: LocalAgentSpawner; timeoutMs?: number; probeTimeoutMs?: number; maxOutputBytes?: number; temporaryRoot?: string; /** Receives one structured line for every failed batch attempt and failed job. The workspace server writes them to stderr as JSON lines. */ log?: (line: Record<string, unknown>) => void; /** Waits before a retry after a rate limit. Resolves early when the signal aborts. Tests pass a fake. */ sleep?: (ms: number, signal: AbortSignal) => Promise<void>; /** Jitter source in [0, 1). */ random?: () => number }
+export interface LocalAgentOptions { chatgpt?: ChatGptDraftClient; byos?: Pick<ByosConnections, 'engines' | 'generate'>; spawn?: LocalAgentSpawner; timeoutMs?: number; probeTimeoutMs?: number; maxOutputBytes?: number; temporaryRoot?: string; /** Receives one structured line for every failed batch attempt and failed job. The workspace server writes them to stderr as JSON lines. */ log?: (line: Record<string, unknown>) => void; /** Waits before a retry after a rate limit. Resolves early when the signal aborts. Tests pass a fake. */ sleep?: (ms: number, signal: AbortSignal) => Promise<void>; /** Jitter source in [0, 1). */ random?: () => number; /** Shortest time a batch attempt runs before a second request for it may start (default 30 s). Tests pass 0. */ hedgeMinMs?: number; /** How often running batches are compared with accepted ones (default 2 s). */ hedgeCheckMs?: number }
 export class LocalAgentError extends Error {
   constructor(readonly code: 'INVALID_AGENT_REQUEST' | 'AGENT_BUSY' | 'AGENT_SERVICE_CLOSED', message: string) { super(message); }
 }
@@ -147,6 +149,18 @@ const BACKOFF_MS = [5_000, 20_000, 60_000];
 const BACKOFF_JITTER = 0.2;
 /** While such an error is live, no more than this many batches run at once. */
 const BACKOFF_WINDOW = 4;
+/**
+ * A batch attempt that runs this many times longer than accepted batches of its size (per persona, median) gets a second,
+ * identical request, and whichever reply arrives first is checked; the other is stopped. Measured: one batch of a
+ * 400-person run streamed at a quarter of the usual speed and took 3 min 24 s while its fifteen peers took about 50 s.
+ */
+const HEDGE_FACTOR = 1.5;
+/** Accepted batches needed before a running batch is compared with them. */
+const HEDGE_AFTER_ACCEPTED = 3;
+const HEDGE_MIN_MS = 30_000;
+const HEDGE_CHECK_MS = 2_000;
+/** Provider slots of second requests are offset from batch slots so their streamed output is kept apart. */
+const HEDGE_SLOT_OFFSET = 1_000_000;
 /** Accepted batches in a row that lift the window back to CONCURRENT_BATCHES. */
 const RECOVERY_SUCCESSES = 2;
 const defaultSleep = (ms: number, signal: AbortSignal): Promise<void> => new Promise(resolve => {
@@ -418,8 +432,13 @@ function failureDetail(error: unknown): { reason: string; excerpt: string } {
   return { reason: error instanceof Error && error.message ? error.message.slice(0, 200) : 'an unexpected error', excerpt: '' };
 }
 export interface CohortBatchExpectation { id: string; size: number; /** Cohort details every batch after the first must copy exactly. */ metadata?: Record<string, unknown> }
-/** Cohort details a batch's personas build on: unique sources and segments, a positive weight, and segment sources that exist. */
-function checkCohortMetadata(candidate: Pick<Cohort, 'sources' | 'segments'>, excerpt: string): void {
+/** Cohort details a batch's personas build on: unique sources and segments, a positive weight, segment sources that exist, and distribution targets the final cohort check accepts. */
+function checkCohortMetadata(candidate: Pick<Cohort, 'sources' | 'segments' | 'distributionTargets'>, excerpt: string): void {
+  // Checked here, not only in the final whole-cohort check, so a bad target is retried at once instead of failing the job after every batch was paid for.
+  if (candidate.distributionTargets) {
+    try { validateTargets(candidate.distributionTargets); }
+    catch (error) { throw new BatchRejected(`the distribution targets are invalid: ${error instanceof Error ? error.message.slice(0, 160) : 'unreadable'}`, excerpt); }
+  }
   const sourceIds = new Set(candidate.sources.map(source => source.id));
   if (sourceIds.size !== candidate.sources.length) throw new BatchRejected('two sources share an id', excerpt);
   if (new Set(candidate.segments.map(segment => segment.id)).size !== candidate.segments.length) throw new BatchRejected('two segments share an id', excerpt);
@@ -475,7 +494,7 @@ export function checkCohortSetup(documentJson: string, id: string): Record<strin
   const parsed = cohortMetadataSchema.safeParse(details);
   if (!parsed.success) throw new BatchRejected(zodReason(parsed.error), excerptOf(documentJson));
   if (parsed.data.id !== id) throw new BatchRejected(`the cohort id is “${parsed.data.id}”, not “${id}”`, excerptOf(documentJson));
-  checkCohortMetadata(parsed.data as Pick<Cohort, 'sources' | 'segments'>, excerptOf(documentJson));
+  checkCohortMetadata(parsed.data as Pick<Cohort, 'sources' | 'segments' | 'distributionTargets'>, excerptOf(documentJson));
   return Object.fromEntries(Object.entries(parsed.data).filter(([, value]) => value !== undefined));
 }
 /**
@@ -587,6 +606,8 @@ export class LocalAgentService {
   private readonly logLine: (line: Record<string, unknown>) => void;
   private readonly sleep: (ms: number, signal: AbortSignal) => Promise<void>;
   private readonly random: () => number;
+  private readonly hedgeMinMs: number;
+  private readonly hedgeCheckMs: number;
   private closed = false;
   private status?: { at: number; value: LocalAgentAvailability };
   private probing?: Promise<LocalAgentAvailability>;
@@ -602,6 +623,8 @@ export class LocalAgentService {
     this.logLine = options.log ?? (() => undefined);
     this.sleep = options.sleep ?? defaultSleep;
     this.random = options.random ?? Math.random;
+    this.hedgeMinMs = Math.max(0, options.hedgeMinMs ?? HEDGE_MIN_MS);
+    this.hedgeCheckMs = Math.max(1, options.hedgeCheckMs ?? HEDGE_CHECK_MS);
   }
 
   async availability(): Promise<LocalAgentAvailability> {
@@ -755,7 +778,7 @@ export class LocalAgentService {
     return { outputChars: slots.reduce((sum, slot) => sum + slot.chars, 0), outputTokens: tokens.length ? tokens.reduce((sum, slot) => sum + slot.tokens!, 0) : undefined };
   }
 
-  private command(engine: LocalAgentEngine, args: string[], cwd: string | undefined, input: string, timeoutMs: number, maxBytes: number, entry?: Entry, captureStderr = false, slot = 0, stream: 'raw' | 'claude-events' = 'raw'): Promise<ProcessResult> {
+  private command(engine: LocalAgentEngine, args: string[], cwd: string | undefined, input: string, timeoutMs: number, maxBytes: number, entry?: Entry, captureStderr = false, slot = 0, stream: 'raw' | 'claude-events' = 'raw', signal?: AbortSignal): Promise<ProcessResult> {
     // A stream-json run prints the reply as deltas, again in the assistant message and again in the result, wrapped in events: a 25-persona batch measured 545 KB against the 1,000 KB limit. Its stdout gets more room than the reply it carries.
     if (stream === 'claude-events') maxBytes *= STREAM_EVENT_ROOM;
     return new Promise(resolve => {
@@ -767,12 +790,12 @@ export class LocalAgentService {
       const stop = () => { if (done) return; limited = true; terminate(child); killTimer ??= setTimeout(() => { terminate(child, 'SIGKILL'); finish(null, false); }, 1000); killTimer.unref(); };
       const timer = setTimeout(() => { timedOut = true; stop(); }, timeoutMs); timer.unref();
       const finish = (code: number | null, missing: boolean) => {
-        if (done) return; done = true; clearTimeout(timer); if (killTimer) clearTimeout(killTimer); this.children.delete(child); entry?.aborts.delete(stop);
+        if (done) return; done = true; clearTimeout(timer); if (killTimer) clearTimeout(killTimer); this.children.delete(child); entry?.aborts.delete(stop); signal?.removeEventListener('abort', stop);
         const result = { code, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8'), missing, limited, timedOut };
         dumpCliCall(entry?.public.id, engine, slot, input, result);
         resolve(result);
       };
-      entry?.aborts.add(stop);
+      entry?.aborts.add(stop); signal?.addEventListener('abort', stop, { once: true });
       child.stdout.on('data', (data: Buffer) => { bytes += data.length; if (bytes > maxBytes) { stop(); return; } stdout.push(Buffer.from(data)); if (entry && !done && !entry.cancelled) {
         let text = stdoutDecoder.write(data); let tokens: number | undefined;
         if (stream === 'claude-events') {
@@ -790,7 +813,7 @@ export class LocalAgentService {
       child.once('close', code => finish(code, false));
       child.stdin.on('error', () => { /* Broken pipes are reported through exit status, never raw diagnostics. */ });
       child.stdin.end(input);
-      if (entry?.cancelled || this.closed) { terminate(child); stop(); }
+      if (entry?.cancelled || this.closed || signal?.aborted) { terminate(child); stop(); }
     });
   }
 
@@ -1012,7 +1035,11 @@ export class LocalAgentService {
     const results: Cohort['personas'][] = [];
     const segmentCounts = new Map<string, number>();
     const recent: Cohort['personas'] = [];
-    const running = new Map<number, { firstStartedAt: string; attempt: number; attemptStartedAt: string; checking: boolean; waiting?: { seconds: number; cause: BackoffCause } }>();
+    const running = new Map<number, { firstStartedAt: string; attempt: number; attemptStartedAt: string; checking: boolean; waiting?: { seconds: number; cause: BackoffCause }; hedged?: boolean }>();
+    // Attempt times of accepted batches per persona, and the batches a second request may still be started for.
+    const acceptedMsPerPersona: number[] = [];
+    const hedges = new Map<number, () => boolean>();
+    let activeHedges = 0;
     let justAccepted: BatchDetail[] = [];
     const retrying = new Map<number, { attempt: number; cause?: BackoffCause }>();
     // Rate limits, overloads and connection errors shrink the window of batches started at once; two accepted batches in a row restore it.
@@ -1048,11 +1075,13 @@ export class LocalAgentService {
     const describe = () => {
       const now = Date.now();
       const batchDetails: BatchDetail[] = [...running.entries()].sort((a, b) => a[0] - b[0]).map(([index, state]) => {
-        const size = batchSizeOf(index); const seen = entry.streamed.get(index) ?? { personas: 0, chars: 0 };
+        const size = batchSizeOf(index); const first = entry.streamed.get(index) ?? { personas: 0, chars: 0 }; const second = entry.streamed.get(HEDGE_SLOT_OFFSET + index);
+        // With two requests for one batch, the batch is as far along as the further one.
+        const seen = second && (second.personas > first.personas || second.personas === first.personas && second.chars > first.chars) ? second : first;
         const contentStreamed = entry.public.progress?.outputSource !== 'response';
         const wrote = seen.chars > 0 || seen.tokens !== undefined && seen.tokens > 0;
         const batchState: BatchState = state.waiting ? 'waiting' : state.checking ? 'checking' : wrote ? 'writing' : state.attempt > 1 ? 'retrying' : 'connecting';
-        return { index: index + 1, size, state: batchState, attempt: state.attempt, maxAttempts: 1 + BATCH_RETRIES, streamingPersonas: contentStreamed ? Math.min(size, seen.personas) : 0, outputChars: seen.chars, ...(seen.tokens !== undefined ? { outputTokens: seen.tokens } : {}), contentStreamed, startedAt: state.attemptStartedAt, ...(state.waiting ? { wait: state.waiting } : {}) };
+        return { index: index + 1, size, state: batchState, attempt: state.attempt, maxAttempts: 1 + BATCH_RETRIES, streamingPersonas: contentStreamed ? Math.min(size, seen.personas) : 0, outputChars: seen.chars, ...(seen.tokens !== undefined ? { outputTokens: seen.tokens } : {}), contentStreamed, startedAt: state.attemptStartedAt, ...(state.waiting ? { wait: state.waiting } : {}), ...(state.hedged ? { hedged: true } : {}) };
       });
       const inFlightPersonas = batchDetails.reduce((sum, detail) => sum + detail.streamingPersonas, 0);
       // Rough pace from partial output: personas written per batch-second, scaled to the batches that will run at once. Superseded by batch timings after two batches finish.
@@ -1084,6 +1113,48 @@ export class LocalAgentService {
 
     // The reason a previous attempt was rejected goes before the request data, which stays last and unchanged.
     const withFeedback = (text: string, note: string) => { const at = text.lastIndexOf('\n\nRequest data:\n'); return note && at >= 0 ? text.slice(0, at) + note + text.slice(at) : text; };
+    // Sends a batch's request and, if hedging starts a second identical one, resolves with whichever reply arrives first and
+    // stops the other. It fails only when every request it started has failed, with the first failure.
+    const raceRequests = (batchIndex: number, prompt: string) => new Promise<{ documentJson: string; explanation: string }>((resolve, reject) => {
+      const controllers: AbortController[] = [];
+      let pending = 0; let settled = false; let firstError: unknown;
+      const finish = () => {
+        settled = true; hedges.delete(batchIndex);
+        for (const controller of controllers) controller.abort();
+        if (controllers.length > 1) { activeHedges--; entry.streamed.delete(HEDGE_SLOT_OFFSET + batchIndex); wakeStarts(); }
+      };
+      const launch = (slot: number) => {
+        const controller = new AbortController(); controllers.push(controller); pending++;
+        this.requestDraft(entry, input, prompt, slot, controller.signal).then(
+          output => { if (settled) return; finish(); resolve(output); },
+          error => { if (settled) return; firstError ??= error; if (--pending === 0) { finish(); reject(firstError); } });
+      };
+      launch(batchIndex);
+      hedges.set(batchIndex, () => {
+        if (settled || controllers.length > 1) return false;
+        activeHedges++; running.get(batchIndex)!.hedged = true;
+        launch(HEDGE_SLOT_OFFSET + batchIndex);
+        return true;
+      });
+    });
+    // A batch attempt running far longer than accepted batches of its size gets a second request, but only in places the
+    // concurrency window leaves free, so the bulk of a job never sends more requests at once, and never while rate-limited.
+    const considerHedges = () => {
+      if (stopped || entry.cancelled || limitCause || acceptedMsPerPersona.length < HEDGE_AFTER_ACCEPTED) return;
+      const sorted = [...acceptedMsPerPersona].sort((a, b) => a - b);
+      const median = sorted[Math.floor(sorted.length / 2)]!;
+      const now = Date.now();
+      for (const [batchIndex, hedge] of hedges) {
+        if (inFlight + activeHedges >= allowed) return;
+        const state = running.get(batchIndex);
+        if (!state || state.checking || state.waiting || state.hedged) continue;
+        const runningMs = now - Date.parse(state.attemptStartedAt);
+        if (runningMs < Math.max(this.hedgeMinMs, median * batchSizeOf(batchIndex) * HEDGE_FACTOR)) continue;
+        if (!hedge()) continue;
+        this.logLine({ event: 'cohort-batch-hedged', jobId: entry.public.id, batch: batchIndex + 1, attempt: state.attempt, runningMs, typicalMs: Math.round(median * batchSizeOf(batchIndex)) });
+        publishRunning();
+      }
+    };
     const attemptBatch = async (batchIndex: number): Promise<void> => {
       const offset = offsets[batchIndex]!;
       const batchSize = batchSizeOf(batchIndex);
@@ -1109,7 +1180,7 @@ export class LocalAgentService {
         running.set(batchIndex, { firstStartedAt, attempt, attemptStartedAt: new Date().toISOString(), checking: false });
         publishRunning({ validation: undefined });
         try {
-          const output = await this.requestDraft(entry, input, withFeedback(prompt, feedback), batchIndex);
+          const output = await raceRequests(batchIndex, withFeedback(prompt, feedback));
           if (entry.cancelled || stopped) throw new StopBatch();
           running.get(batchIndex)!.checking = true;
           this.updateProgress(entry, entry.public.progress?.phase ?? 'generating', entry.public.message, { validation: { scope: 'batch', status: 'checking', checks: [], checkedPersonas: 0 }, ...describe() });
@@ -1134,6 +1205,7 @@ export class LocalAgentService {
             if (unchangedBytes + emptyGeneratedBytes - 2 + serializedPersonaBytes > MAX_WORKSPACE_BYTES) throw new FatalDraftFailure('The completed cohort would exceed the workspace size limit. Use a smaller persona count or reduce saved workspace data.');
           }
           const durationMs = Math.max(0, Date.now() - Date.parse(firstStartedAt));
+          acceptedMsPerPersona.push(Math.max(0, Date.now() - Date.parse(running.get(batchIndex)!.attemptStartedAt)) / batchSize);
           results[batchIndex] = accepted;
           for (const persona of accepted) segmentCounts.set(persona.segment, (segmentCounts.get(persona.segment) ?? 0) + 1);
           recent.push(...accepted);
@@ -1141,6 +1213,7 @@ export class LocalAgentService {
           if (limitCause && ++successStreak >= RECOVERY_SUCCESSES) { allowed = CONCURRENT_BATCHES; limitCause = undefined; successStreak = 0; wakeStarts(); }
           justAccepted = [{ index: batchIndex + 1, size: batchSize, state: 'accepted', attempt, maxAttempts: 1 + BATCH_RETRIES, streamingPersonas: batchSize, outputChars: entry.streamed.get(batchIndex)?.chars ?? 0, contentStreamed: entry.public.progress?.outputSource !== 'response', startedAt: running.get(batchIndex)!.attemptStartedAt }];
           running.delete(batchIndex); retrying.delete(batchIndex); entry.streamed.delete(batchIndex);
+          considerHedges();
           const validation: NonNullable<LocalAgentProgress['validation']> = { scope: 'batch', status: 'passed', checks: ['Required fields and adult ages', 'Expected cohort ID and batch size', ...(originalMetadata || personasOnly ? ['Saved cohort details unchanged'] : []), ...(targets.length ? ['Requested distribution targets'] : []), 'Workspace size limit'], checkedPersonas: batchSize };
           const done = {
             completedPersonas: acceptedPersonas, completedBatches: acceptedBatches,
@@ -1183,7 +1256,7 @@ export class LocalAgentService {
     // A saved cohort being regenerated already has them.
     const setUp = async (): Promise<Record<string, unknown>> => {
       const setupData = { request: input.prompt, selectedProject: projectBrief(input.document, input.projectId), cohortId: request.id, totalPersonas: request.size, batches };
-      const prompt = `${guidance.replace('documentJson is a string containing the COMPLETE workspace document;', 'documentJson is a string containing one cohort object with its details and an empty personas list;')} Set up cohort ${request.id} before its ${request.size} personas are written. Return documentJson as one cohort object matching the cohort schema with "personas": [], and write no personas: give its id, name, description, population, createdAt, sources, segments with weights and weight provenance, and assumptions. The personas are written next, in ${batches} batches at the same time, and every batch uses these details exactly, so include every segment the request names and make each segment description specific enough to write distinct people from. No unrelated workspace data is provided or needed.\n\nCohort schema:\n${JSON.stringify(jsonSchema('cohort'))}\n\nRequest data:\n${JSON.stringify(setupData)}`;
+      const prompt = `${guidance.replace('documentJson is a string containing the COMPLETE workspace document;', 'documentJson is a string containing one cohort object with its details and an empty personas list;')} Set up cohort ${request.id} before its ${request.size} personas are written. Return documentJson as one cohort object matching the cohort schema with "personas": [], and write no personas: give its id, name, description, population, createdAt, sources, segments with weights and weight provenance, and assumptions. Add distributionTargets only for spreads the request asks for, and name each field age, segment or attributes.<attributeName>, never a bare attribute name. The personas are written next, in ${batches} batches at the same time, and every batch uses these details exactly, so include every segment the request names and make each segment description specific enough to write distinct people from. No unrelated workspace data is provided or needed.\n\nCohort schema:\n${JSON.stringify(jsonSchema('cohort'))}\n\nRequest data:\n${JSON.stringify(setupData)}`;
       const startedAt = new Date().toISOString();
       let feedback = ''; let transientFailures = 0;
       for (let attempt = 1; ; attempt++) {
@@ -1220,7 +1293,7 @@ export class LocalAgentService {
     let failure: { error: unknown } | undefined;
     const worker = async () => {
       while (!stopped && !entry.cancelled && nextBatch < batches) {
-        if (inFlight >= allowed) { await new Promise<void>(resolve => startWaiters.push(resolve)); continue; }
+        if (inFlight + activeHedges >= allowed) { await new Promise<void>(resolve => startWaiters.push(resolve)); continue; }
         inFlight++;
         try { await attemptBatch(nextBatch++); }
         catch (error) {
@@ -1229,7 +1302,9 @@ export class LocalAgentService {
         } finally { inFlight--; wakeStarts(); }
       }
     };
-    await Promise.all(Array.from({ length: Math.min(CONCURRENT_BATCHES, batches) }, worker));
+    const hedgeTimer = setInterval(considerHedges, this.hedgeCheckMs); hedgeTimer.unref();
+    try { await Promise.all(Array.from({ length: Math.min(CONCURRENT_BATCHES, batches) }, worker)); }
+    finally { clearInterval(hedgeTimer); }
     if (failure) throw (failure as { error: unknown }).error;
     const personas = results.flat();
     if (entry.cancelled || !metadata || personas.length !== request.size || acceptedBatches !== batches) throw Error();
@@ -1258,7 +1333,8 @@ export class LocalAgentService {
     return { document, explanation: `Prepared ${request.size} synthetic personas in ${batches} batches. ${targets.length ? 'Saved distribution targets matched deterministic whole-person quotas (largest remainder rounding); these are synthetic counts, not observed population data. ' : ''}${firstExplanation}`.slice(0, 5000) };
   }
 
-  private async requestDraft(entry: Entry, input: LocalAgentInput, prompt: string, slot = 0): Promise<{ documentJson: string; explanation: string }> {
+  /** `signal` stops this one request without cancelling the job: the slower of a batch's two requests. */
+  private async requestDraft(entry: Entry, input: LocalAgentInput, prompt: string, slot = 0, signal?: AbortSignal): Promise<{ documentJson: string; explanation: string }> {
     let directory: string | undefined;
     const startedAt = new Date().toISOString();
     entry.slots.set(slot, { chars: 0 });
@@ -1268,7 +1344,7 @@ export class LocalAgentService {
       let payload: unknown;
       if (input.engine === 'chatgpt') {
         if (!this.chatgpt || !input.model) throw Error();
-        const controller = new AbortController(); const abort = () => controller.abort(); entry.aborts.add(abort);
+        const controller = new AbortController(); const abort = () => controller.abort(); entry.aborts.add(abort); signal?.addEventListener('abort', abort, { once: true }); if (signal?.aborted) abort();
         const timer = setTimeout(() => controller.abort(), this.timeoutMs); timer.unref();
         let active = true;
         try {
@@ -1284,10 +1360,10 @@ export class LocalAgentService {
           if (error instanceof DraftFailure) throw error;
           if (entry.cancelled) throw error;
           throw new DraftFailure(chatGptMessage(error));
-        } finally { active = false; clearTimeout(timer); entry.aborts.delete(abort); }
+        } finally { active = false; clearTimeout(timer); entry.aborts.delete(abort); signal?.removeEventListener('abort', abort); }
       } else if (isByosEngine(input.engine)) {
         if (!this.byos || !input.model) throw Error();
-        const controller = new AbortController(); const abort = () => controller.abort(); entry.aborts.add(abort);
+        const controller = new AbortController(); const abort = () => controller.abort(); entry.aborts.add(abort); signal?.addEventListener('abort', abort, { once: true }); if (signal?.aborted) abort();
         const timer = setTimeout(() => controller.abort(), this.timeoutMs); timer.unref();
         let active = true;
         try {
@@ -1301,7 +1377,7 @@ export class LocalAgentService {
           if (error instanceof DraftFailure || entry.cancelled) throw error;
           if (error instanceof ByosConnectionError) throw new DraftFailure(error.message);
           throw error;
-        } finally { active = false; clearTimeout(timer); entry.aborts.delete(abort); }
+        } finally { active = false; clearTimeout(timer); entry.aborts.delete(abort); signal?.removeEventListener('abort', abort); }
       } else {
         directory = await mkdtemp(join(this.temporaryRoot, 'jev-agent-')); await chmod(directory, 0o700);
         const schemaPath = join(directory, 'response-schema.json'); const resultPath = join(directory, 'response.json');
@@ -1315,11 +1391,11 @@ export class LocalAgentService {
           args = ['--print', '--safe-mode', '--restricted', '--tools', '', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--permission-mode', 'dontAsk', '--no-session-persistence', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--json-schema', JSON.stringify(outputSchema)];
         }
         if (entry.cancelled) throw Error();
-        let outcome = await this.command(input.engine, args, directory, prompt, this.timeoutMs, this.maxOutputBytes, entry, false, slot, input.engine === 'claude' ? 'claude-events' : 'raw');
-        if (input.engine === 'claude' && outcome.code !== 0 && !outcome.limited && !outcome.missing && !entry.cancelled && !outcome.stdout.includes('"type":"result"')) {
+        let outcome = await this.command(input.engine, args, directory, prompt, this.timeoutMs, this.maxOutputBytes, entry, false, slot, input.engine === 'claude' ? 'claude-events' : 'raw', signal);
+        if (input.engine === 'claude' && outcome.code !== 0 && !outcome.limited && !outcome.missing && !entry.cancelled && !signal?.aborted && !outcome.stdout.includes('"type":"result"')) {
           // A CLI that rejects the streaming flags still drafts, with its result printed only at the end.
           const plain = args.map((value, index) => args[index - 1] === '--output-format' ? 'json' : value).filter(value => value !== '--verbose' && value !== '--include-partial-messages');
-          outcome = await this.command(input.engine, plain, directory, prompt, this.timeoutMs, this.maxOutputBytes, entry, false, slot);
+          outcome = await this.command(input.engine, plain, directory, prompt, this.timeoutMs, this.maxOutputBytes, entry, false, slot, 'raw', signal);
         }
         if (entry.cancelled) throw Error();
         const tail = outcome.stdout.slice(-EXCERPT_CHARS);

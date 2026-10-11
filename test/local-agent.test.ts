@@ -1064,6 +1064,52 @@ test('each batch is given its share of segments in proportion to the segment wei
   assert.deepEqual(count(segmentSequence([{ id: 'a', weight: 1 }, { id: 'b', weight: 1 }, { id: 'c', weight: 1 }], 2)), { a: 1, b: 1 }, 'fewer people than segments: no one is invented');
 });
 
+test('a batch far behind the accepted ones gets a second request; the first reply wins and the other is stopped', async t => {
+  for (const winner of ['second', 'first'] as const) {
+    const calls = new Map<number, number>(); let aborted = 0; const releaseFirst = deferred<void>(); const lines: Record<string, unknown>[] = [];
+    const client = nativeDraft(async (input, signal) => {
+      const batch = requestData(input).batch?.number as number | undefined;
+      if (batch !== 4) return cohortBatchResponse(input);
+      const call = (calls.get(batch) ?? 0) + 1; calls.set(batch, call);
+      const slow = winner === 'second' ? call === 1 : call === 2;
+      if (slow) return new Promise<string>((resolve, reject) => signal!.addEventListener('abort', () => { aborted++; reject(Error('aborted')); }, { once: true }));
+      if (winner === 'first') await releaseFirst.promise;
+      return cohortBatchResponse(input);
+    });
+    const service = new LocalAgentService({ chatgpt: client, hedgeMinMs: 0, hedgeCheckMs: 5, log: line => lines.push(line) }); t.after(() => service.close());
+    const job = service.start(batchRequest(100));
+    if (winner === 'first') { await waitFor(() => calls.get(4) === 2); assert.equal(stateOf(service, job.id, 4)!.hedged, true); releaseFirst.resolve(); }
+    const done = await terminal(service, job);
+    assert.equal(done.status, 'completed', done.message); assert.equal(done.progress!.completedPersonas, 100);
+    assert.equal(calls.get(4), 2, 'one second request, never more'); assert.equal(aborted, 1, 'the slower request is stopped');
+    assert.equal(done.progress!.retries, 0, 'a second request is not a retry');
+    const hedged = lines.filter(line => line.event === 'cohort-batch-hedged');
+    assert.equal(hedged.length, 1); assert.equal(hedged[0]!.batch, 4);
+    await service.close();
+  }
+});
+
+test('no second request before three batches are accepted or beyond the concurrency window', async t => {
+  const calls = new Map<number, number>(); const gate = deferred<void>();
+  const client = nativeDraft(async input => {
+    const batch = requestData(input).batch?.number as number | undefined;
+    if (batch !== undefined) calls.set(batch, (calls.get(batch) ?? 0) + 1);
+    if (batch === 1) await gate.promise;
+    return cohortBatchResponse(input);
+  });
+  const service = new LocalAgentService({ chatgpt: client, hedgeMinMs: 0, hedgeCheckMs: 5 }); t.after(() => service.close());
+  const job = service.start(batchRequest(30));
+  await waitFor(() => service.get(job.id)!.progress!.completedBatches === 2);
+  await new Promise(resolve => setTimeout(resolve, 60));
+  assert.equal(calls.get(1), 1, 'two accepted batches are too few to call batch 1 slow');
+  gate.resolve();
+  assert.equal((await terminal(service, job)).status, 'completed');
+  const full = countingDraft({ hold: async batch => { if (batch === 1) await new Promise(resolve => setTimeout(resolve, 80)); } });
+  const busy = new LocalAgentService({ chatgpt: full.client, hedgeMinMs: 0, hedgeCheckMs: 5 }); t.after(() => busy.close());
+  assert.equal((await terminal(busy, busy.start(batchRequest(1000)))).status, 'completed');
+  assert.ok(full.state.peak <= 16, `never more than sixteen requests at once (peak ${full.state.peak})`);
+});
+
 test('persona order and IDs follow position even when batches finish out of order', async t => {
   const finishOrder: number[] = [];
   const { client } = countingDraft({ hold: async batch => { if (batch > 1) await new Promise(resolve => setTimeout(resolve, (8 - batch) * 15)); finishOrder.push(batch); } });
@@ -1586,6 +1632,9 @@ test('the setup call returns cohort details with no personas, checked like a fir
   assert.equal(reject({ ...metadata, segments: [...metadata.segments, metadata.segments[0]] }), 'two segments share an id');
   assert.match(reject({ ...metadata, population: undefined }), /^population is missing/);
   assert.equal(reject([metadata]), 'the reply is not a cohort object');
+  // Seen in a real Claude run: a setup that invented a target on a plain field passed, then failed the final check after every batch.
+  assert.match(reject({ ...metadata, distributionTargets: [{ field: 'country', kind: 'categorical', buckets: [{ label: 'US', percent: 100, value: 'US' }] }] }), /^the distribution targets are invalid: .*attributes/);
+  assert.deepEqual(checkCohortSetup(JSON.stringify({ ...metadata, distributionTargets: [{ field: 'attributes.country', kind: 'categorical', buckets: [{ label: 'US', percent: 100, value: 'US' }] }] }), 'customers').distributionTargets, [{ field: 'attributes.country', kind: 'categorical', buckets: [{ label: 'US', percent: 100, value: 'US' }] }]);
 });
 
 test('claudeEnvelope reads the structured output of the result event even when its text holds quotes and braces', () => {

@@ -49,6 +49,21 @@ behaviors:
       for every positive-weight segment, unless a saved segment target already assigns segments.
       Batches return a JSON array of personas; the cohort details are never read from a batch reply,
       so a batch cannot change them.
+  - id: slow-batch-second-request
+    description: >-
+      A batch attempt running far longer than the accepted batches gets one second, identical request;
+      the first reply is checked and the other request is stopped, and it is never counted as a retry.
+    details: >-
+      Added 2026-10-11 after one batch of a 400-person Claude run streamed at a quarter of the usual
+      speed and took 3 min 24 s while its fifteen peers took about 50 s, holding up the finish. A
+      second request starts only after three batches are accepted, once an attempt has run 1.5 times
+      the median accepted time per persona for its size and at least 30 s, only in a place the
+      concurrency window leaves free (so the bulk of a job never sends more than sixteen requests at
+      once), and never while a rate limit, overload or connection error has narrowed the window. The
+      batch shows as hedged, its progress is the further of the two requests, and the server logs a
+      cohort-batch-hedged line. The setup call and every first batch also check distribution targets
+      the way the final check does: a real setup reply named a target field "country" instead of
+      "attributes.country", passed its batch, and failed the finished audience after every batch.
     source:
       text: generation is way too slow, why?
       reference: 2026-10-11 jev-polls project thread, Giulio, with a screenshot of batch 1 of 41 at 1 min 19 s
