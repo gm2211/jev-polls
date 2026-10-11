@@ -44,6 +44,23 @@ behaviors:
     description: >-
       Progress names the batches running, counts only accepted batches, shows retries, and divides
       the remaining-time range by the batches running at once.
+  - id: streamed-generation-detail
+    description: >-
+      While batches draft, progress shows accepted personas and personas still being written as two
+      separate numbers, a real state for each batch, and a rough finish time from the first seconds;
+      personas seen in partial output are never counted as accepted before their batch passes its
+      checks.
+    details: >-
+      Streamed personas are counted from partial CLI output and capped at the batch size. Batch states
+      are connecting, writing (persona N of size), checking, retrying after a failed check (attempt N of
+      3) and accepted. ChatGPT streams only counters, so its batches show tokens so far and no persona
+      count. The early estimate is labeled rough and gives way to the batch-based estimate after two
+      batches complete. Batch 1 is described as setting up the audience before twelve batches run at once.
+    source:
+      text: >-
+        why am i not getting details about what's going on - 2mins almost and still 0/1000 is very
+        confusing
+      reference: 2026-10-11 jev-polls project thread, Giulio
   - id: proposal-then-adopt
     description: >-
       A generated cohort stays a proposal until the user chooses Review and edit cohort; Discard

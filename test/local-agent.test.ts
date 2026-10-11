@@ -1321,3 +1321,102 @@ test('a cohort job remembers the step it was started for', async t => {
   assert.deepEqual(service.get(job.id)!.cohort!.step, step);
   assert.throws(() => service.start({ ...batchRequest(3), cohort: { id: 'customers', size: 3, step: { pipelineId: 'Bad Id', stageId: 'panel' } } }), LocalAgentError);
 });
+
+const personaKey = (count: number) => Array.from({ length: count }, (_, index) => `{\\"label\\":\\"P${index}\\",\\"background\\":\\"text\\"},`).join('');
+const batchNumberOf = (child: FakeChild) => requestData(child.input).batch.number as number;
+const stateOf = (service: LocalAgentService, id: string, index: number) => service.get(id)!.progress!.batchDetails?.find(detail => detail.index === index);
+
+test('streamed personas rise mid-batch, stay within the batch size, and are never counted as accepted until the batch passes', async t => {
+  const root = await setup(t); let first!: FakeChild; const release = deferred<void>();
+  const service = new LocalAgentService({ temporaryRoot: root, spawn: fakeSpawner(async ({ args, child }) => {
+    if (batchNumberOf(child) === 1) first = child;
+    if (batchNumberOf(child) === 1) await release.promise;
+    await writeFile(args[args.indexOf('--output-last-message') + 1]!, cohortBatchResponse(child.input)); child.finish();
+  }) }); t.after(() => service.close());
+  const job = service.start({ engine: 'codex', prompt: 'Create 30 adults', revision: 0, document: empty, cohort: { id: 'customers', size: 30 } });
+  await waitFor(() => stateOf(service, job.id, 1)?.state === 'connecting');
+  assert.equal(service.get(job.id)!.progress!.inFlightPersonas, 0);
+  first.stdout.write('{"documentJson":"{\\"id\\":\\"customers\\",\\"personas\\":[' + personaKey(1) + '{\\"label\\":\\"P\\",\\"backg');
+  await waitFor(() => stateOf(service, job.id, 1)?.state === 'writing');
+  assert.equal(stateOf(service, job.id, 1)!.streamingPersonas, 1, 'a key split across chunks is counted once, when it completes');
+  first.stdout.write('round\\":\\"text\\"},');
+  await waitFor(() => service.get(job.id)!.progress!.inFlightPersonas === 2);
+  first.stdout.write(personaKey(1));
+  await waitFor(() => service.get(job.id)!.progress!.inFlightPersonas === 3);
+  let progress = service.get(job.id)!.progress!;
+  assert.equal(progress.completedPersonas, 0); assert.equal(progress.completedBatches, 0); assert.equal(progress.latestAccepted, undefined);
+  assert.equal(stateOf(service, job.id, 1)!.size, 10);
+  first.stdout.write(personaKey(40));
+  await waitFor(() => stateOf(service, job.id, 1)!.streamingPersonas === 10);
+  progress = service.get(job.id)!.progress!;
+  assert.equal(progress.inFlightPersonas, 10, 'the streamed count is capped at the batch size');
+  assert.equal(progress.completedPersonas, 0, 'streamed personas are not accepted');
+  assert.ok(progress.outputChars! > 0);
+  release.resolve();
+  const done = await terminal(service, job);
+  assert.equal(done.status, 'completed'); assert.equal(done.progress!.completedPersonas, 30);
+  assert.equal(done.progress!.batchDetails!.find(detail => detail.index === 2)!.state, 'accepted');
+});
+
+test('batch states move from connecting to writing to checking to accepted, and a failed check shows the retry', async t => {
+  const seen = new Map<number, string[]>(); let attempts = 0; const hold = deferred<void>();
+  const client = nativeDraft(async input => {
+    const batch = requestData(input).batch.number as number;
+    if (batch === 1 && ++attempts === 1) { const reply = JSON.parse(cohortBatchResponse(input)); const cohort = JSON.parse(reply.documentJson); cohort.personas.pop(); return JSON.stringify({ ...reply, documentJson: JSON.stringify(cohort) }); }
+    if (batch === 1 && attempts === 2) await hold.promise;
+    return cohortBatchResponse(input);
+  });
+  const service = new LocalAgentService({ chatgpt: client }); t.after(() => service.close());
+  const job = service.start(batchRequest(12));
+  const sampler = setInterval(() => { for (const detail of service.get(job.id)?.progress?.batchDetails ?? []) { const list = seen.get(detail.index) ?? []; if (list.at(-1) !== detail.state) list.push(detail.state); seen.set(detail.index, list); } }, 1);
+  t.after(() => clearInterval(sampler));
+  await waitFor(() => stateOf(service, job.id, 1)?.state === 'retrying');
+  const retrying = stateOf(service, job.id, 1)!;
+  assert.equal(retrying.attempt, 2); assert.equal(retrying.maxAttempts, 3);
+  hold.resolve();
+  const done = await terminal(service, job); clearInterval(sampler);
+  assert.equal(done.status, 'completed');
+  assert.ok(seen.get(1)!.indexOf('connecting') < seen.get(1)!.indexOf('retrying'), JSON.stringify([...seen]));
+  assert.equal(done.progress!.batchDetails!.at(-1)!.state, 'accepted');
+  assert.equal(done.progress!.retries, 1);
+});
+
+test('a rough estimate appears from streaming speed before any batch completes and is replaced by batch timings after two', async t => {
+  const root = await setup(t); t.mock.timers.enable({ apis: ['Date'] });
+  const hold = deferred<void>(); let first!: FakeChild;
+  const service = new LocalAgentService({ temporaryRoot: root, spawn: fakeSpawner(async ({ args, child }) => {
+    if (batchNumberOf(child) === 1) { first = child; await hold.promise; }
+    await writeFile(args[args.indexOf('--output-last-message') + 1]!, cohortBatchResponse(child.input)); child.finish();
+  }) }); t.after(() => service.close());
+  const job = service.start({ engine: 'codex', prompt: 'Create 1000 adults', revision: 0, document: empty, cohort: { id: 'customers', size: 1000 } });
+  await waitFor(() => stateOf(service, job.id, 1)?.state === 'connecting');
+  assert.equal(service.get(job.id)!.progress!.estimate, undefined, 'nothing written yet, so no estimate');
+  first.stdout.write(personaKey(4)); await waitFor(() => stateOf(service, job.id, 1)?.streamingPersonas === 4);
+  t.mock.timers.tick(10000); first.stdout.write(personaKey(1));
+  await waitFor(() => service.get(job.id)!.progress!.estimate !== undefined);
+  const estimate = service.get(job.id)!.progress!.estimate!;
+  assert.equal(estimate.basis, 'streaming'); assert.ok(estimate.seconds > 0 && Number.isFinite(estimate.seconds));
+  assert.equal(service.get(job.id)!.progress!.completedBatches, 0);
+  hold.resolve();
+  await waitFor(() => (service.get(job.id)!.progress!.completedBatches ?? 0) >= 2);
+  assert.equal(service.get(job.id)!.progress!.estimate, undefined, 'after two batches the batch timings take over');
+  service.cancel(job.id);
+});
+
+test('ChatGPT streams only counters, so batches show tokens and never a persona count', async t => {
+  const entered = deferred<string>(); const reply = deferred<string>(); let progress!: (activity: { phase: 'receiving'; outputChars: number; outputTokens?: number }) => void;
+  const service = new LocalAgentService({ chatgpt: {
+    status: async () => ({ connected: true, planEnabled: true }),
+    generate: async ({ input, onProgress }: { input: string; onProgress: typeof progress }) => { progress = onProgress; entered.resolve(input); return { text: await reply.promise }; },
+  } as ChatGptDraftClient }); t.after(() => service.close());
+  const job = service.start(batchRequest(8));
+  const input = await entered.promise;
+  progress({ phase: 'receiving', outputChars: 640, outputTokens: 212 });
+  const detail = stateOf(service, job.id, 1)!;
+  assert.equal(detail.state, 'writing'); assert.equal(detail.contentStreamed, false);
+  assert.equal(detail.streamingPersonas, 0); assert.equal(detail.outputTokens, 212);
+  assert.equal(service.get(job.id)!.progress!.inFlightPersonas, 0);
+  assert.equal(service.get(job.id)!.progress!.estimate, undefined);
+  reply.resolve(cohortBatchResponse(input));
+  assert.equal((await terminal(service, job)).status, 'completed');
+});
