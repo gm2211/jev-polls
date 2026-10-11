@@ -21,6 +21,45 @@ behaviors:
     source:
       text: Keep buttons and editable controls outside collapsible disclosures.
       reference: AGENTS.md
+  - id: one-type-scale
+    description: >-
+      Headings, buttons, tabs, inputs and labels use one family (IBM Plex Sans) and one six-step
+      size scale (11, 12, 14, 17, 22, 30px) with weights 400, 500 and 600; Space Grotesk is kept
+      for the jev wordmark only.
+    source:
+      text: getting better but fonts are inconsistent across ui elements, also too many buttons it should be intuitive
+      reference: 2026-10-11 jev-polls project chat, Giulio, on the empty study page
+  - id: one-next-action
+    description: >-
+      Each action appears once, where a first-time user looks for it, so there is always one
+      obvious next step. An empty study offers only the canvas's two ways in (add a question,
+      describe it in words); Save shows only while something is unsaved, and Cmd/Ctrl+S saves.
+    source:
+      text: specifically what I like is that together with "ask question" or "describe in words" it provides clear next step
+      reference: 2026-10-11 jev-polls project chat, Giulio
+  - id: exclusive-input-choices
+    description: >-
+      When a value can be entered several ways, the ways are mutually exclusive cards picked
+      first (Type a list, Import a file, Draft with AI) and only the chosen input shows. Once
+      options exist they appear once, in the one editable list.
+    source:
+      text: this is messy, ther should be clear mutually exclusive import or list options
+      reference: 2026-10-11 jev-polls project chat, Giulio, on the step panel's Options tab
+  - id: step-panel-one-level
+    description: >-
+      The step panel is one level deep. Creating an audience in Who answers is one column: the
+      form, then progress in its place, then the draft to review, with no sub-tabs, back button
+      or cards inside the panel.
+    source:
+      text: lots of nesting - what can we do to make things flow more naturally
+      reference: 2026-10-11 jev-polls project chat, Giulio, on Who answers during generation
+  - id: progress-fits-panel
+    description: >-
+      Generation progress is one readout (title, count, stages, one live status line) that fits
+      its panel without scrolling, with no detail tabs.
+    source:
+      text: this ui should not be scrollable
+      reference: 2026-10-11 jev-polls project chat, Giulio, on cohort generation progress
   - id: reachable-actions
     description: Navigation, save actions, and page controls stay easy to reach.
   - id: responsive-no-clipping

@@ -15,7 +15,8 @@ import { writeJson, writeText } from './io.js';
 import { WorkspaceStore, workspacePlan, WorkspaceConflictError, validateWorkspaceDocument } from './workspace-store.js';
 import { renderWorkspace } from './workspace-ui.js';
 import { agentConnectionConfig } from './agent-config.js';
-import { buildCommandTargets, materialNameSchema, materialSchema, optionDraftInputSchema, LocalAgentError, LocalAgentService } from './local-agent.js';
+import { buildCommandTargets, cohortInputSchema, materialNameSchema, materialSchema, optionDraftInputSchema, LocalAgentError, LocalAgentService, LOCAL_AGENT_ENGINES } from './local-agent.js';
+import { ByosConnectionError, ByosConnections, isByosEngine } from './byos-connections.js';
 import { ChatGptConnection, chatGptMessage, createDraftClient, type ChatGptDraftClient } from './chatgpt.js';
 import type { Pipeline, Provider } from './types.js';
 import type { AuthStatus } from './auth.js';
@@ -54,6 +55,8 @@ function validationMessage(error: unknown): string {
 export interface WorkspaceServerOptions {
   directory: string;
   chatgpt?: ChatGptDraftClient;
+  /** BYOS API-key drafting providers; defaults to keys in the macOS Keychain. */
+  byos?: ByosConnections;
   port?: number;
   getAuthStatus?: () => Promise<AuthStatus>;
   connectAccount?: (key: string) => Promise<unknown>;
@@ -68,7 +71,8 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
   const directory = resolve(options.directory);
   const store = new WorkspaceStore(directory);
   const chatgpt = new ChatGptConnection(options.chatgpt ?? createDraftClient());
-  const localAgents = options.localAgents ?? new LocalAgentService({ chatgpt: chatgpt.client });
+  const byos = options.byos ?? new ByosConnections();
+  const localAgents = options.localAgents ?? new LocalAgentService({ chatgpt: chatgpt.client, byos, log: line => { try { process.stderr.write(`${JSON.stringify({ at: new Date().toISOString(), ...line })}\n`); } catch { /* A closed stderr never affects drafting. */ } } });
   let activeDraftId: string | undefined;
   let changingChatGpt = false;
   const csrf = randomBytes(32).toString('hex');
@@ -306,9 +310,32 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
         throw new HttpError(400, 'CHATGPT_REQUEST_FAILED', chatGptMessage(error));
       }
     }
+    if (pathname.startsWith('/api/byos/')) {
+      try {
+        if (method === 'GET' && pathname === '/api/byos/models') {
+          const engine = new URL(request.url ?? '/', origin).searchParams.get('provider');
+          if (!isByosEngine(engine)) throw new HttpError(400, 'INVALID_PROVIDER', 'Choose a drafting provider.');
+          send(response, 200, { models: await byos.models(engine) }); return;
+        }
+        if (method === 'POST' && (pathname === '/api/byos/connect' || pathname === '/api/byos/disconnect')) {
+          if (activeDraftId && localAgents.get(activeDraftId)?.status === 'running') throw new HttpError(409, 'AGENT_BUSY', 'Wait for the drafting task or cancel it before changing AI connections.');
+          if (pathname.endsWith('/connect')) {
+            // The key is checked, saved to the OS credential store and never sent back or logged.
+            const input = z.object({ provider: z.string().refine(isByosEngine), key: z.string().min(1).max(1000) }).strict().parse(await body(request));
+            send(response, 200, { models: await byos.connect(input.provider as Parameters<typeof byos.connect>[0], input.key) }); return;
+          }
+          const input = z.object({ provider: z.string().refine(isByosEngine) }).strict().parse(await body(request));
+          await byos.disconnect(input.provider as Parameters<typeof byos.disconnect>[0]); send(response, 200, { disconnected: true }); return;
+        }
+      } catch (error) {
+        if (error instanceof HttpError) throw error;
+        if (error instanceof z.ZodError) throw new HttpError(400, 'BYOS_REQUEST_FAILED', 'Choose a provider and paste one key.');
+        throw new HttpError(400, 'BYOS_REQUEST_FAILED', error instanceof ByosConnectionError ? error.message : 'The AI connection could not be changed. Try again.');
+      }
+    }
     if (method === 'GET' && pathname === '/api/local-agents') { send(response, 200, await localAgents.availability()); return; }
     if (method === 'POST' && pathname === '/api/agent/jobs') {
-      const input = z.object({ projectId: safeId.optional(), engine: z.enum(['codex', 'claude', 'chatgpt']), model: z.string().trim().min(1).max(200).optional(), prompt: z.string().trim().min(1).max(10_000), revision: z.number().int().nonnegative().safe(), cohort: z.object({ id: safeId, size: z.number().int().min(1).max(MAX_COHORT_PERSONAS) }).strict().optional(), persona: z.object({ cohortId: safeId, personaId: safeId }).strict().optional(), options: optionDraftInputSchema.optional(), material: materialSchema.optional(), materialName: materialNameSchema.optional() }).strict().refine(value => [value.cohort, value.persona, value.options].filter(Boolean).length <= 1, 'Choose one draft target').refine(value => value.material === undefined || !(value.cohort || value.persona || value.options), 'Source material belongs to workspace drafts').refine(value => value.materialName === undefined || value.material !== undefined, 'A material name needs source material').parse(await body(request, 2 * 1024 * 1024));
+      const input = z.object({ projectId: safeId.optional(), engine: z.enum(LOCAL_AGENT_ENGINES), model: z.string().trim().min(1).max(200).optional(), prompt: z.string().trim().min(1).max(10_000), revision: z.number().int().nonnegative().safe(), cohort: cohortInputSchema.optional(), persona: z.object({ cohortId: safeId, personaId: safeId }).strict().optional(), options: optionDraftInputSchema.optional(), material: materialSchema.optional(), materialName: materialNameSchema.optional() }).strict().refine(value => [value.cohort, value.persona, value.options].filter(Boolean).length <= 1, 'Choose one draft target').refine(value => value.material === undefined || !(value.cohort || value.persona || value.options), 'Source material belongs to workspace drafts').refine(value => value.materialName === undefined || value.material !== undefined, 'A material name needs source material').parse(await body(request, 2 * 1024 * 1024));
       const saved = await store.read();
       if (saved.revision !== input.revision) throw new WorkspaceConflictError(input.revision, saved.revision);
       if (input.engine === 'chatgpt' && (changingChatGpt || (await chatgpt.snapshot()).signingIn || changingChatGpt)) throw new HttpError(409, 'CHATGPT_BUSY', 'Finish or cancel ChatGPT sign-in before drafting.');
@@ -324,7 +351,7 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
       send(response, 202, job); return;
     }
     if (method === 'POST' && pathname === '/api/agent/commands') {
-      const input = z.object({ projectId: safeId.optional(), engine: z.enum(['codex', 'claude', 'chatgpt']), model: z.string().trim().min(1).max(200).optional(), prompt: z.string().trim().min(1).max(10_000), revision: z.number().int().nonnegative().safe(), document: z.unknown().optional() }).strict().parse(await body(request, MAX_WORKSPACE_BYTES + 256 * 1024));
+      const input = z.object({ projectId: safeId.optional(), engine: z.enum(LOCAL_AGENT_ENGINES), model: z.string().trim().min(1).max(200).optional(), prompt: z.string().trim().min(1).max(10_000), revision: z.number().int().nonnegative().safe(), document: z.unknown().optional() }).strict().parse(await body(request, MAX_WORKSPACE_BYTES + 256 * 1024));
       const saved = await store.read();
       if (saved.revision !== input.revision) throw new WorkspaceConflictError(input.revision, saved.revision);
       let commandDocument: WorkspaceDocument;

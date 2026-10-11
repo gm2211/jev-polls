@@ -70,7 +70,10 @@ behaviors:
       mean or yes-probability. Colour by switches Status, Top pick and Confidence. Group by offers
       Segment, Age, every categorical attribute the cohort has (arrays group by their one item, or
       Several) and None. Hovering shows who they are, their segment, status and top pick with its
-      probability; clicking opens the full answer and the synthetic-profile note. Tiles are
+      probability; clicking opens the full answer and the synthetic-profile note. The hover tooltip
+      belongs to the pointer or to keyboard focus only: it is hidden on click, when the pointer
+      leaves the map, on scroll, on Esc, on blur and when the selected member changes, and focus
+      that came from a click never brings it back; the detail stays in the side panel. Tiles are
       focusable buttons with labels, and the arrow keys move between them. A step with few members
       draws large tiles with initials.
     source:

@@ -4,7 +4,9 @@ import type { BatchPlan, StageBudget } from './request-budget.js';
 
 /** Editable drafts use the same shape as runnable artifacts; validation happens at review. */
 export interface WorkspaceProject { id: string; name: string; description: string; cohortIds: string[]; pipelineIds: string[] }
-export interface WorkspaceDocument { version: 1; cohorts: Cohort[]; pipelines: Pipeline[]; projects?: WorkspaceProject[] }
+/** Server-stamped times, keyed `project:<id>`, `cohort:<id>` or `pipeline:<id>`. `createdAt` is absent for items saved before stamping existed. */
+export interface WorkspaceActivity { createdAt?: string; updatedAt: string }
+export interface WorkspaceDocument { version: 1; cohorts: Cohort[]; pipelines: Pipeline[]; projects?: WorkspaceProject[]; activity?: Record<string, WorkspaceActivity> }
 export interface WorkspaceSaved { revision: number; document: WorkspaceDocument }
 export interface WorkspaceRun {
   id: string; projectId: string; pipelineId: string; pipelineName: string; status: 'running' | 'completed' | 'failed';

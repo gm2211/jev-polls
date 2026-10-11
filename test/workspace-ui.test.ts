@@ -59,7 +59,7 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={locationHash,plural,recoverDraftingJob,recoverableDraftingJob,loadLocalAgents,cohortJobNotice,cohortJobNoticeVisible,commandState,adoptCohortProposal,commandEntries,commandExecute,inlineCohortJobVisible,inlineCohortTarget,setupCohortPicker,runCaveats,beginRun,commandApplyProposal,commandJobVisible,S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,locationHash,restoreLocation,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,studies,review,say,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,studyQuestionList,validateSetupAnswers,questionParts,upsertQuestion,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList,studyNextAction,studyReviewPanel,rememberRunSignature,ensureStudyQuestion};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={retryCohortJob,locationHash,plural,recoverDraftingJob,recoverableDraftingJob,loadLocalAgents,cohortJobNotice,cohortJobNoticeVisible,commandState,adoptCohortProposal,commandEntries,commandExecute,inlineCohortJobVisible,inlineCohortTarget,setupCohortPicker,runCaveats,beginRun,commandApplyProposal,commandJobVisible,S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,locationHash,restoreLocation,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,studies,review,say,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,studyQuestionList,validateSetupAnswers,questionParts,upsertQuestion,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList,studyNextAction,studyReviewPanel,rememberRunSignature,ensureStudyQuestion,audienceNext,audienceAdd,audienceState,audienceResume,audienceNote,audienceProposalList};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
   if (openExistingProject) (context as any).clientTest.S.projectId = 'existing-research';
@@ -791,7 +791,7 @@ test('cohort prompt generation scopes the request and previews personas without 
   const job = { id: 'cohort-job', engine: 'codex', revision: S.revision, status: 'completed', cohort: { id: candidate.id, size: 2, prompt: S.cohortPrompt }, proposal: { document: { ...structuredClone(S.doc), cohorts: [...S.doc.cohorts, candidate] }, explanation: 'Fictional personas with assumed weights.' } };
   browser.respond('/api/agent/jobs', job);
   await startCohortJob();
-  assert.deepEqual(JSON.parse(JSON.stringify(browser.bodies.at(-1)!.body)), { projectId: 'existing-research', engine: 'codex', prompt: S.cohortPrompt, revision: S.revision, cohort: { id: 'new-audience', size: 2 } });
+  assert.deepEqual(JSON.parse(JSON.stringify(browser.bodies.at(-1)!.body)), { projectId: 'existing-research', engine: 'codex', prompt: S.cohortPrompt, revision: S.revision, cohort: { id: 'new-audience', size: 2, step: { pipelineId: 'study', stageId: 'panel' } } });
   assert.equal(JSON.stringify(S.doc), JSON.stringify(original), 'generation cannot modify the workspace draft');
   const review = cohortProposalReview(S.localJob);
   assert.match(review, /Frequent visitor/); assert.match(review, /Use this audience/);
@@ -804,6 +804,28 @@ test('cohort prompt generation scopes the request and previews personas without 
   assert.match(browser.element('app').innerHTML, /Museum visitors/);
   assert.equal(S.doc.pipelines[0].cohorts[S.doc.pipelines[0].stages[0].cohort], candidate.id);
   assert.equal(browser.bodies.filter(x => x.path === '/api/workspace' || x.path.endsWith('/apply')).length, 0, 'review adoption stays local until explicit save');
+});
+
+test('a failed cohort generation shows which batch failed and retries the same brief in place', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, act, cohortProposalReview } = browser.client;
+  S.tab = 'studies'; S.pipelineId = 'study'; S.stageId = 'panel';
+  act(null, { dataset: { act: 'new-cohort' } }); await settle();
+  S.localEngine = 'claude'; S.localEngines = [{ id: 'claude', label: 'Claude Code', available: true }];
+  const brief = 'Adult gamers who can buy a $20 game.\n\nSegments: Strategy; Shooter.';
+  const failed = { id: 'failed-job', engine: 'claude', revision: S.revision, status: 'failed', message: 'Batch 7 failed its checks 3 times: persona 3 has no segment. Workspace unchanged.', cohort: { id: 'gamers', size: 1000, prompt: brief } };
+  S.localJob = failed;
+  const review = cohortProposalReview(failed);
+  assert.match(review, /Generation failed/); assert.match(review, /Batch 7 failed its checks 3 times: persona 3 has no segment\. Workspace unchanged\./);
+  assert.match(review, /data-act="cohort-retry">Retry generation</);
+  assert.doesNotMatch(cohortProposalReview({ ...failed, status: 'cancelled', message: 'Cancelled.' }), /Retry generation/);
+  assert.doesNotMatch(cohortProposalReview({ ...failed, cohort: undefined }), /Retry generation/);
+  browser.respond('/api/agent/jobs/failed-job/discard', { ...failed, settled: 'discarded' });
+  browser.respond('/api/agent/jobs', { id: 'retry-job', engine: 'claude', revision: S.revision, status: 'running', cohort: failed.cohort });
+  act(null, { dataset: { act: 'cohort-retry' } }); await settle();
+  const sent = browser.bodies.filter(x => x.path === '/api/agent/jobs' && x.body).at(-1)!.body;
+  assert.equal(sent.prompt, brief); assert.deepEqual(JSON.parse(JSON.stringify(sent.cohort)), { id: 'gamers', size: 1000, step: { pipelineId: 'study', stageId: 'panel' } });
+  assert.equal(S.localJob.id, 'retry-job');
 });
 
 test('cohort generation preserves unsaved edits and rejects stale proposal adoption', async () => {
@@ -1456,6 +1478,12 @@ test('empty study cohort selection generates inline without losing question or c
   act(null, { dataset: { act: 'flow-inspector', section: 'cohort' } });
   assert.equal(browser.client.inlineCohortJobVisible(), true);
   assert.match(browser.element('app').innerHTML, /Virtual readers with varied experience/);
+  assert.doesNotMatch(browser.element('app').innerHTML, /Back to who answers|Cohort prompt<\/button>|generation-help/, 'the inline audience is one flat column');
+  S.localJob = { id: 'running-inline', status: 'running', engine: 'claude', cohort: { id: 'c-new', size: 17, prompt: S.cohortPrompt }, progress: { phase: 'generating', totalPersonas: 17, completedPersonas: 0 } };
+  render();
+  assert.match(browser.element('app').innerHTML, /Generating 17 personas/);
+  assert.doesNotMatch(browser.element('app').innerHTML, /Who are they\?|Choose a saved audience instead|role="tablist"[^>]*cohort-generation/, 'progress replaces the form in place');
+  S.localJob = null; render();
   S.sections.pipeline = 'phase';
   const wizard = stageForm(p,stage);
   assert.equal([...wizard.matchAll(/<form\b/g)].length, 1, 'inline generator does not nest forms in setup wizard');
@@ -1867,7 +1895,7 @@ test('generation progress reports accepted counts without inventing completion o
   assert.match(html, /25 <span>\/ 60/); assert.match(html, /value="25" max="60"/);
   assert.match(html, /Generating batch 2 of 3/); assert.doesNotMatch(html, /batches checked/);
   assert.match(html, /ChatGPT · chosen-model/); assert.match(html, /1m 5s elapsed/);
-  assert.match(html, /personas generated/); assert.doesNotMatch(html, /Waiting for ChatGPT|Counts update after validation/); assert.match(html, /Cancel generation/);
+  assert.match(html, />accepted</); assert.doesNotMatch(html, /being written/); assert.doesNotMatch(html, /Waiting for ChatGPT|Counts update after validation/); assert.match(html, /Cancel generation/);
   assert.doesNotMatch(cohortGenerator(), /Wait for the current draft/);
   assert.equal(canGenerateCohort(), false);
   const clock = { dataset: { draftStart: job.startedAt }, textContent: '' };
@@ -1977,22 +2005,15 @@ test('changing an intermediate cohort keeps other phase cohorts and inputs indep
 });
 
 
-test('progress exposes observed activity, synthetic previews and real checks without changing draft fields', async () => {
+test('progress shows observed activity as one live line without changing draft fields', async () => {
   const browser = browserHarness(); await settle();
   const { S, draftProgress } = browser.client;
   const job = { id: 'streamed', status: 'running', engine: 'chatgpt', cohort: {size:100}, progress: { phase:'generating', totalPersonas:100, completedPersonas:25, batch:2, totalBatches:4, batchSize:25, activity:'receiving', outputChars:12500, lastActivityAt:new Date().toISOString(), latestAccepted:[{label:'Synthetic reader <script>',age:42}], validation:{scope:'batch',status:'passed',checks:['Required fields and adult ages','Expected batch size'],checkedPersonas:25} } };
   S.localJob=job; S.cohortComposer=true; S.cohortTarget='new'; S.sections['cohort-generation']='review';
   assert.match(draftProgress(job), /Response arriving/);
   assert.match(draftProgress(job), /12,500 characters received/);
-  assert.match(draftProgress(job), /synthetic draft/);
-  assert.match(draftProgress(job), /Synthetic reader &lt;script&gt;/);
+  assert.doesNotMatch(draftProgress(job), /draft-inspect|Activity<|What is checked/, 'progress is one readout, with no detail tabs');
   const before=JSON.stringify(S.doc);
-  browser.element('app').querySelectorAll=(selector:string)=>selector==='[data-form]'?[{reportValidity:()=>assert.fail('progress tab must not submit another form')}]:[];
-  browser.listeners.get('click')!({target:{closest:()=>({dataset:{act:'draft-progress-section',section:'checks'}})},preventDefault(){}});
-  const html=draftProgress(job);
-  assert.match(html,/Latest batch checks · passed/); assert.match(html,/Expected batch size/);
-  assert.match(html,/do not verify real-world facts/);
-  assert.match(draftProgress({...job,progress:{...job.progress,validation:undefined,lastBatchChecks:['Expected batch size']}}),/Latest batch checks · passed/);
   assert.equal(JSON.stringify(S.doc),before); assert.equal(browser.bodies.length,0);
   assert.match(draftProgress({...job,progress:{...job.progress,outputSource:'cli-stdout'}}),/CLI output arriving/);
 });
@@ -2256,8 +2277,8 @@ test('option comparisons preserve descriptions, stable keys and paginated answer
   S.pipelineId='study';S.stageId='panel';const p=S.doc.pipelines[0],s=p.stages[0],q=s.questions.answer;
   q.criteria={a:{label:'Afterlight',description:'A hopeful title about exploration.'},b:{label:'Project Dawn',description:'A bold title about a new beginning.'},c:'None of these',d:'Other',e:{label:'Hidden option',description:'Preserve this off-page description.'}};
   const html=stageForm(p,s);
-  assert.match(html,/data-options-box/);assert.match(html,/Probability distribution/);assert.doesNotMatch(html,/name="setupOption"|name="setupDescription"|>Rating</);
-  assert.match(html,/A hopeful title/);assert.doesNotMatch(html.slice(html.indexOf('data-options-list')),/Hidden option/,'the compact list pages four at a time; the box holds every option');assert.match(html,/Hidden option: Preserve this off-page description\./);
+  assert.match(html,/data-options-box/);assert.doesNotMatch(html,/name="setupOption"|name="setupDescription"|>Rating</);
+  assert.match(html,/A hopeful title/);assert.doesNotMatch(html,/data-options-list/,'the box is the one list');assert.match(html,/Hidden option: Preserve this off-page description\./);
   const beforeEditing=JSON.stringify(q);setupAction('setup-edit-option',{dataset:{key:'a'}});
   const editor=stageForm(p,s);assert.match(editor,/Option 1 name/);assert.match(editor,/Option 1 description/);assert.doesNotMatch(editor,/Option 2 name/);
   assert.equal(JSON.stringify(q),beforeEditing,'opening an option does not mutate criteria');
@@ -2479,7 +2500,7 @@ test('empty option setup starts with the options box and manual add opens only o
   const browser=browserHarness();await settle();const {S,stageForm,setupAction}=browser.client;
   S.pipelineId='study';S.stageId='panel';const p=S.doc.pipelines[0],s=p.stages[0];s.questions.answer.criteria={a:'',b:''};
   const before=JSON.stringify(s);let html=stageForm(p,s);
-  assert.match(html,/data-options-box/);assert.match(html,/data-act="answer-list-import"/);assert.doesNotMatch(html,/Unnamed option/);
+  assert.match(html,/data-options-box/);assert.match(html,/How do you want to add options\?/);assert.match(html,/data-source="file" aria-pressed="false"/);assert.doesNotMatch(html,/data-act="answer-list-import"|Unnamed option/);
   assert.doesNotMatch(html,/name="setupOption"|name="setupDescription"/);assert.equal(JSON.stringify(s),before);
   setupAction('setup-add-option',{dataset:{}});html=stageForm(p,s);
   assert.equal((html.match(/name="setupOption"/g)||[]).length,1);assert.equal((html.match(/name="setupDescription"/g)||[]).length,1);
@@ -2490,9 +2511,9 @@ test('provider change redraws distribution semantics without requiring a reviewe
   const browser = browserHarness(); await settle();
   const { S, render } = browser.client;
   S.tab='studies';S.pipelineId='study';S.stageId='panel';S.plan=null;S.sections['flow-inspector']='answers';render();
-  assert.match(browser.element('app').innerHTML,/Probability distribution/);
+  assert.match(browser.element('app').innerHTML,/Probabilities 0–1, totaling 1\./);
   await browser.listeners.get('change')!({target:{name:'evaluationProvider',value:'gliner'}});
-  assert.match(browser.element('app').innerHTML,/Normalized option scores/);
+  assert.match(browser.element('app').innerHTML,/not calibrated probabilities/);
   assert.doesNotMatch(browser.element('app').innerHTML,/Jev returns a probability/);
 });
 
@@ -2514,7 +2535,7 @@ test('option input tabs isolate sources and preserve drafts and reachable blank 
   applyStudySetup({dataset:{questionId:'answer'},values:{setupPrompt:'Choose a title'},querySelectorAll:()=>[row]});
   setupAction('setup-option-back',{dataset:{}});setupAction('setup-input',{dataset:{source:'file'}});setupAction('setup-input',{dataset:{source:'manual'}});
   assert.equal(q.label,'Choose a title');assert.equal(q.criteria.a.description,'A hopeful title.');assert.equal(q.criteria.b,'');
-  html=stageForm(p,s);assert.match(html,/Afterlight/);assert.match(html,/Unnamed option 2/);
+  html=stageForm(p,s);assert.match(html,/Afterlight: A hopeful title\./);assert.doesNotMatch(html,/How do you want to add options/,'once an option exists the box is the one list');
   const other={...s,id:'other',questions:{answer:{...q,criteria:{a:'',b:''}}}};
   setupAction('setup-input',{dataset:{source:'agent'}});assert.doesNotMatch(stageForm(p,other),/optionAgentPrompt/,'source selection belongs to one step');assert.match(stageForm(p,other),/data-options-box/);
 });
@@ -3103,6 +3124,20 @@ test('concurrent batch progress names the running batches, the retry, and divide
   assert.match(html.replace(/retries/,''),/Generating/);
 });
 
+test('a rate-limited batch says how long it waits and the panel names the narrowed window', async () => {
+  const browser=browserHarness(); await settle(); const {draftProgress,S}=browser.client;
+  const detail=(index,state,extra={})=>({index,size:25,state,attempt:1,maxAttempts:3,streamingPersonas:0,outputChars:0,contentStreamed:true,startedAt:new Date().toISOString(),...extra});
+  const job={id:'p',engine:'claude',status:'running',startedAt:new Date().toISOString(),cohort:{id:'new',size:1000},progress:{phase:'generating',batch:2,batchSize:25,batchStartedAt:new Date().toISOString(),activeBatches:[2,3],maxConcurrentBatches:12,totalBatches:40,completedBatches:1,completedPersonas:10,totalPersonas:1000,retries:1,retry:{batch:2,attempt:2,maxAttempts:3,cause:'rate-limit'},batchLimit:{allowed:4,cause:'rate-limit'},batchDetails:[detail(2,'waiting',{attempt:2,wait:{seconds:20,cause:'rate-limit'}}),detail(3,'connecting')],outputChars:0}};
+  S.localJob=job;
+  const html=draftProgress(job);
+  assert.match(html,/Batch 2: waiting 20 s after a rate limit \(attempt 2 of 3\)/);
+  assert.match(html,/4 batches at once while the AI is rate-limited/);
+  assert.match(html,/Batch 2 hit a rate limit and is being tried again \(attempt 2 of 3\)/);
+  assert.doesNotMatch(html,/did not pass its checks/);
+  const calm=draftProgress({...job,progress:{...job.progress,batchLimit:undefined,retry:undefined,batchDetails:[detail(3,'connecting')]}});
+  assert.doesNotMatch(calm,/at once while/);
+});
+
 test('a new tab reattaches to a running cohort generation and offers it on the Cohorts list', async () => {
   const browser = browserHarness(); await settle();
   const { S, loadLocalAgents, cohortJobNotice, commandState } = browser.client;
@@ -3335,7 +3370,8 @@ test('the study header always names one next action, from the first question to 
   const next = () => html().match(/<button type="button" class="button primary study-next" data-act="([a-z-]+)"[^>]*>([^<]*)<\/button>/)!.slice(1, 3).join('|');
   S.tab = 'studies'; S.pipelineId = 'study'; S.stageId = 'panel'; S.flowPanel = false;
   const stages = study.stages; study.stages = []; render();
-  assert.equal(next(), 'flow-add|Add your first question', 'an empty study points at the first-question target');
+  assert.doesNotMatch(html(), /study-next|data-act="draft-panel-open">Draft with assistant|data-act="flow-create-open"|flow-empty-hint/, 'an empty study offers its two ways in once, on the canvas');
+  assert.equal((html().match(/class="flow-empty-target"/g) || []).length, 2);
   study.stages = stages;
   render(); assert.equal(next(), 'next-review|Review run', 'a finished study offers the review');
   q.label = ''; render(); assert.equal(next(), 'flow-fix|Next: write the question');
@@ -3464,4 +3500,134 @@ test('unsaved edits show a top-bar pill on pages without their own Save, and per
   const html = browser.element('app').innerHTML;
   assert.match(html, /Attributes · JSON/);
   assert.doesNotMatch(html, /No structured attributes yet/);
+});
+
+const audienceRequest = { cohortId: 'adult-gamers', name: 'Adult gamers who can buy a $20 game', description: 'Adults who play games weekly and could buy a $20 game.', size: 1000, steps: [{ pipelineId: 'study', stageId: 'panel' }] };
+function audienceProposal(browser: ReturnType<typeof browserHarness>, requests: unknown[] = [audienceRequest]) {
+  const { S } = browser.client;
+  const document = structuredClone(browser.snapshot().document);
+  document.pipelines[0].cohorts.audience = '';
+  const job = { id: 'study-draft', engine: 'codex', projectId: 'existing-research', status: 'completed', revision: S.revision, message: '', proposal: { document, explanation: 'Drafted a naming study.', audienceRequests: requests } };
+  browser.respond('/api/agent/jobs/study-draft/apply', { revision: S.revision + 1, document });
+  S.localJob = job; S.localEngine = 'codex'; S.localEngines = [{ id: 'codex', available: true }];
+  return job;
+}
+const cohortJob = (id: string, status = 'running', extra: object = {}) => ({ id: 'job-' + id, engine: 'codex', projectId: 'existing-research', status, revision: 2, message: '', cohort: { id, size: 1000, prompt: 'x', step: { pipelineId: 'study', stageId: 'panel' } }, ...extra });
+
+test('the proposal review lists the audiences that will be generated', async () => {
+  const browser = browserHarness(); await settle();
+  const job = audienceProposal(browser);
+  const review = browser.client.proposalReview(job);
+  assert.match(review, /Will generate: <strong>Adult gamers who can buy a \$20 game<\/strong> · 1,000 people/);
+  assert.match(review, /Apply proposal/);
+  assert.doesNotMatch(browser.client.proposalReview({ ...job, proposal: { ...job.proposal, audienceRequests: undefined } }), /Will generate/);
+});
+
+test('the generation prompt is the full brief: description, every named attribute, the segments and the independence rule', async () => {
+  const browser = browserHarness(); await settle();
+  const { applyLocalProposal, audienceNext } = browser.client;
+  const attributes = ['annualIncomeUsd', 'country', 'ethnicity', 'favoriteFranchises', 'hoursPlayedLastYear', 'seriesLoyalty', 'preferredGenres', 'platform'];
+  const rich = { ...audienceRequest, description: 'Adult gamers who could buy a $20 game. Two-sentence backstories.', attributes, segments: [{ id: 'strategy', label: 'Strategy and 4X', share: 30 }, { id: 'casual', label: 'Casual' }] };
+  audienceProposal(browser, [rich]);
+  browser.respond('/api/agent/jobs', cohortJob('adult-gamers'));
+  await applyLocalProposal(); await audienceNext();
+  const start = browser.bodies.find(entry => entry.path === '/api/agent/jobs')!.body as any;
+  assert.ok(start.prompt.startsWith(rich.description));
+  for (const attribute of attributes) assert.ok(start.prompt.includes(attribute), attribute);
+  assert.match(start.prompt, /Strategy and 4X \(about 30%\); Casual/);
+  assert.match(start.prompt, /nobody a preference for or against any option, name or product/);
+  assert.ok(start.prompt.length <= 10000);
+});
+
+test('applying a proposal with an audience request starts its inline generation in the step panel', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, applyLocalProposal, audienceNext } = browser.client;
+  audienceProposal(browser);
+  browser.respond('/api/agent/jobs', cohortJob('adult-gamers'));
+  await applyLocalProposal(); await audienceNext();
+  const start = browser.bodies.find(entry => entry.path === '/api/agent/jobs')!.body as any;
+  assert.deepEqual(start.cohort, { id: 'adult-gamers', size: 1000, step: { pipelineId: 'study', stageId: 'panel' } });
+  assert.ok(start.prompt.startsWith(audienceRequest.description));
+  assert.deepEqual(JSON.parse(JSON.stringify(S.cohortInlineTarget)), { pipelineId: 'study', stageId: 'panel' });
+  assert.equal(S.tab, 'studies'); assert.equal(S.stageId, 'panel'); assert.equal(S.sections['flow-inspector'], 'cohort'); assert.equal(S.flowPanel, true);
+  assert.equal(S.localJob.cohort.id, 'adult-gamers');
+  assert.deepEqual(JSON.parse(browser.storage.get('jev-local-job-target:http://127.0.0.1:4180:existing-research')!), { jobId: 'job-adult-gamers', pipelineId: 'study', stageId: 'panel' });
+  assert.match(browser.client.audienceNote(), /Drafting from your description:<\/strong> Adult gamers who can buy a \$20 game · 1,000 people/);
+});
+
+test('several audience requests run one at a time, the next starting when the previous is used', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, applyLocalProposal, audienceNext, adoptCohortProposal } = browser.client;
+  const second = { cohortId: 'parents', name: 'Parents of teens', description: 'Parents of teenage gamers.', size: 300, steps: [{ pipelineId: 'study', stageId: 'second' }] };
+  const job = audienceProposal(browser, [audienceRequest, second]);
+  job.proposal.document.pipelines[0].stages.push({ ...structuredClone(job.proposal.document.pipelines[0].stages[0]), id: 'second', cohort: 'other' });
+  job.proposal.document.pipelines[0].cohorts.other = '';
+  browser.respond('/api/agent/jobs/study-draft/apply', { revision: S.revision + 1, document: job.proposal.document });
+  browser.respond('/api/agent/jobs', cohortJob('adult-gamers'));
+  await applyLocalProposal(); await audienceNext();
+  const starts = () => browser.bodies.filter(entry => entry.path === '/api/agent/jobs').map(entry => (entry.body as any).cohort.id);
+  assert.deepEqual(starts(), ['adult-gamers']);
+  assert.equal(await audienceNext(), false, 'one drafting job at a time');
+  assert.match(browser.client.audienceNote(), /Next, one at a time: Parents of teens · 300 people/);
+  const generated = { ...structuredClone(S.doc.cohorts[0]), id: 'adult-gamers', name: 'Adult gamers' };
+  S.localJob = cohortJob('adult-gamers', 'completed', { revision: S.revision, proposal: { document: { cohorts: [generated] }, explanation: 'Synthetic' } });
+  browser.respond('/api/agent/jobs', cohortJob('parents'));
+  let saved!: (value: unknown) => void;
+  browser.respond('/api/workspace', new Promise(resolve => { saved = resolve; }), 'POST');
+  adoptCohortProposal();
+  saved({ revision: S.revision + 1, document: JSON.parse(JSON.stringify(S.doc)) });
+  const p = S.doc.pipelines[0];
+  assert.equal(p.cohorts[p.stages[0].cohort], 'adult-gamers', 'the first audience is assigned to its step');
+  for (let i = 0; i < 6; i++) await settle();
+  assert.deepEqual(starts(), ['adult-gamers', 'parents']);
+  assert.equal(S.stageId, 'second'); assert.equal(S.localJob.cohort.id, 'parents');
+});
+
+test('a reload keeps the queue and the generating step', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, applyLocalProposal, audienceNext } = browser.client;
+  const second = { cohortId: 'parents', name: 'Parents of teens', description: 'Parents of teenage gamers.', size: 300, steps: [{ pipelineId: 'study', stageId: 'panel' }] };
+  audienceProposal(browser, [audienceRequest, second]);
+  const running = cohortJob('adult-gamers');
+  browser.respond('/api/agent/jobs', running);
+  await applyLocalProposal(); await audienceNext();
+  const reloaded = browserHarness(); await settle();
+  for (const [key, value] of browser.storage) reloaded.storage.set(key, value);
+  reloaded.respond('/api/agent/jobs/job-adult-gamers', running);
+  reloaded.client.S.audience = null; // a real reload starts with the saved queue already in storage
+  await reloaded.client.loadLocalAgents();
+  const { S: R } = reloaded.client;
+  assert.equal(R.localJob.id, 'job-adult-gamers'); assert.equal(R.tab, 'studies'); assert.equal(R.stageId, 'panel'); assert.equal(R.sections['flow-inspector'], 'cohort');
+  assert.deepEqual(JSON.parse(JSON.stringify(reloaded.client.audienceState().queue.map((r: any) => r.cohortId))), ['parents']);
+  assert.equal(reloaded.bodies.some(entry => entry.path === '/api/agent/jobs'), false, 'a running job blocks the queue after reload');
+  void S;
+});
+
+test('a job recovered in another tab returns to the step it was started for', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, recoverDraftingJob } = browser.client;
+  browser.respond('/api/agent/jobs?projectId=existing-research', { jobs: [cohortJob('adult-gamers')] });
+  browser.respond('/api/agent/jobs/job-adult-gamers', cohortJob('adult-gamers'));
+  assert.equal(await recoverDraftingJob(), true);
+  assert.equal(S.tab, 'studies'); assert.equal(S.pipelineId, 'study'); assert.equal(S.stageId, 'panel'); assert.equal(S.sections['flow-inspector'], 'cohort');
+  assert.deepEqual(JSON.parse(JSON.stringify(S.cohortInlineTarget)), { pipelineId: 'study', stageId: 'panel' });
+});
+
+test('drafting progress separates accepted from being written and describes each batch honestly', async () => {
+  const browser = browserHarness(); await settle(); const { draftProgress, draftEstimate } = browser.client;
+  const detail = (index: number, state: string, extra: object = {}) => ({ index, size: 25, state, attempt: 1, maxAttempts: 3, streamingPersonas: 0, outputChars: 0, contentStreamed: true, startedAt: new Date().toISOString(), ...extra });
+  const progress = { phase: 'generating', batch: 2, totalBatches: 41, completedBatches: 1, completedPersonas: 160, totalPersonas: 1000, activeBatches: [1, 2, 3, 4, 5], maxConcurrentBatches: 12, inFlightPersonas: 37, batchStartedAt: new Date().toISOString(),
+    batchDetails: [detail(1, 'writing', { size: 10, streamingPersonas: 4, outputChars: 900 }), detail(2, 'writing', { streamingPersonas: 7 }), detail(3, 'connecting'), detail(4, 'retrying', { attempt: 2 }), detail(5, 'checking', { streamingPersonas: 25 }), detail(6, 'writing', { contentStreamed: false, outputTokens: 212, outputChars: 600 }), detail(7, 'accepted', { streamingPersonas: 25 })] };
+  const html = draftProgress({ id: 'j', engine: 'chatgpt', status: 'running', startedAt: new Date().toISOString(), cohort: { id: 'c', size: 1000 }, progress });
+  assert.match(html, /160 <span>\/ 1,000/); assert.match(html, />accepted</);
+  assert.match(html, /\+37 being written across 5 batches/);
+  assert.match(html, /Batch 1 sets up the audience: segments, weights, assumptions \(10 people\), then 12 batches run at once/);
+  assert.match(html, /Batch 2: writing persona 7 of 25/); assert.match(html, /Batch 3: connecting/);
+  assert.match(html, /Batch 4: retrying after a failed check \(attempt 2 of 3\)/); assert.match(html, /Batch 5: checking batch/);
+  assert.match(html, /Batch 6: writing… \(212 tokens so far\)/); assert.doesNotMatch(html, /Batch 6: writing persona/);
+  assert.match(html, /Batch 7: accepted/); assert.match(html, /count as accepted only after their batch passes its checks/);
+  assert.doesNotMatch(draftProgress({ id: 'j', engine: 'chatgpt', status: 'running', startedAt: new Date().toISOString(), cohort: { id: 'c', size: 1000 }, progress: { ...progress, inFlightPersonas: 0, batchDetails: undefined } }), /being written/);
+  const early = draftEstimate({ ...progress, estimate: { seconds: 240, basis: 'streaming', at: new Date().toISOString() } });
+  assert.match(early, /remaining \(rough\)/); assert.match(early, /firmer after two batches/);
+  assert.match(draftEstimate({ ...progress, estimate: undefined }), /Estimating…/);
 });

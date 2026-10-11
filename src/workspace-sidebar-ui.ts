@@ -31,17 +31,17 @@ export const SIDEBAR_CSS = String.raw`
 .app-frame{display:grid;grid-template-columns:224px minmax(0,1fr);align-items:start;min-height:calc(100dvh - 56px)}
 .app-frame>.shell{min-width:0;width:100%}
 .app-sidebar{position:sticky;top:0;align-self:stretch;max-height:calc(100dvh - 56px);overflow:auto;display:flex;flex-direction:column;gap:2px;padding:16px 12px;background:var(--raised);border-right:1px solid var(--line)}
-.side-back{appearance:none;display:flex;align-items:center;gap:6px;min-height:36px;padding:0 10px;border:0;border-radius:var(--radius-control,6px);background:transparent;color:var(--muted);font:inherit;font-size:12px;font-weight:600;cursor:pointer;text-align:left}
+.side-back{appearance:none;display:flex;align-items:center;gap:6px;min-height:36px;padding:0 10px;border:0;border-radius:var(--radius-control,6px);background:transparent;color:var(--muted);font:inherit;font-size:var(--text-sm);font-weight:600;cursor:pointer;text-align:left}
 .side-back:hover{color:var(--ink);background:var(--hover)}.side-back .ui-icon{width:14px;height:14px}
-.side-project{margin:10px 10px 8px;font:600 15px/1.3 var(--display);letter-spacing:-.01em;color:var(--ink);overflow-wrap:anywhere}
+.side-project{margin:10px 10px 8px;font:600 var(--text-md)/1.3 var(--display);letter-spacing:-.01em;color:var(--ink);overflow-wrap:anywhere}
 /* minmax(0,1fr) stops a long nowrap label from widening the track past the sidebar, so the label can ellipsize. */
 .side-group{display:grid;grid-template-columns:minmax(0,1fr);gap:2px}.side-children{display:grid;grid-template-columns:minmax(0,1fr);gap:1px;margin:0 0 4px}
-.side-link{appearance:none;display:flex;min-width:0;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:40px;padding:0 10px;border:0;border-radius:var(--radius-control,6px);background:transparent;color:var(--muted);font:inherit;font-size:13px;font-weight:600;text-align:left;cursor:pointer}
+.side-link{appearance:none;display:flex;min-width:0;align-items:center;justify-content:space-between;gap:8px;width:100%;min-height:40px;padding:0 10px;border:0;border-radius:var(--radius-control,6px);background:transparent;color:var(--muted);font:inherit;font-size:var(--text-md);font-weight:600;text-align:left;cursor:pointer}
 .side-link:hover{background:var(--hover);color:var(--ink)}
 .side-link[aria-current=page]{background:var(--surface);color:var(--ink);box-shadow:inset 3px 0 0 var(--blue)}
-.side-link.side-sub{min-height:34px;padding-left:22px;font-size:12px;font-weight:500}
+.side-link.side-sub{min-height:34px;padding-left:22px;font-size:var(--text-sm);font-weight:500}
 .side-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.side-count{flex:none;font:500 11px var(--numeric,var(--body));font-variant-numeric:tabular-nums;color:var(--faint)}
+.side-count{flex:none;font:500 var(--text-xs) var(--numeric,var(--body));font-variant-numeric:tabular-nums;color:var(--faint)}
 .side-back:focus-visible,.side-link:focus-visible{outline:2px solid var(--focus,var(--blue));outline-offset:-2px}
 @media(max-width:800px){
   .app-frame{grid-template-columns:minmax(0,1fr);min-height:0}

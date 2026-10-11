@@ -44,7 +44,13 @@ test('local assistant proposals require explicit application at the original sav
   assert.equal((await post('/api/agent/jobs', { ...input, cohort: { id: 'fresh-panel', size: MAX_COHORT_PERSONAS + 1 } })).status, 400);
   assert.equal((await post('/api/agent/jobs', { ...input, persona: { cohortId: 'customers', personaId: '__proto__' } })).status, 400);
   assert.equal((await post('/api/agent/jobs', { ...input, persona: { cohortId: 'customers', personaId: 'alex' }, cohort: { id: 'customers', size: 1 } })).status, 400);
+  assert.equal((await post('/api/agent/jobs', { ...input, cohort: { id: 'fresh-panel', size: 2, step: { pipelineId: 'Bad Id', stageId: 'panel' } } })).status, 400);
+  assert.equal((await post('/api/agent/jobs', { ...input, cohort: { id: 'fresh-panel', size: 2, step: { pipelineId: 'study', stageId: 'panel', extra: 1 } } })).status, 400);
   assert.equal(starts, 0);
+  const stepped = await post('/api/agent/jobs', { ...input, cohort: { id: 'stepped-panel', size: 1000, step: { pipelineId: 'study', stageId: 'panel' } } });
+  assert.equal(stepped.status, 202);
+  assert.deepEqual(jobs.get((await stepped.json()).id)!.cohort, { id: 'stepped-panel', size: 1000, step: { pipelineId: 'study', stageId: 'panel' }, prompt: input.prompt });
+  starts = 0;
   const created = await post('/api/agent/jobs', { ...input, cohort: { id: 'fresh-panel', size: 100 } });
   assert.equal(created.status, 202);
   const job = jobs.get((await created.json()).id)!;
@@ -99,7 +105,8 @@ test('persona regeneration HTTP proposals retain saved data and cannot replace a
   const edited = structuredClone(document); edited.cohorts[0]!.name = 'Newer saved edit';
   assert.equal((await post('/api/workspace', { revision: 1, document: edited })).status, 200);
   assert.equal((await post(`/api/agent/jobs/${job.id}/apply`, { revision: 1 })).status, 409);
-  assert.deepEqual((await (await fetch(new URL('/api/workspace', server.url))).json()).document, validateWorkspaceDocument(edited));
+  const { activity: _stamps, ...savedEdit } = (await (await fetch(new URL('/api/workspace', server.url))).json()).document;
+  assert.deepEqual(savedEdit, validateWorkspaceDocument(edited));
   const retry = await (await post('/api/agent/jobs', { ...input, revision: 2 })).json();
   for (let index = 0; index < 100 && localAgents.get(retry.id)?.status === 'running'; index++) await new Promise(resolve => setTimeout(resolve, 5));
   const applied = await post(`/api/agent/jobs/${retry.id}/apply`, { revision: 2 }); assert.equal(applied.status, 200);

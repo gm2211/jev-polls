@@ -62,20 +62,27 @@ const plain = (value: unknown) => JSON.parse(JSON.stringify(value));
 const box = (value: string) => ({ value, matches: (selector: string) => selector === '[data-options-box]' });
 const csv = (text: string, name = 'names.csv') => ({ name, size: Buffer.byteLength(text), text: async () => text });
 
-test('the Options stop shows the one-step box with its hint, a live count and the secondary actions', async () => {
+test('the Options stop shows one editable list once options exist, and the ways to fill it as exclusive choices', async () => {
   const h = await harness();
   const html = h.flowInspector(h.study, h.poll);
   assert.match(html, /<textarea id="optionsBox"[^>]*data-options-box/);
   assert.match(html, /One option per line\. Add a description after a colon or tab, e\.g\. <code>Orbital Empire: an empire, but in orbit<\/code>/);
   assert.match(html, /Alpha: Existing description\.\nBeta<\/textarea>/);
   assert.match(html, /id="optionsBoxStatus"[^>]*>2 options</);
-  for (const label of ['Import file', 'Draft with your AI', 'Paste dialog']) assert.match(html, new RegExp(label));
-  assert.match(html, /data-act="answer-list-import"/);
-  assert.match(html, /data-act="setup-input" data-source="agent"/);
-  assert.match(html, /data-act="answer-list-open"/);
-  assert.doesNotMatch(html, /Paste or type|class="setup-input-tabs"/);
-  assert.match(html, /data-options-list/);
-  assert.match(html, /Edit option Alpha/);
+  assert.doesNotMatch(html, /data-options-list|Edit option Alpha|Paste dialog|data-act="answer-list-open"|options-source"/, 'the options show once, in the box');
+  assert.match(html, /data-act="setup-input" data-source="choose">Import a file or draft with AI instead/);
+  h.S.sections['setup-input-study-ask-answer'] = 'choose';
+  const choose = h.flowInspector(h.study, h.poll);
+  assert.match(choose, /How do you want to add options\?/);
+  assert.equal((choose.match(/class="setup-type-card" data-act="setup-input"/g) || []).length, 3);
+  assert.match(choose, /data-source="manual" aria-pressed="true"><strong>Type a list/);
+  h.S.sections['setup-input-study-ask-answer'] = 'file';
+  const file = h.flowInspector(h.study, h.poll);
+  assert.match(file, /data-source="file" aria-pressed="true"/);
+  assert.match(file, /data-act="answer-list-import"/);
+  assert.doesNotMatch(file, /data-options-box/, 'only the chosen way shows its input');
+  h.S.sections['setup-input-study-ask-answer'] = 'manual';
+  assert.match(h.flowInspector(h.study, h.poll), /data-options-box/);
 });
 
 test('typing is parsed after a pause into the option list, keeping IDs, descriptions and custom fields of matching names', async () => {

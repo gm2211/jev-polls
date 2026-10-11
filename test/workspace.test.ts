@@ -378,7 +378,8 @@ for (const settledStatus of ['cancelled', 'completed'] as const) {
     }
     const protectedSnapshot = await (await fetch(new URL('/api/workspace', server.url))).json();
     assert.equal(protectedSnapshot.revision, 1);
-    assert.deepEqual(protectedSnapshot.document, initial);
+    const { activity: _stamps, ...protectedDocument } = protectedSnapshot.document;
+    assert.deepEqual(protectedDocument, initial);
     const retainingOwner = structuredClone(initial);
     retainingOwner.projects = retainingOwner.projects!.filter(project => project.id === running.projectId);
     assert.equal((await post('/api/workspace', { document: retainingOwner, revision: 1 })).status, 200, 'Unrelated project deletion remains available');

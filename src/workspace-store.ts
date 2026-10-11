@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { Cohort, Json, Pipeline } from './types.js';
-import type { WorkspaceDocument, WorkspaceProject, WorkspaceSaved } from './workspace-types.js';
+import type { WorkspaceActivity, WorkspaceDocument, WorkspaceProject, WorkspaceSaved } from './workspace-types.js';
 import { parseCohort, parsePipeline, stageOrder } from './schema.js';
 import { validateTargets } from './cohort-insights.js';
 import { enforceBudgets, estimateBudgets, type BatchPlan, type StageBudget } from './request-budget.js';
@@ -29,10 +29,12 @@ const saveTails = new Map<string, Promise<void>>();
 export class WorkspaceStore {
   private readonly directory: string;
   private readonly file: string;
+  private readonly now: () => Date;
 
-  constructor(directory: string) {
+  constructor(directory: string, options: { now?: () => Date } = {}) {
     this.directory = resolve(directory);
     this.file = join(this.directory, FILE_NAME);
+    this.now = options.now ?? (() => new Date());
   }
 
   async read(): Promise<WorkspaceSaved> {
@@ -62,7 +64,7 @@ export class WorkspaceStore {
       try {
         const current = await this.read();
         if (current.revision !== expectedRevision) throw new WorkspaceConflictError(expectedRevision, current.revision);
-        const saved: WorkspaceSaved = { revision: current.revision + 1, document: validated };
+        const saved: WorkspaceSaved = { revision: current.revision + 1, document: stampActivity(current.document, validated, this.now().toISOString()) };
         const temporary = `${this.file}.${randomUUID()}.tmp`;
         try {
           await writeFile(temporary, `${JSON.stringify(saved, null, 2)}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
@@ -100,7 +102,8 @@ export function validateWorkspaceDocument(input: unknown): WorkspaceDocument {
   catch { throw new Error('Workspace document must be JSON-serializable'); }
   if (serialized === undefined) throw new Error('Workspace document must be a JSON object');
   if (Buffer.byteLength(serialized, 'utf8') > MAX_DOCUMENT_BYTES) throw new Error('Workspace document exceeds the maximum size');
-  const root = object(input, 'workspace document', ['version', 'cohorts', 'pipelines', 'projects'], ['version', 'cohorts', 'pipelines']);
+  const root = object(input, 'workspace document', ['version', 'cohorts', 'pipelines', 'projects', 'activity'], ['version', 'cohorts', 'pipelines']);
+  if (root.activity !== undefined) validateActivity(root.activity);
   if (root.version !== 1) throw new Error('Workspace document version must be 1');
   const cohorts = array(root.cohorts, 'workspace cohorts', MAX_COHORTS);
   const pipelines = array(root.pipelines, 'workspace pipelines', MAX_PIPELINES);
@@ -117,6 +120,56 @@ export function validateWorkspaceDocument(input: unknown): WorkspaceDocument {
   }] : [];
   validateProjectOwnership(document);
   return document;
+}
+
+const ACTIVITY_KINDS = ['project', 'cohort', 'pipeline'] as const;
+
+function validateActivity(value: unknown): void {
+  const activity = object(value, 'workspace activity');
+  if (Object.keys(activity).length > 300) throw new Error('workspace activity exceeds 300 entries');
+  for (const [key, entry] of Object.entries(activity)) {
+    const [kind, itemId, ...rest] = key.split(':');
+    if (!ACTIVITY_KINDS.includes(kind as typeof ACTIVITY_KINDS[number]) || rest.length) throw new Error(`workspace activity key '${key}' must be project:, cohort: or pipeline: followed by an ID`);
+    id(itemId, `workspace activity key '${key}'`);
+    const stamp = object(entry, `workspace activity.${key}`, ['createdAt', 'updatedAt'], ['updatedAt']);
+    for (const field of ['createdAt', 'updatedAt'] as const) {
+      if (stamp[field] === undefined) continue;
+      if (typeof stamp[field] !== 'string' || stamp[field].length > 40 || Number.isNaN(Date.parse(stamp[field]))) throw new Error(`workspace activity.${key}.${field} must be an ISO timestamp`);
+    }
+  }
+}
+
+/**
+ * The server owns created/updated times: whatever the client sends is replaced.
+ * An item is created when its ID first appears and updated whenever its saved
+ * content changes; unchanged items keep their previous stamps.
+ */
+export function stampActivity(previous: WorkspaceDocument, next: WorkspaceDocument, now: string): WorkspaceDocument {
+  const before = previous.activity ?? {};
+  const activity: Record<string, WorkspaceActivity> = {};
+  const visit = (kind: typeof ACTIVITY_KINDS[number], items: { id: string }[], prior: { id: string }[]) => {
+    const old = new Map(prior.map(item => [item.id, canonical(item)]));
+    for (const item of items) {
+      const key = `${kind}:${item.id}`;
+      const stamp = before[key];
+      const was = old.get(item.id);
+      if (was === undefined) activity[key] = { createdAt: now, updatedAt: now };
+      else if (was !== canonical(item)) activity[key] = { ...(stamp?.createdAt ? { createdAt: stamp.createdAt } : {}), updatedAt: now };
+      else if (stamp) activity[key] = stamp;
+    }
+  };
+  visit('project', next.projects ?? [], previous.projects ?? []);
+  visit('cohort', next.cohorts, previous.cohorts);
+  visit('pipeline', next.pipelines, previous.pipelines);
+  const { activity: _clientActivity, ...document } = next;
+  return Object.keys(activity).length ? { ...document, activity } : document;
+}
+
+/** JSON with sorted object keys, so key order alone never counts as an edit. */
+function canonical(value: unknown): string {
+  return JSON.stringify(value, (_key, inner: unknown) => isRecord(inner)
+    ? Object.fromEntries(Object.keys(inner).sort().map(key => [key, inner[key]]))
+    : inner);
 }
 
 function validateProjectOwnership(document: WorkspaceDocument): void {

@@ -38,12 +38,74 @@ behaviors:
       110 seconds per 25-persona batch, 1,000 personas take about 8 minutes instead of about 15.
   - id: batch-retry
     description: >-
-      A batch that fails parsing or checks is retried with the same inputs up to two more times
-      before the whole job fails with the workspace unchanged; cancellation never retries.
+      A batch that fails parsing or checks is retried with the same request data up to two more times,
+      with the reason it was rejected added to the instructions, before the whole job fails with the
+      workspace unchanged; cancellation never retries.
+    details: >-
+      Added 2026-10-11 (gap left by the per-batch failure reasons): a batch that fails because the AI
+      was rate-limited, overloaded or unreachable (a CLI error result with status 429, 529 or 5xx, an
+      "overloaded" or "rate limit" message, a connection reset or a timeout) is not a bad reply, so
+      the same request is sent again after an exponential wait with jitter (about 5 s, then 20 s,
+      then 60 s for a batch's later attempts, each 20% either way) and without a rejection note.
+      Failed checks and unreadable replies keep the immediate retry with the reason. While any such
+      error is live, no more than four batches are started at once; the limit lifts back to twelve
+      after two accepted batches in a row, and another such error restarts that count. The attempt
+      limit is still three, so only the first two waits occur before a batch fails the job. A waiting
+      batch shows "waiting 20 s after a rate limit (attempt 2 of 3)" and the panel says "4 batches at
+      once while the AI is rate-limited", so the displayed wait and window are the real ones.
+      Cancelling ends a wait at once. CLI and MCP behaviour is unchanged apart from the waits.
+  - id: generation-failure-detail
+    description: >-
+      A failed generation says which batch failed and which check it failed ("Batch 7 failed its
+      checks 3 times: persona 3 has no segment. Workspace unchanged."), the server logs one JSON line
+      on stderr for every failed batch attempt and for the final failure, and the failed panel offers
+      Retry generation with the same brief and size.
+    details: >-
+      Added 2026-10-11 after a 1,000-person run failed after about nine minutes with only "Agent did
+      not return a valid workspace draft" and nothing in the server log. Every batch reply is now
+      checked in its own batch for valid JSON, the cohort format (naming the persona and field, such
+      as "persona 3 has no segment"), the cohort id, the persona count, details copied exactly from
+      the first batch, and that each persona names a segment and sources the cohort has; before this,
+      a persona with an unknown segment passed its batch and failed only the final check, after
+      every batch had been paid for, with no reason given. Each log line carries the job id, batch
+      index, attempt, reason and the first 300 characters of the offending output; a failure of the
+      AI call itself (CLI exit status, an error result, a reply without documentJson) is reported the
+      same way. Setting JEV_AGENT_DEBUG_DIR writes the prompt, stdout, stderr and exit status of every
+      drafting CLI call to that directory for diagnosis. A failure in the final whole-cohort checks
+      names the check as well. The Claude stream-json stdout limit is four times the reply limit,
+      because the stream repeats the reply (a 25-persona batch measured 545 KB against 1,000 KB).
+    source:
+      text: >-
+        Generation failed · Agent did not return a valid workspace draft. Try a smaller or more specific
+        request. Workspace unchanged.
+      reference: 2026-10-11 jev-polls project thread, Giulio's failed 1,000-person run
   - id: concurrent-progress-truthful
     description: >-
       Progress names the batches running, counts only accepted batches, shows retries, and divides
       the remaining-time range by the batches running at once.
+  - id: streamed-generation-detail
+    description: >-
+      While batches draft, progress shows accepted personas and personas still being written as two
+      separate numbers, a real state for each batch, and a rough finish time from the first seconds;
+      personas seen in partial output are never counted as accepted before their batch passes its
+      checks.
+    details: >-
+      Streamed personas are counted from partial CLI output and capped at the batch size. The Claude CLI
+      runs in stream-json mode with partial messages, so its content deltas arrive as JSON lines while
+      the batch is written; only deltas are counted (the repeated assistant and result events are not),
+      the final result is read from the result event, and a CLI that rejects the streaming flags is rerun
+      in plain JSON mode with the result printed only at the end. The Codex CLI runs with its JSON event
+      stream, which currently reports a message only once complete, so its batches show no persona count
+      until they finish. Every restriction flag stays on. Batch states
+      are connecting, writing (persona N of size), checking, retrying after a failed check (attempt N of
+      3) and accepted. ChatGPT streams only counters, so its batches show tokens so far and no persona
+      count. The early estimate is labeled rough and gives way to the batch-based estimate after two
+      batches complete. Batch 1 is described as setting up the audience before twelve batches run at once.
+    source:
+      text: >-
+        why am i not getting details about what's going on - 2mins almost and still 0/1000 is very
+        confusing
+      reference: 2026-10-11 jev-polls project thread, Giulio
   - id: proposal-then-adopt
     description: >-
       A generated cohort stays a proposal until the user chooses Review and edit cohort; Discard

@@ -72,8 +72,8 @@ export const STUDY_NEXT_CSS = String.raw`
 .review-panel-summary{margin-bottom:12px}
 .review-panel-steps{display:grid;gap:6px;margin:8px 0 14px;padding:0;list-style:none}
 .review-panel-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
-.review-panel-title{min-width:0;overflow-wrap:anywhere;font-size:13px;font-weight:600}
-.review-panel-requests{color:var(--muted);font-size:12px;white-space:nowrap}
+.review-panel-title{min-width:0;overflow-wrap:anywhere;font-size:var(--text-md);font-weight:600}
+.review-panel-requests{color:var(--muted);font-size:var(--text-sm);white-space:nowrap}
 .review-panel .guided-footer .row{gap:8px;flex-wrap:wrap;justify-content:flex-end}
 .link-button{appearance:none;border:0;background:transparent;padding:0;color:var(--blue);font:inherit;text-decoration:underline;cursor:pointer}
 `;
