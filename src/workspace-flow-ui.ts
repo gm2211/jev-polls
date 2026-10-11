@@ -205,10 +205,12 @@ function flowInspector(p,s){
   if(!s||S.flowPanel===false)return '';
   const tabs=flowRoundTabs(p,s),requested=S.sections['flow-inspector']==='answer'?'answers':S.sections['flow-inspector']||'question',tab=tabs.some(([key])=>key===requested)?requested:'question';
   const kind=s.kind==='poll'?'Ask the audience · '+answerName(Object.values(s.questions||{})[0]?.type):s.kind==='aggregate'?'Combine answers':'Final result';
+  // The panel names the step without its canvas number; a custom step name moves under the question so the title stays one line.
+  const full=stepTitle(p,s).replace(/^\d+\. /,''),name=s.label?.trim()||'',named=s.kind==='poll'&&!!name&&full.startsWith(name+': '),title=named?full.slice(name.length+2):full;
   const body=tab==='settings'?advancedStageForm(p,s):tab==='connections'?flowConnections(p,s):tab==='cohort'?flowSampleNotice(p,s)+flowCohortMap(p,s):s.kind==='poll'?stageForm(p,s,tab):stageForm(p,s,true);
   const error=S.sections['flow-inspector-error']?'<p class="setup-wizard-error" role="alert" tabindex="-1">'+esc(S.sections['flow-inspector-error'])+'</p>':'';
   const footer=inlineCohortTarget(p,s)&&tab==='cohort'?'':flowGuidedFooter(p,s,tab);
-  return '<aside class="flow-inspector round-panel" aria-label="Selected step editor" data-inspector-tab="'+attr(tab)+'"><div class="flow-inspector-head"><div class="round-panel-title"><h2 tabindex="-1">'+esc(stepTitle(p,s))+'</h2><span class="round-panel-kind">'+esc(kind)+'</span></div><div class="row"><button class="button small icon-button" data-act="flow-panel-close" aria-label="Close step panel" title="Close (Esc)">'+icon('close')+'</button></div></div><nav class="round-tabs" role="tablist" aria-label="Selected step sections">'+tabs.map(([key,label,todo,done])=>'<button type="button" role="tab" class="round-tab" data-act="flow-inspector" data-section="'+key+'" aria-selected="'+(tab===key)+'"'+(todo?' data-todo="true"':'')+(done?' data-done="true"':'')+'>'+flowTabContent(label,todo,done)+'</button>').join('')+'</nav><div class="flow-inspector-body" role="tabpanel">'+body+error+'</div>'+footer+'</aside>';
+  return '<aside class="flow-inspector round-panel" aria-label="Selected step editor" data-inspector-tab="'+attr(tab)+'"><div class="flow-inspector-head"><div class="round-panel-title"><h2 tabindex="-1" title="'+attr(title)+'">'+esc(title)+'</h2><span class="round-panel-kind">'+esc((named?name+' · ':'')+kind)+'</span></div><div class="row"><button class="button small icon-button" data-act="flow-panel-close" aria-label="Close step panel" title="Close (Esc)">'+icon('close')+'</button></div></div><nav class="round-tabs" role="tablist" aria-label="Selected step sections">'+tabs.map(([key,label,todo,done])=>'<button type="button" role="tab" class="round-tab" data-act="flow-inspector" data-section="'+key+'" aria-selected="'+(tab===key)+'"'+(todo?' data-todo="true"':'')+(done?' data-done="true"':'')+'>'+flowTabContent(label,todo,done)+'</button>').join('')+'</nav><div class="flow-inspector-body" role="tabpanel">'+body+error+'</div>'+footer+'</aside>';
 }
 function flowAddBar(p,add){
   const first=phaseOutput(p,add)[0];
@@ -589,7 +591,7 @@ export const ROUND_PANEL_CSS = `
 @keyframes round-panel-in{from{transform:translateX(24px);opacity:0}to{transform:none;opacity:1}}
 @media(prefers-reduced-motion:reduce){.round-panel{animation:none}}
 .round-panel .flow-inspector-head{align-items:center;padding:16px 18px 10px}
-.round-panel-title{display:grid;gap:2px;min-width:0}.round-panel-title h2{margin:0;font:600 var(--text-lg)/1.3 var(--display);letter-spacing:-.01em;overflow-wrap:anywhere}
+.round-panel-title{display:grid;gap:2px;min-width:0}.round-panel-title h2{margin:0;font:600 var(--text-lg)/1.3 var(--display);letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .round-panel-kind{font-size:var(--text-sm);color:var(--muted)}
 .round-tabs{display:flex;gap:2px;padding:0 12px;border-bottom:1px solid var(--line);overflow-x:auto}
 .round-tab{appearance:none;display:inline-flex;align-items:center;gap:6px;min-height:42px;padding:0 12px;border:0;border-bottom:2px solid transparent;background:transparent;color:var(--muted);font:inherit;font-size:var(--text-md);font-weight:600;white-space:nowrap;cursor:pointer}
@@ -600,6 +602,8 @@ export const ROUND_PANEL_CSS = `
 .guided-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;flex:none;padding:12px 18px;border-top:1px solid var(--line);background:var(--surface)}
 .round-panel .setup-wizard-error{margin:12px 0 0}
 .round-panel .flow-inspector-body{flex:1;min-height:0;overflow:auto;padding:16px 18px}
+.flow-inspector-body:has(>.panel>.step-settings){display:flex;flex-direction:column}.flow-inspector-body>.panel:has(>.step-settings){flex:1 0 auto;display:flex;flex-direction:column;margin:0}.flow-inspector .step-settings{flex:1 0 auto;display:flex;flex-direction:column;gap:10px}.step-settings-branch .checkrow{margin:0}.step-settings .field{margin:0;gap:4px}.step-settings .grid2{margin:0;gap:10px}.step-settings .question-card{margin:0;padding:0;border:0}.step-settings textarea{min-height:0}.step-settings-row{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr);gap:10px}.step-settings-pair{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:10px;align-items:start}.step-settings-question-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px}.step-settings-requires{max-height:96px;overflow:auto;padding-block:2px}.step-settings .toolbar{margin:0 0 6px}.flow-inspector .step-settings>.sticky-actions{justify-content:space-between;margin:auto -18px -16px;padding-inline:18px}
+@media(max-width:600px){.step-settings-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.step-settings-row>:first-child{grid-column:1/-1}.step-settings-pair{grid-template-columns:minmax(0,1fr)}}
 .round-outputs{margin-top:16px;padding-top:12px;border-top:1px solid var(--line)}.round-outputs h3{margin:0 0 4px;font-size:var(--text-md)}
 @media(max-width:760px){.round-panel{position:static;width:auto;box-shadow:none;animation:none}}
 @media(max-width:700px){.round-panel{position:fixed;inset:0;z-index:40;width:auto;border:0;border-radius:0;animation:none}body:has(.flow-workspace .round-panel){overflow:hidden}}
