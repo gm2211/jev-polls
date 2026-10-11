@@ -63,7 +63,7 @@ function flowSampleNotice(p,s){
 function flowReadiness(p,s){
   if(s.kind==='poll'){
     if(!Object.values(s.questions||{}).length||Object.values(s.questions).some(q=>!q.label.trim()||(/^What should this (?:step|phase) decide\?$/).test(q.label)))return 'Needs question';
-    if(!poolForPhase(p,s)?.personas.length)return 'Needs cohort';
+    if(!poolForPhase(p,s)?.personas.length)return 'Needs an audience';
     if(Object.values(s.questions).some(q=>q.type==='choice'?Object.keys(q.criteria).length<2||Object.entries(q.criteria).some(([key,value])=>!String(optionName(key,value)).trim()):q.type==='score'?q.criteria.length<2||q.criteria.some(value=>!value.trim()):false))return 'Needs options';
     if(flowSampleShort(p,s))return 'Needs more personas';
   }else if(!flowInputs(p,s).length)return 'Needs input';
@@ -110,7 +110,7 @@ function flowNodeInputs(p,s,list){
 function flowNode(p,s,list){
   const pool=poolForPhase(p,s),outputs=phaseOutput(p,s),status=flowReadiness(p,s),pending=S.flowSource?.pipelineId===p.id?S.flowSource:null;
   const targetable=pending&&flowCanConnect(p,pending.stage,pending.question,s)&&!flowAlreadyConnected(p,s,pending.stage,pending.question);
-  const {title,sub}=flowNodeTitle(p,s),kind=s.kind==='poll'?'Ask cohort':s.kind==='aggregate'?'Combine':'Final result';
+  const {title,sub}=flowNodeTitle(p,s),kind=s.kind==='poll'?'Ask the audience':s.kind==='aggregate'?'Combine':'Final result';
   const downstream=p.stages.some(x=>x.dependsOn.includes(s.id)),short=s.kind==='poll'&&flowSampleShort(p,s);
   const who=s.kind!=='poll'?'':pool?.personas.length?'<button class="flow-who" data-act="flow-cohort-map" data-id="'+attr(s.id)+'" aria-label="Explore '+attr(pool.name)+' ('+flowPlural(pool.personas.length,'member')+')" title="Explore the cohort"><span class="flow-host-dots" aria-hidden="true">'+pool.personas.slice(0,8).map(()=>'<i></i>').join('')+'</span><span class="flow-who-text"><strong>'+esc(pool.name)+'</strong><span>'+(short?'<span class="flow-sample-short">'+short.asks.toLocaleString('en-US')+' of '+flowPlural(short.have,'persona')+'</span>':flowPlural(s.size??pool.personas.length,'persona'))+'</span></span></button>':'';
   return '<article class="flow-node" data-flow-node="'+attr(s.id)+'" data-stage-index="'+p.stages.indexOf(s)+'" data-selected="'+(S.stageId===s.id)+'" data-targetable="'+!!targetable+'" aria-label="'+attr(stepTitle(p,s))+'">'+
@@ -119,7 +119,7 @@ function flowNode(p,s,list){
     '<button class="flow-select" data-act="flow-select" data-id="'+attr(s.id)+'" aria-pressed="'+(S.stageId===s.id)+'" aria-label="'+(targetable?'Connect to ':'Edit ')+attr(stepTitle(p,s))+'"><strong>'+esc(title)+'</strong>'+(sub?'<span>'+esc(sub)+'</span>':'')+'</button>'+
     who+
     (targetable?'<button class="flow-destination" data-act="flow-connect" data-id="'+attr(s.id)+'" aria-label="Connect here: '+attr(stepTitle(p,s))+'">'+icon('plus')+' Connect here</button>':'')+
-    '<div class="flow-node-outputs">'+outputs.map(q=>{const used=flowOutputUsed(p,s,q)||(s.kind==='decision'&&!downstream),label=(outputs.length>1?(q.label||q.id)+' · ':'')+flowOutputLabel(p,s,q);return '<button class="flow-output" data-act="flow-output" data-id="'+attr(s.id)+'" data-question="'+attr(q.id)+'" data-used="'+used+'" aria-pressed="'+(pending?.stage===s.id&&pending?.question===q.id)+'" aria-label="Connect '+attr(flowOutputLabel(p,s,q))+' from '+attr(stepTitle(p,s))+'" title="'+(s.kind==='decision'&&!downstream?'The study\'s final answer. Click to pass it to another step.':used?'Sent to a later step. Click to send it to another step too.':'Click, then choose the step that should use it')+'"><span class="flow-output-text">'+(used?'':'<strong>Connect output '+icon('right')+'</strong>')+'<span>'+esc(label)+'</span></span><span class="flow-socket" aria-hidden="true"></span></button>'}).join('')+'</div>'+
+    '<div class="flow-node-outputs">'+outputs.map(q=>{const used=flowOutputUsed(p,s,q)||(s.kind==='decision'&&!downstream),label=(outputs.length>1?(q.label||q.id)+' · ':'')+flowOutputLabel(p,s,q);return '<button class="flow-output" data-act="flow-output" data-id="'+attr(s.id)+'" data-question="'+attr(q.id)+'" data-used="'+used+'" aria-pressed="'+(pending?.stage===s.id&&pending?.question===q.id)+'" aria-label="Connect '+attr(flowOutputLabel(p,s,q))+' from '+attr(stepTitle(p,s))+'" title="'+(s.kind==='decision'&&!downstream?'The study\'s final answer. Drag it onto another step, or click to pass it on.':used?'Sent to a later step. Drag it onto another step to send it there too.':'Drag onto the step that should use it, or click then choose the step')+'"><span class="flow-output-text">'+(used?'':'<strong>Connect output '+icon('right')+'</strong>')+'<span>'+esc(label)+'</span></span><span class="flow-socket" aria-hidden="true"></span></button>'}).join('')+'</div>'+
     (downstream||s.kind==='decision'?'':'<button class="flow-next" data-act="flow-add-menu" data-id="'+attr(s.id)+'" aria-label="Add after '+attr(stepTitle(p,s))+'">'+icon('plus')+'<span>Add next step</span></button>')+'</article>';
 }
 function flowNewStage(p,kind,source){
@@ -176,7 +176,7 @@ function flowTodo(p){
   }
   return todo;
 }
-/** The guided stops of an Ask cohort step, in order: what to ask, its options (Yes/no has none), who answers. Inputs sits outside the sequence. */
+/** The guided stops of an Ask the audience step, in order: what to ask, its options (Yes/no has none), who answers. Inputs sits outside the sequence. */
 const FLOW_STOP_LABEL={question:'What to ask',answers:'Options',cohort:'Who answers',connections:'Inputs'};
 function flowGuidedStops(s){
   if(s.kind!=='poll')return [];
@@ -204,7 +204,7 @@ function flowGuidedFooter(p,s,tab){
 function flowInspector(p,s){
   if(!s||S.flowPanel===false)return '';
   const tabs=flowRoundTabs(p,s),requested=S.sections['flow-inspector']==='answer'?'answers':S.sections['flow-inspector']||'question',tab=tabs.some(([key])=>key===requested)?requested:'question';
-  const kind=s.kind==='poll'?'Ask cohort · '+answerName(Object.values(s.questions||{})[0]?.type):s.kind==='aggregate'?'Combine answers':'Final result';
+  const kind=s.kind==='poll'?'Ask the audience · '+answerName(Object.values(s.questions||{})[0]?.type):s.kind==='aggregate'?'Combine answers':'Final result';
   const body=tab==='settings'?advancedStageForm(p,s):tab==='connections'?flowConnections(p,s):tab==='cohort'?flowSampleNotice(p,s)+flowCohortMap(p,s):s.kind==='poll'?stageForm(p,s,tab):stageForm(p,s,true);
   const error=S.sections['flow-inspector-error']?'<p class="setup-wizard-error" role="alert" tabindex="-1">'+esc(S.sections['flow-inspector-error'])+'</p>':'';
   const footer=inlineCohortTarget(p,s)&&tab==='cohort'?'':flowGuidedFooter(p,s,tab);
@@ -218,7 +218,7 @@ function flowWorkspace(p,s){
   const pending=S.flowSource?.pipelineId===p.id?S.flowSource:null,add=p.stages.find(x=>x.id===S.flowAdd),list=flowListMode();
   return '<div class="flow-workspace"><section class="flow-board" aria-label="Study flow"><div class="flow-toolbar"><h2>Study flow <span>'+flowPlural(p.stages.length,'step')+'</span></h2><div class="row"><button class="button small primary" data-act="flow-create-open" aria-haspopup="dialog">'+icon('plus')+' Add step</button>'+(list?'':'<button class="button small icon-button" data-act="flow-fit" aria-label="Fit flow to view" title="Fit flow to view">'+icon('fit')+'</button><button class="button small" data-act="flow-reset" aria-label="Actual size" title="Actual size">100%</button>')+'</div></div>'+
     (add&&!list?flowAddBar(p,add):'')+
-    (pending?'<div class="flow-hint" role="status">'+'<span><strong>Choose where it goes</strong><br>'+esc(inputTitle(p,{stage:pending.stage,question:pending.question}))+' → Click <strong>Connect here</strong> on a highlighted step.</span><button class="button small" data-act="flow-cancel">Cancel connection</button>'+'</div>':'')+flowCanvas(p)+'</section>'+(studyReviewPanel(p)||flowInspector(p,s))+'</div>';
+    (pending?'<div class="flow-hint" role="status">'+'<span><strong>Choose where it goes</strong><br>'+esc(inputTitle(p,{stage:pending.stage,question:pending.question}))+' → Click <strong>Connect here</strong> on a highlighted step, or drag the output onto it.</span><button class="button small" data-act="flow-cancel">Cancel connection</button>'+'</div>':'')+flowCanvas(p)+'</section>'+(studyReviewPanel(p)||flowInspector(p,s))+'</div>';
 }
 function flowAction(a,el){
   if(!a.startsWith('flow-'))return false;
@@ -339,7 +339,7 @@ function drawFlowEdges(){
 
 /* Freeform canvas: drag steps, pan empty canvas, click empty canvas to add a step (Railway/Hex style). */
 const FLOW_KINDS=[
-  {kind:'poll',label:'Ask cohort',hint:'Ask one or more questions to a cohort',keys:'question poll ask survey',icon:'<path d="M5 5h14v10H9l-4 4z"/>'},
+  {kind:'poll',label:'Ask the audience',hint:'Ask one or more questions to an audience',keys:'question poll ask survey',icon:'<path d="M5 5h14v10H9l-4 4z"/>'},
   {kind:'aggregate',label:'Combine answers',hint:'Weight compatible answers together',keys:'aggregate merge weight join',icon:'<path d="M5 5c0 7 7 7 7 14M19 5c0 7-7 7-7 14"/>'},
   {kind:'decision',label:'Final result',hint:'Select the leading option from a Choice',keys:'decision winner outcome',icon:'<path d="M6 21V4h11l-2 4 2 4H6"/>'},
 ];
@@ -402,6 +402,39 @@ function flowEdgePath(a,b,box){
   const x1=a.right-box.left,y1=a.top+a.height/2-box.top,x2=b.left-box.left-3,y2=b.top+b.height/2-box.top,d=Math.max(48,Math.abs(x2-x1)/2);
   return 'M '+x1+' '+y1+' C '+(x1+d)+' '+y1+', '+(x2-d)+' '+y2+', '+x2+' '+y2;
 }
+/** Drag-to-connect: pull a wire from an output socket and drop it on a step that can use it. */
+function flowWireStart(d){
+  const p=pipeline(),stage=d.output.dataset.id,question=d.output.dataset.question;
+  if(!p||!p.stages.some(s=>s.id===stage)){flowDrag=null;return false}
+  Object.assign(d,{p,stage,question,target:null});flowCloseCreate();
+  d.viewport.classList.add('flow-connecting');d.output.setAttribute('data-wiring','true');
+  for(const n of d.viewport.querySelectorAll('[data-flow-node]')){const s=p.stages.find(x=>x.id===n.dataset.flowNode);if(s&&flowCanConnect(p,stage,question,s)&&!flowAlreadyConnected(p,s,stage,question))n.setAttribute('data-drop-ok','true')}
+  const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');svg.setAttribute('class','flow-drag-wire');svg.setAttribute('aria-hidden','true');
+  const path=document.createElementNS('http://www.w3.org/2000/svg','path');svg.append(path);document.body.append(svg);d.wire=svg;
+  return true;
+}
+function flowWireMove(d,e){
+  const v=d.viewport,box=v.getBoundingClientRect(),edge=36,step=14;
+  if(e.clientX<box.left+edge)v.scrollLeft-=step;else if(e.clientX>box.right-edge)v.scrollLeft+=step;
+  if(e.clientY<box.top+edge)v.scrollTop-=step;else if(e.clientY>box.bottom-edge)v.scrollTop+=step;
+  const hit=document.elementFromPoint?.(e.clientX,e.clientY)?.closest?.('[data-flow-node]'),target=hit&&v.contains(hit)&&hit.dataset.dropOk==='true'?hit:null;
+  if(target!==d.target){d.target?.removeAttribute('data-drop-target');target?.setAttribute('data-drop-target','true');d.target=target}
+  const socket=(d.output.querySelector('.flow-socket')||d.output).getBoundingClientRect(),x1=socket.left+socket.width/2,y1=socket.top+socket.height/2;
+  let x2=e.clientX,y2=e.clientY;
+  if(target){const inlet=target.getBoundingClientRect();x2=inlet.left;y2=Math.max(inlet.top+12,Math.min(e.clientY,inlet.bottom-12))}
+  const c=Math.max(40,Math.abs(x2-x1)/2);
+  d.wire.firstChild.setAttribute('d','M '+x1+' '+y1+' C '+(x1+c)+' '+y1+', '+(x2-c)+' '+y2+', '+x2+' '+y2);
+  d.wire.toggleAttribute('data-snapped',!!target);
+}
+function flowWireEnd(d,cancelled){
+  d.wire?.remove();d.viewport.classList.remove('flow-connecting');d.output.removeAttribute('data-wiring');
+  d.viewport.querySelectorAll('[data-drop-ok],[data-drop-target]').forEach(n=>{n.removeAttribute('data-drop-ok');n.removeAttribute('data-drop-target')});
+  const id=d.target?.dataset.flowNode;if(cancelled||!id)return;
+  try{flowConnect(d.p,d.stage,d.question,id)}catch(error){fail(error);return}
+  if(S.reviewPanel){S.reviewPanel=false;S.plan=null}
+  S.flowSource=null;S.stageId=id;if(S.flowPanel)S.sections['flow-inspector']='connections';S.dirty=true;S.plan=null;render();
+  say('Connected to '+stepTitle(d.p,d.p.stages.find(s=>s.id===id))+'.');
+}
 function flowRedraw(){if(flowFrame)return;flowFrame=requestAnimationFrame(()=>{flowFrame=0;drawFlowEdges()})}
 function wireFlowCanvas(){
 document.addEventListener('pointerdown',e=>{
@@ -409,8 +442,8 @@ document.addEventListener('pointerdown',e=>{
   const viewport=e.target.closest('.flow-viewport');
   if(!viewport||e.target.closest('.flow-create-menu,input,select,textarea,a'))return;
   const box=viewport.getBoundingClientRect();if(e.clientX>=box.left+viewport.clientLeft+viewport.clientWidth||e.clientY>=box.top+viewport.clientTop+viewport.clientHeight)return;
-  const node=e.target.closest('[data-flow-node]');
-  flowDrag={pointerId:e.pointerId,type:e.pointerType,x:e.clientX,y:e.clientY,node,onWire:!!e.target.closest('.flow-wire-hit'),viewport,moved:false,scrollLeft:viewport.scrollLeft,scrollTop:viewport.scrollTop,menuOpen:!!S.flowCreate};
+  const node=e.target.closest('[data-flow-node]'),output=e.target.closest('.flow-map [data-act=flow-output]');
+  flowDrag={pointerId:e.pointerId,type:e.pointerType,x:e.clientX,y:e.clientY,node,output,onWire:!!e.target.closest('.flow-wire-hit'),viewport,moved:false,scrollLeft:viewport.scrollLeft,scrollTop:viewport.scrollTop,menuOpen:!!S.flowCreate};
 });
 document.addEventListener('pointermove',e=>{
   const d=flowDrag;if(!d||e.pointerId!==d.pointerId)return;
@@ -419,15 +452,18 @@ document.addEventListener('pointermove',e=>{
     if(Math.hypot(dx,dy)<5)return;
     if(!d.node&&d.type==='touch'){flowDrag=null;return}
     d.moved=true;d.scale=flowScaleApplied;d.viewport.classList.add('flow-dragging');
-    if(d.node){const p=pipeline();flowFreezeLayout(p);d.p=p;d.id=d.node.dataset.flowNode;d.start={...p.layout[d.id]};d.node.classList.add('flow-node-dragging');flowCloseCreate()}
+    if(d.output){if(!flowWireStart(d))return}
+    else if(d.node){const p=pipeline();flowFreezeLayout(p);d.p=p;d.id=d.node.dataset.flowNode;d.start={...p.layout[d.id]};d.node.classList.add('flow-node-dragging');flowCloseCreate()}
   }
   e.preventDefault();
-  if(d.node){d.p.layout[d.id]={x:Math.max(0,Math.round(d.start.x+dx/d.scale)),y:Math.max(0,Math.round(d.start.y+dy/d.scale))};flowRedraw()}
+  if(d.output)flowWireMove(d,e);
+  else if(d.node){d.p.layout[d.id]={x:Math.max(0,Math.round(d.start.x+dx/d.scale)),y:Math.max(0,Math.round(d.start.y+dy/d.scale))};flowRedraw()}
   else{d.viewport.scrollLeft=d.scrollLeft-dx;d.viewport.scrollTop=d.scrollTop-dy}
 });
 function flowPointerEnd(e,cancelled){
   const d=flowDrag;if(!d||e.pointerId!==d.pointerId)return;flowDrag=null;
   d.viewport.classList.remove('flow-dragging');d.node?.classList.remove('flow-node-dragging');
+  if(d.output&&d.moved){flowSuppressClick=true;setTimeout(()=>{flowSuppressClick=false},0);flowWireEnd(d,cancelled);return}
   if(d.moved){
     flowSuppressClick=true;setTimeout(()=>{flowSuppressClick=false},0);
     if(d.node){S.flowScale=d.scale;S.dirty=true;S.plan=null;render()}
@@ -514,7 +550,11 @@ const FLOW_BASE_CSS = `
 @media(max-width:1000px){.flow-workspace{grid-template-columns:minmax(0,1fr) 320px}.flow-toolbar{flex-wrap:wrap;gap:8px}.flow-toolbar h2{flex:1}}
 @media(max-width:760px){.flow-workspace{grid-template-columns:minmax(0,1fr)}.flow-viewport{min-height:240px;max-height:350px}.flow-inspector-body{max-height:none;min-height:0}.flow-inspector-head h2{font-size:14px}.flow-toolbar{padding:10px 12px}.flow-hint{padding:8px 12px}.flow-column,.flow-node{width:216px}.flow-map{gap:100px}.flow-inspector>.section-tabs .button{flex:1}}
 .flow-space{position:relative}.flow-viewport{cursor:default}.flow-viewport.flow-dragging{cursor:grabbing;user-select:none;-webkit-user-select:none}.flow-viewport.flow-dragging *{cursor:grabbing!important}
-.flow-node{cursor:grab;touch-action:none}.flow-map.flow-free{display:block;padding:0}.flow-map.flow-free .flow-column{display:contents}.flow-map.flow-free .flow-node{position:absolute;margin:0}
+.flow-node{cursor:grab;touch-action:none}.flow-map .flow-output{cursor:crosshair}
+.flow-viewport.flow-connecting{user-select:none;-webkit-user-select:none}.flow-viewport.flow-connecting *{cursor:crosshair!important}
+.flow-connecting .flow-node:not([data-drop-ok]):not(:has([data-wiring])){opacity:.55}.flow-node[data-drop-ok=true]{border-style:dashed;border-color:var(--blue)}.flow-node[data-drop-target=true]{border:2px solid var(--blue);box-shadow:0 0 0 4px var(--selection)}
+.flow-output[data-wiring=true]{background:var(--selection)}.flow-output[data-wiring=true] .flow-socket{background:var(--blue)}
+.flow-drag-wire{position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none;z-index:60;overflow:visible}.flow-drag-wire path{fill:none;stroke:var(--blue);stroke-width:2;stroke-dasharray:6 5}.flow-drag-wire[data-snapped] path{stroke-dasharray:none;stroke-width:2.5}.flow-map.flow-free{display:block;padding:0}.flow-map.flow-free .flow-column{display:contents}.flow-map.flow-free .flow-node{position:absolute;margin:0}
 .flow-node-dragging{z-index:3;box-shadow:0 14px 30px rgba(15,35,55,.2)}.flow-node-dragging button{pointer-events:none}
 .flow-create-menu{position:absolute;z-index:6;width:300px;max-width:calc(100vw - 48px);display:grid;gap:2px;padding:6px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink);box-shadow:0 18px 40px rgba(15,35,55,.22);cursor:default}
 .flow-create-search{width:100%;border:0;border-bottom:1px solid var(--line);border-radius:0;padding:10px 10px 12px;margin-bottom:4px;font:inherit;font-size:13px;background:transparent;color:var(--ink);outline:none;box-shadow:none}

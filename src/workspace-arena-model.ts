@@ -18,7 +18,7 @@ export function createArenaModel() {
   type Visual = { state: 'queued' | 'running' | 'failed' | 'done'; /** 'option' tiles use palette `index`; 'scale' tiles use `value` 0..1. */ fill: 'none' | 'option' | 'scale'; index: number; value: number; progress: number | null };
 
   /** Option colours are palette slots; the first PALETTE slots are curated in CSS, later ones are generated. */
-  const PALETTE = 8;
+  const PALETTE = 14;
   const GROUP_LIMIT = 12;
   const AGE_BANDS: [number, number, string][] = [[0, 30, '18–29'], [30, 40, '30–39'], [40, 50, '40–49'], [50, 60, '50–59'], [60, 70, '60–69'], [70, 1000, '70+']];
 
@@ -250,9 +250,10 @@ export function createArenaModel() {
     const min = options.min ?? 8, max = options.max ?? 22;
     const safeWidth = Math.max(60, width);
     const widest = Math.max(1, ...counts);
-    const attempt = (tile: number, shared: number): { columns: number[]; height: number } => {
+    const attempt = (tile: number, shared: number, even = false): { columns: number[]; height: number } => {
       const cell = tile + gap;
-      const columns = counts.map(count => Math.max(1, Math.min(count, shared)));
+      // `even` gives every group about the same number of rows (columns follow group size), so a row of unequal groups wastes less.
+      const columns = counts.map(count => Math.max(1, Math.min(count, even ? Math.round(shared * count / widest) : shared)));
       let rowWidth = 0, rowHeight = 0, total = 0;
       counts.forEach((count, index) => {
         const w = columns[index]! * cell - gap + 2 * pad, h = header + Math.ceil(count / columns[index]!) * cell - gap + 2 * pad;
@@ -265,7 +266,7 @@ export function createArenaModel() {
     const best = (tile: number): { columns: number[]; height: number } => {
       const room = Math.max(1, Math.min(widest, Math.floor((safeWidth - 2 * pad + gap) / (tile + gap))));
       let winner = attempt(tile, 1);
-      for (let shared = 1; shared <= room; shared += 1) { const candidate = attempt(tile, shared); if (candidate.height < winner.height) winner = candidate; }
+      for (let shared = 1; shared <= room; shared += 1) for (const even of [false, true]) { const candidate = attempt(tile, shared, even); if (candidate.height < winner.height) winner = candidate; }
       return winner;
     };
     if (!counts.length) return { tile: max, columns: [], height: 0, fits: true };
@@ -279,6 +280,8 @@ export function createArenaModel() {
 
   /** Biggest tile worth drawing: a handful of members get large tiles with room for a progress ring. */
   function tileCap(total: number): number { return total <= 24 ? 64 : total <= 90 ? 44 : total <= 260 ? 30 : 22; }
+  /** Biggest tile Fit may choose in the full-screen view: the viewport decides, this only stops a handful of members becoming billboards. */
+  function fitCap(total: number): number { return total <= 24 ? 72 : total <= 90 ? 56 : total <= 260 ? 44 : 40; }
   function tileFor(total: number, zoom: string): number { const cap = tileCap(total); return zoom === '2' ? Math.round(cap * (cap >= 44 ? 1.25 : 1.45)) : cap; }
   /** Two letters for the middle of a big tile. */
   function initials(label: string): string {
@@ -295,13 +298,24 @@ export function createArenaModel() {
 
   // ---- status strip ------------------------------------------------------------------------------------
 
-  /** Evaluations per second over the trailing window, or null until two readings span enough time. */
+  /**
+   * Evaluations per second over the trailing window, measured from the poll just before the first finished
+   * evaluation so the first seconds neither read 0 nor jump to a burst. Elapsed time never counts for less
+   * than two seconds, so the figure ramps up smoothly. Null until something has finished.
+   */
   function rate(samples: { t: number; done: number }[], now: number, windowMs = 20000): number | null {
-    const recent = samples.filter(sample => now - sample.t <= windowMs);
-    if (recent.length < 2) return null;
-    const first = recent[0]!, last = recent[recent.length - 1]!;
-    const seconds = (last.t - first.t) / 1000;
-    return seconds >= 1.5 ? Math.max(0, (last.done - first.done) / seconds) : null;
+    if (samples.length < 2) return null;
+    const baseline = samples[0]!.done, first = samples.findIndex(sample => sample.done > baseline);
+    if (first < 1) return null;
+    const anchor = samples[first - 1]!, recent = samples.filter(sample => now - sample.t <= windowMs);
+    const from = recent.length && recent[0]!.t > anchor.t ? recent[0]! : anchor, last = samples[samples.length - 1]!;
+    const seconds = Math.max(2, (last.t - from.t) / 1000);
+    return Math.max(0, (last.done - from.done) / seconds);
+  }
+
+  /** Exponential smoothing for the number shown in the status strip. */
+  function smoothRate(previous: number | null, next: number | null, weight = 0.35): number | null {
+    return next === null ? previous : previous === null ? next : previous + (next - previous) * weight;
   }
 
   function secondsLeft(remaining: number, perSecond: number | null): number | null {
@@ -393,7 +407,106 @@ export function createArenaModel() {
     return Math.min(total, cursor + perSecond * elapsedMs / 1000);
   }
 
-  return { PALETTE, GROUP_LIMIT, tileCap, tileFor, initials, memberKey, describeQuestions, answerFor, topPick, confidenceOf, tileVisual, optionColor, groupMembers, groupFields, leaderboard, fitLayout, fixedLayout, rate, secondsLeft, duration, signature, patchPlan, mergeMembers, replayOrder, replayMembers, replayRate, replayAdvance };
+  // ---- commentary and results ---------------------------------------------------------------------------
+
+  type NewsLine = { n: number; text: string; kind: 'lead' | 'segment' | 'milestone' | 'split' };
+  const pctText = (share: number): string => `${Math.round(share * 1000) / 10}%`.replace(/\.0%$/, '%');
+  const pctWhole = (share: number): string => `${Math.round(share * 100)}%`;
+  const MILESTONES: [number, string][] = [[0.25, 'A quarter'], [0.5, 'Half'], [0.75, 'Three quarters'], [1, 'Every']];
+  const WAYS = ['', '', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight'];
+
+  /**
+   * Short factual lines about how a choice question is going, derived only from the members' recorded answers
+   * walked in finishing order: lead changes, segments whose favourite changes, milestones at 25/50/75/100% of the
+   * step, and segments that finish split. `n` is how many evaluations had finished when the line became true, so a
+   * replay at any position shows exactly the lines a live run showed, in order.
+   */
+  function commentary(members: Member[], question: Question | undefined, segmentLabels: Record<string, string> = {}): NewsLine[] {
+    const total = members.length, lines: NewsLine[] = [];
+    if (!total) return lines;
+    const finished = replayOrder(members);
+    const choice = question?.type === 'choice' && question.options.length > 1 ? question : undefined;
+    const weighted = finished.length > 0 && finished.filter(member => member.status === 'completed').every(member => typeof member.weight === 'number' && member.weight > 0);
+    const size = new Map<string, number>();
+    for (const member of members) size.set(member.segment, (size.get(member.segment) ?? 0) + 1);
+    const overall = new Map<string, number>(), seg = new Map<string, { mass: Map<string, number>; weight: number; n: number; leader: string; last: number }>();
+    let weight = 0, leader = '', announced = '', lastLeadAt = -1e9, evaluated = 0, nextMilestone = 0;
+    const label = (id: string): string => choice!.options.find(option => option.id === id)?.label ?? id;
+    const top = (mass: Map<string, number>): string => { let best = '', value = -1; for (const option of choice!.options) { const m = mass.get(option.id) ?? 0; if (m > value + 1e-12) { value = m; best = option.id; } } return best; };
+    const minGap = Math.max(3, Math.round(total * 0.03));
+    finished.forEach((member, position) => {
+      const count = position + 1;
+      if (choice && member.status === 'completed') {
+        const answer = answerFor(member, choice);
+        if (answer) {
+          evaluated += 1;
+          const w = weighted ? member.weight! : 1, slot = seg.get(member.segment) ?? { mass: new Map<string, number>(), weight: 0, n: 0, leader: '', last: -1e9 };
+          seg.set(member.segment, slot);
+          weight += w; slot.weight += w; slot.n += 1;
+          for (const option of choice.options) {
+            const p = (Number(answer.probabilities?.[option.id]) || 0) * w;
+            overall.set(option.id, (overall.get(option.id) ?? 0) + p); slot.mass.set(option.id, (slot.mass.get(option.id) ?? 0) + p);
+          }
+          const best = top(overall);
+          if (evaluated >= Math.min(20, Math.max(5, Math.round(total * 0.02))) && best !== leader) {
+            const margin = leader ? ((overall.get(best) ?? 0) - (overall.get(leader) ?? 0)) / weight : 1;
+            if (!leader || (margin > 0.003 && count - lastLeadAt >= minGap)) {
+              if (best !== announced) lines.push({ n: count, kind: 'lead', text: announced ? `${label(best)} takes the lead` : `${label(best)} leads early at ${pctText((overall.get(best) ?? 0) / weight)}` });
+              announced = best; leader = best; lastLeadAt = count;
+            }
+          }
+          const segTop = top(slot.mass);
+          const segSize = size.get(member.segment) ?? 1;
+          if (slot.n >= Math.max(8, Math.round(segSize * 0.15)) && segTop !== slot.leader && count - slot.last >= minGap && segTop !== leader) {
+            const share = (slot.mass.get(segTop) ?? 0) / slot.weight, name = segmentLabels[member.segment] || member.segment;
+            lines.push({ n: count, kind: 'segment', text: `${name} ${slot.leader ? 'swing to' : 'lean'} ${label(segTop)}: ${pctWhole(share)} of ${slot.n.toLocaleString('en-US')} so far` });
+            slot.last = count;
+          }
+          if (slot.n >= Math.max(8, Math.round(segSize * 0.15)) && segTop) slot.leader = segTop;
+          if (slot.n === segSize && segSize >= 8) {
+            const shares = choice.options.map(option => (slot.mass.get(option.id) ?? 0) / slot.weight).sort((a, b) => b - a);
+            let ways = 1;
+            while (ways < Math.min(8, shares.length) && shares[0]! - shares[ways]! <= 0.04) ways += 1;
+            if (ways >= 3) lines.push({ n: count, kind: 'split', text: `${segmentLabels[member.segment] || member.segment} split ${WAYS[ways]} ways` });
+          }
+        }
+      }
+      while (nextMilestone < MILESTONES.length && count / total >= MILESTONES[nextMilestone]![0] - 1e-9) {
+        const [fraction, word] = MILESTONES[nextMilestone]!;
+        const lead = choice && weight > 0 && top(overall) ? ` · ${label(top(overall))} ${fraction === 1 ? 'finishes first' : 'leads'} at ${pctText((overall.get(top(overall)) ?? 0) / weight)}` : '';
+        lines.push({ n: count, kind: 'milestone', text: fraction === 1 ? `All ${total.toLocaleString('en-US')} evaluations are in${lead}` : `${word} of the ${total.toLocaleString('en-US')} evaluations are in${lead}` });
+        nextMilestone += 1;
+      }
+    });
+    return lines;
+  }
+
+  /** Each segment's best `count` options by weighted share, for the results panel. Segments keep first-seen order. */
+  function segmentTops(members: Member[], question: Question | undefined, segmentLabels: Record<string, string> = {}, count = 3): { id: string; label: string; evaluated: number; top: { id: string; label: string; share: number }[] }[] {
+    if (!question || question.type !== 'choice') return [];
+    const order: string[] = [];
+    for (const member of members) if (!order.includes(member.segment)) order.push(member.segment);
+    return order.map(id => {
+      const board = leaderboard(members.filter(member => member.segment === id), question);
+      return { id, label: segmentLabels[id] || id, evaluated: board.evaluated, top: board.rows.slice(0, count).map(row => ({ id: row.id, label: row.label, share: row.share })) };
+    }).filter(entry => entry.evaluated > 0);
+  }
+
+  /** One factual sentence for a finished choice question: the overall leader and whether segments agree. */
+  function resultSummary(board: { rows: { id: string; label: string; share: number }[]; leader: string | null; evaluated: number }, tops: { label: string; top: { id: string; label: string }[] }[]): string {
+    const lead = board.rows.find(row => row.id === board.leader);
+    if (!lead || !board.evaluated) return '';
+    const base = `${lead.label} leads overall at ${pctText(lead.share)}`;
+    const rated = tops.filter(entry => entry.top[0]);
+    if (rated.length < 2) return `${base}.`;
+    const apart = rated.filter(entry => entry.top[0]!.id !== lead.id);
+    if (!apart.length) return `${base} and tops every segment.`;
+    const distinct = new Set(rated.map(entry => entry.top[0]!.id)).size;
+    if (distinct === rated.length) return `${base}, but each segment prefers a different option.`;
+    return `${base}, but ${apart.length} of ${rated.length} segments prefer a different option.`;
+  }
+
+  return { PALETTE, GROUP_LIMIT, tileCap, fitCap, tileFor, initials, memberKey, describeQuestions, answerFor, topPick, confidenceOf, tileVisual, optionColor, groupMembers, groupFields, leaderboard, fitLayout, fixedLayout, rate, smoothRate, commentary, segmentTops, resultSummary, secondsLeft, duration, signature, patchPlan, mergeMembers, replayOrder, replayMembers, replayRate, replayAdvance };
 }
 
 export const arenaModel = createArenaModel();

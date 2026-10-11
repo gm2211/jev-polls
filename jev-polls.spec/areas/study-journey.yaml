@@ -284,6 +284,20 @@ behaviors:
     source:
       text: "first step should be choosing question tipe: yes / no, ranking, noul (or whatever the jev types are)"
       reference: jev-polls project chat, Giulio, 2026-10-09, with a screenshot of Step settings
+  - id: audience-wording
+    description: >-
+      In the guided flow an Ask cohort step reads "Ask the audience": the step panel subtitle is
+      "Ask the audience · <kind of answer>", the canvas card kind is "Ask the audience", and an
+      unfinished step says "Needs an audience", matching the Who answers stop. The Cohorts
+      navigation name and the data model's cohort stay as they are.
+    details: >-
+      Replaces "Ask cohort · Compare options" and "Needs cohort", which mixed two words for the
+      same thing. The step-kind menu and review screens use the same name.
+    source:
+      text: >-
+        in the guided flow use "Who answers" / "Needs an audience" / "Ask the audience", consistent
+        with the Who answers stop. Keep the Cohorts nav name.
+      reference: 2026-10-10 jev-polls project thread, Giulio
   - id: study-settings-page
     description: >-
       A study page has no tab row: the canvas is the study, and a settings button beside the study
