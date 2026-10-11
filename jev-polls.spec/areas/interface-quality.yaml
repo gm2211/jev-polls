@@ -153,3 +153,24 @@ behaviors:
     source:
       text: Five words for the same thing (UI audit, item 6)
       reference: jev-polls project thread "UI audit in a headless browser", 2026-10-10
+  - id: step-panel-one-type-scale
+    description: >-
+      Every tab of the step panel uses the same sizes: field labels and help text at the small
+      size, inputs, selects and text areas at the body size, and section headings at the body size.
+      No tab shrinks its own labels or inputs.
+    details: >-
+      Before 2026-10-11 a desktop density block made "What do you want to ask?" 11px while "Who are
+      they?" was 12px, the question text area 12px while the AI select was 14px, and help text 11px.
+    source:
+      text: fonts are inconsistent across ui elements, also too many buttons it should be intuitive
+      reference: jev-polls project chat, Giulio, 2026-10-11
+  - id: step-panel-one-next
+    description: >-
+      While the step panel shows a guided stop (What to ask, Options, Who answers), its footer is the
+      only Next button; the study header drops its own Next until the panel closes or shows Settings
+      or Inputs. The Options tab shows the options and the honest output note only, without a second
+      heading or a "Later steps can use" list. Refresh connections appears only when the chosen
+      drafting AI is not ready. The Settings tab has no second "Step settings" heading.
+    source:
+      text: too many buttons it should be intuitive
+      reference: jev-polls project chat, Giulio, 2026-10-11
