@@ -97,3 +97,24 @@ behaviors:
     source:
       text: A Choice question records only one pick. The full ranking is given in the chair's written explanation.
       reference: jev-polls project thread, 2026-10-10
+  - id: one-prompt-study
+    description: >-
+      One prompt in Build with words builds the study and its large audiences: the assistant drafts
+      personas inline only up to 25 people and otherwise returns an audience request (description
+      and size); applying the proposal lands the steps, saves the small cohorts, and starts each
+      requested audience's normal generation job in its step, one at a time.
+    details: >-
+      An audience request is a cohort entry with an audienceRequest and no personas; size is 1 to
+      20,000 and the description is required, and a cohort that has both personas and a request,
+      reuses a saved id, or is used by no step rejects the proposal. The proposal review lists each
+      one as "Will generate: name · N people". On apply the step keeps an unselected cohort; the
+      job is the same one as Create the audience on the Who answers stop, so the user sees the
+      step panel's progress and later chooses Use this audience, which assigns the cohort to the
+      step. Requests queue in sessionStorage and the next starts once the current audience is used
+      or discarded. A cohort job records the step it was started for, so a reload or another tab
+      returns to the generating step (drafting-job-recovery).
+    source:
+      text: >-
+        focus on the feature and ux changes needed to make demo more compelling rather than tricks
+        to make video look nicer
+      reference: 2026-10-11 jev-polls project thread, Giulio

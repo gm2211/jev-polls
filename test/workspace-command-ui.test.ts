@@ -19,6 +19,7 @@ function harness(overrides: Record<string, unknown> = {}) {
     pipeline: () => S.doc.pipelines.find((p: any) => p.id === S.pipelineId),
     flushForms() { calls.push('flush'); if (S.invalid) throw Error('Invalid field'); }, render() { calls.push('render'); },
     selectProject(id: string) { calls.push('project:' + id); S.projectId = id; }, act(_: unknown, el: any) { calls.push('act:' + el.dataset.act); },
+    audienceQueued: () => (context.queued ?? []), audienceNext: async () => { calls.push('audience-next'); return true; },
     loadLocalAgents: async () => {}, draftReady: () => true, draftCancelButton: () => '', proposalReview: () => '<p>Review</p>',
     fail(e: Error) { calls.push('error:' + e.message); },
     applyLocalProposal: async () => { S.proposalApplied = true; const p = { id: 'new', name: 'New study', stages: [{ id: 'newstep', kind: 'poll' }] }; S.doc.pipelines.push(p); context.project().pipelineIds.push(p.id); },
@@ -168,4 +169,11 @@ test('a recovered job shows the file it was sent with, read-only, until a new fi
   assert.doesNotMatch(h.draftSidePanel(), /Remove file/); assert.deepEqual(JSON.parse(JSON.stringify(h.draftMaterial())), {});
   await h.draftAttachRead(textFile('fresh', 'new.json'));
   assert.doesNotMatch(h.draftSidePanel(), /Sent with this request/); assert.match(h.draftSidePanel(), /new\.json/);
+});
+
+test('applying a proposal that asks for audiences hands over to the audience queue instead of opening the first step', async () => {
+  const withQueue = harness({ queued: [{ cohortId: 'gamers' }] }); withQueue.S.pipelineId = 'names'; withQueue.S.stageId = 'ask';
+  withQueue.commandAction('draft-panel-open', { dataset: {} }); await withQueue.commandApplyProposal();
+  assert.ok(withQueue.calls.includes('audience-next'));
+  assert.equal(withQueue.S.pipelineId, 'names', 'the queue chooses the step to show'); assert.equal(withQueue.commandJobVisible(), false);
 });
