@@ -39,7 +39,7 @@ async function harness(engines: any[] = []) {
   };
   const html = renderWorkspace('options-box', 'token');
   const script = html.match(/<script nonce="options-box">([\s\S]*?)<\/script>/)![1]!;
-  const names = ['S', 'pipeline', 'render', 'stageForm', 'flowInspector', 'flowAction', 'setupAction', 'applyStudySetup', 'setupAudienceForm', 'setupCohortPicker', 'optionsBoxCommit', 'optionsBoxFor', 'optionsBoxRecords', 'optionsBoxText', 'optionsBoxFile', 'cohortBlockReason', 'draftProviderChoice', 'loadLocalAgents', 'commandEntries', 'commandExecute', 'reviewPage', 'studyNextClick', 'setupWizardKey'];
+  const names = ['S', 'pipeline', 'render', 'stageForm', 'flowInspector', 'flowAction', 'setupAction', 'applyStudySetup', 'setupAudienceForm', 'setupCohortPicker', 'optionsBoxCommit', 'optionsBoxAdd', 'optionsBoxFlush', 'optionsBoxRecords', 'optionsBoxFile', 'optionsBoxKeydown', 'optionsBoxPaste', 'cohortBlockReason', 'draftProviderChoice', 'loadLocalAgents', 'commandEntries', 'commandExecute', 'reviewPage', 'studyNextClick', 'setupWizardKey'];
   new Script(script.replace(/\}\)\(\);$/, `globalThis.optionsTest={${names.join(',')}};})();`)).runInNewContext(context);
   await new Promise<void>(resolve => setImmediate(resolve));
   const client = context.optionsTest;
@@ -59,18 +59,25 @@ async function harness(engines: any[] = []) {
 }
 
 const plain = (value: unknown) => JSON.parse(JSON.stringify(value));
-const box = (value: string) => ({ value, matches: (selector: string) => selector === '[data-options-box]' });
 const csv = (text: string, name = 'names.csv') => ({ name, size: Buffer.byteLength(text), text: async () => text });
+// A row input as the input listener sees it: its field and the row's option key.
+const field = (key: string, name: 'label' | 'description', value: string) => ({ value, dataset: { optionField: name }, matches: (selector: string) => selector === '[data-option-field]', closest: () => ({ dataset: { optionKey: key } }) });
+const addRow = (value: string) => ({ value, matches: (selector: string) => selector === '[data-option-add]' });
+const labels = (q: any) => Object.entries<any>(q.criteria).map(([key, value]) => value?.label ?? value ?? key);
 
-test('the Options stop shows one editable list once options exist, and the ways to fill it as exclusive choices', async () => {
+test('the Options stop is one light list of rows once options exist, and the ways to fill it as exclusive choices', async () => {
   const h = await harness();
   const html = h.flowInspector(h.study, h.poll);
-  assert.match(html, /<textarea id="optionsBox"[^>]*data-options-box/);
-  assert.match(html, /One option per line\. Add a description after a colon or tab, e\.g\. <code>Orbital Empire: an empire, but in orbit<\/code>/);
-  assert.match(html, /Alpha: Existing description\.\nBeta<\/textarea>/);
+  assert.doesNotMatch(html, /<textarea[^>]*optionsBox/, 'no free-text box');
+  assert.equal((html.match(/class="options-row" data-option-key=/g) || []).length, 2);
+  assert.match(html, /data-option-key="a"><input data-option-field="label" value="Alpha"[^>]*><input data-option-field="description" value="Existing description\."/);
+  assert.match(html, /data-option-key="b"><input data-option-field="label" value="Beta"[^>]*><input data-option-field="description" value=""/);
+  assert.match(html, /data-act="setup-remove-option" data-key="a" aria-label="Remove Alpha"[^>]*disabled/, 'two options cannot shrink further');
+  assert.match(html, /<input data-option-add value="" placeholder="Add an option, or paste a list"/);
   assert.match(html, /id="optionsBoxStatus"[^>]*>2 options</);
-  assert.doesNotMatch(html, /data-options-list|Edit option Alpha|Paste dialog|data-act="answer-list-open"|options-source"/, 'the options show once, in the box');
-  assert.match(html, /data-act="setup-input" data-source="choose">Import a file or draft with AI instead/);
+  assert.doesNotMatch(html, /Probabilities 0–1|totaling 1/, 'the output format is not part of filling in options');
+  assert.doesNotMatch(html, /Edit option Alpha|Paste dialog|data-act="answer-list-open"|options-source"|list-pager|listPage/, 'the options show once, unpaged');
+  assert.match(html, /data-act="setup-input" data-source="choose">Import or draft with AI/);
   h.S.sections['setup-input-study-ask-answer'] = 'choose';
   const choose = h.flowInspector(h.study, h.poll);
   assert.match(choose, /How do you want to add options\?/);
@@ -85,104 +92,114 @@ test('the Options stop shows one editable list once options exist, and the ways 
   assert.match(h.flowInspector(h.study, h.poll), /data-options-box/);
 });
 
-test('typing is parsed after a pause into the option list, keeping IDs, descriptions and custom fields of matching names', async () => {
+test('typing in a row edits that option at once, keeping its ID and custom fields', async () => {
   const h = await harness();
   h.S.dirty = false; h.S.plan = { token: 'reviewed' };
-  const before = JSON.stringify(h.q);
-  h.fire('input', { target: box('Alpha: Brand new description\nBeta\nOrbital Empire: an empire, but in orbit\nStarfall') });
-  assert.equal(JSON.stringify(h.q), before, 'nothing is read until the pause ends');
+  h.fire('input', { target: field('a', 'label', 'Alpha Prime') });
+  assert.deepEqual(plain(h.q.criteria.a), { label: 'Alpha Prime', description: 'Existing description.', note: 'custom' });
   assert.equal(h.S.dirty, true);
   assert.equal(h.S.plan, null);
-  h.runTimers();
-  assert.deepEqual(Object.keys(h.q.criteria).slice(0, 2), ['a', 'b']);
-  assert.deepEqual(plain(h.q.criteria.a), { label: 'Alpha', description: 'Brand new description', note: 'custom' });
-  assert.equal(h.q.criteria.b, 'Beta');
-  const rest = Object.values<any>(h.q.criteria).slice(2);
-  assert.deepEqual(plain(rest), [{ label: 'Orbital Empire', description: 'an empire, but in orbit' }, 'Starfall']);
-  assert.equal(new Set(Object.keys(h.q.criteria)).size, 4);
-  assert.match(h.flowInspector(h.study, h.poll), /id="optionsBoxStatus"[^>]*>4 options</);
+  h.fire('input', { target: field('b', 'description', 'Second letter') });
+  assert.deepEqual(plain(h.q.criteria.b), { label: 'Beta', description: 'Second letter' });
+  h.fire('input', { target: field('b', 'label', 'Bravo') });
+  assert.deepEqual(plain(h.q.criteria.b), { label: 'Bravo', description: 'Second letter' });
+  assert.deepEqual(Object.keys(h.q.criteria), ['a', 'b']);
+  assert.match(h.flowInspector(h.study, h.poll), /value="Bravo"/);
 });
 
-test('a tab separates the description so names may contain a colon, and blank lines are ignored', async () => {
+test('a plain name stays a plain string until it gets a description', async () => {
   const h = await harness();
-  assert.deepEqual(plain(h.optionsBoxRecords('Mission: Impossible\tA spy name\n\n  Plain  name \nURL http://x.test\nTime 10:30')), [
-    { label: 'Mission: Impossible', description: 'A spy name' },
-    { label: 'Plain name', description: '' },
-    { label: 'URL http://x.test', description: '' },
-    { label: 'Time 10:30', description: '' },
-  ]);
-  h.optionsBoxCommit('Mission: Impossible\tA spy name\nSecond');
-  assert.equal(h.q.criteria[Object.keys(h.q.criteria)[0]!].label, 'Mission: Impossible');
-  assert.equal(h.optionsBoxText(h.q), 'Mission: Impossible\tA spy name\nSecond');
+  h.fire('input', { target: field('b', 'label', 'Bravo') });
+  assert.equal(h.q.criteria.b, 'Bravo');
 });
 
-test('removing a description in the box clears it, and an unchanged multi-line description is kept intact', async () => {
+test('the add row adds one option, or one per line of a pasted list, splitting “Name: description”', async () => {
   const h = await harness();
-  h.q.criteria.b = { label: 'Beta', description: 'Line one\nLine two' };
-  h.optionsBoxCommit('Alpha\nBeta: Line one Line two');
-  assert.equal(h.q.criteria.a.description, '');
-  assert.equal(h.q.criteria.a.note, 'custom');
-  assert.equal(h.q.criteria.b.description, 'Line one\nLine two');
+  h.optionsBoxAdd('Gamma: Third letter');
+  assert.deepEqual(labels(h.q), ['Alpha', 'Beta', 'Gamma']);
+  assert.deepEqual(plain(Object.values(h.q.criteria).at(-1)), { label: 'Gamma', description: 'Third letter' });
+  h.optionsBoxAdd('Mission: Impossible\tA spy name\n\n  Delta  \nEcho');
+  assert.deepEqual(labels(h.q), ['Alpha', 'Beta', 'Gamma', 'Mission: Impossible', 'Delta', 'Echo']);
+  assert.equal(new Set(Object.keys(h.q.criteria)).size, 6);
+  assert.match(h.flowInspector(h.study, h.poll), /id="optionsBoxStatus"[^>]*>6 options</);
 });
 
-test('duplicates keep the previous list, show the error and keep the typed text', async () => {
+test('a list pasted into a row name lands right after that row', async () => {
   const h = await harness();
-  const before = JSON.stringify(h.q.criteria);
-  const result = h.optionsBoxCommit('Alpha\nBeta\nAlpha');
-  assert.match(result.error, /“Alpha” appears more than once/);
-  assert.equal(JSON.stringify(h.q.criteria), before);
-  const html = h.flowInspector(h.study, h.poll);
-  assert.match(html, /Alpha\nBeta\nAlpha<\/textarea>/, 'a re-render keeps what was typed');
-  assert.match(html, /id="optionsBoxError"[^>]*role="alert"\s*>[^<]*appears more than once/);
-  h.optionsBoxCommit('Alpha\nBeta\nGamma');
-  assert.equal(h.optionsBoxFor(h.study, h.poll, 'answer', h.q).error, '');
+  h.optionsBoxAdd('One\nTwo', 'a');
+  assert.deepEqual(labels(h.q), ['Alpha', 'One', 'Two', 'Beta']);
+});
+
+test('pasting several lines is intercepted; a single line pastes normally', async () => {
+  const h = await harness();
+  let prevented = 0;
+  const paste = (text: string) => ({ target: { matches: (selector: string) => selector.includes('[data-option-add]'), closest: () => null }, clipboardData: { getData: () => text }, preventDefault() { prevented++; } });
+  h.optionsBoxPaste(paste('Just one'));
+  assert.equal(prevented, 0);
+  assert.equal(Object.keys(h.q.criteria).length, 2);
+  h.optionsBoxPaste(paste('Gamma\nDelta\n'));
+  assert.equal(prevented, 1);
+  assert.deepEqual(labels(h.q), ['Alpha', 'Beta', 'Gamma', 'Delta']);
+});
+
+test('Enter in the add row adds it; Enter in a row moves to the add row instead of submitting', async () => {
+  const h = await harness();
+  let prevented = 0;
+  const key = (target: any) => ({ key: 'Enter', target, preventDefault() { prevented++; } });
+  h.optionsBoxKeydown(key({ value: 'Gamma', matches: (selector: string) => selector.includes('[data-option-add]') }));
+  assert.deepEqual(labels(h.q), ['Alpha', 'Beta', 'Gamma']);
+  h.optionsBoxKeydown(key({ value: 'Alpha', matches: (selector: string) => selector.includes('[data-option-field]') }));
+  assert.equal(prevented, 2);
   assert.equal(Object.keys(h.q.criteria).length, 3);
 });
 
-test('more than 255 lines is refused with the limit named', async () => {
+test('blank placeholder rows give way to the first options added', async () => {
   const h = await harness();
-  const result = h.optionsBoxCommit(Array.from({ length: 256 }, (_, i) => 'Option ' + i).join('\n'));
-  assert.match(result.error, /Use up to 255 options\. This list has 256\./);
-  assert.equal(Object.keys(h.q.criteria).length, 2);
-});
-
-test('fewer than two options are kept but padded with blanks, so the stop stays unfinished', async () => {
-  const h = await harness();
-  h.optionsBoxCommit('Only one');
-  assert.equal(Object.keys(h.q.criteria).length, 2);
-  assert.equal(Object.values<any>(h.q.criteria).filter(v => String(v.label ?? v).trim()).length, 1);
-  assert.match(h.flowInspector(h.study, h.poll), />1 option · add at least one more</);
-  h.optionsBoxCommit('');
-  assert.deepEqual(Object.values(h.q.criteria), ['', '']);
+  h.q.criteria = { option_1: '', option_2: '' };
   assert.match(h.flowInspector(h.study, h.poll), />No options yet</);
-  assert.doesNotMatch(h.flowInspector(h.study, h.poll), /Unnamed option/, 'blank placeholders are not listed');
+  h.optionsBoxAdd('Only one');
+  assert.equal(Object.keys(h.q.criteria).length, 2, 'padded back to two rows');
+  assert.deepEqual(labels(h.q)[0], 'Only one');
+  assert.match(h.flowInspector(h.study, h.poll), />1 option · add at least one more</);
+  h.optionsBoxAdd('Second');
+  assert.deepEqual(labels(h.q), ['Only one', 'Second']);
 });
 
-test('the box mirrors edits made elsewhere, such as removing an option', async () => {
+test('duplicate names show the problem until one is renamed', async () => {
   const h = await harness();
-  h.optionsBoxCommit('Alpha\nBeta\nGamma');
+  h.fire('input', { target: field('b', 'label', 'Alpha') });
+  assert.match(h.flowInspector(h.study, h.poll), /id="optionsBoxError"[^>]*role="alert"\s*>“Alpha” appears more than once/);
+  h.fire('input', { target: field('b', 'label', 'Beta') });
+  assert.match(h.flowInspector(h.study, h.poll), /id="optionsBoxError"[^>]*hidden/);
+});
+
+test('more than 255 options is refused with the limit named', async () => {
+  const h = await harness();
+  const result = h.optionsBoxAdd(Array.from({ length: 254 }, (_, i) => 'Option ' + i).join('\n'));
+  assert.match(result.error, /Use up to 255 options\. This list would have 256\./);
+  assert.equal(Object.keys(h.q.criteria).length, 2);
+  assert.match(h.optionsBoxCommit(Array.from({ length: 256 }, (_, i) => 'Option ' + i).join('\n')).error, /This list has 256\./);
+});
+
+test('removing an option drops its row', async () => {
+  const h = await harness();
+  h.optionsBoxAdd('Gamma');
   h.setupAction('setup-remove-option', { dataset: { key: 'a' } });
   const html = h.flowInspector(h.study, h.poll);
-  assert.match(html, /data-options-box[^>]*>Beta\nGamma<\/textarea>/);
+  assert.doesNotMatch(html, /value="Alpha"/);
   assert.match(html, />2 options</);
 });
 
-test('leaving mid-typing still saves the text: submitting the setup form reads the box immediately', async () => {
+test('leaving with text in the add row still adds it', async () => {
   const h = await harness();
-  h.fire('input', { target: box('Alpha\nBeta\nPending option') });
-  assert.equal(Object.keys(h.q.criteria).length, 2);
-  h.applyStudySetup({ dataset: { questionId: 'answer' }, values: { setupPrompt: 'Which name?' }, querySelector: (selector: string) => selector === '[data-options-box]' ? box('Alpha\nBeta\nPending option') : null, querySelectorAll: () => [] });
-  assert.equal(Object.keys(h.q.criteria).length, 3);
-  assert.equal(Object.values<any>(h.q.criteria).at(-1), 'Pending option');
+  h.fire('input', { target: addRow('Pending option') });
+  assert.match(h.flowInspector(h.study, h.poll), /data-option-add value="Pending option"/, 'a re-render keeps the unsent text');
+  h.applyStudySetup({ dataset: { questionId: 'answer' }, values: { setupPrompt: 'Which name?' }, querySelector: (selector: string) => selector === '[data-options-box]' ? {} : null, querySelectorAll: () => [] });
+  assert.deepEqual(labels(h.q), ['Alpha', 'Beta', 'Pending option']);
+  assert.match(h.flowInspector(h.study, h.poll), /data-option-add value=""/);
 });
 
-test('a re-render before the pause ends does not discard typed text', async () => {
-  const h = await harness();
-  h.fire('input', { target: box('Alpha\nBeta\nTyped but unread') });
-  assert.match(h.flowInspector(h.study, h.poll), /Typed but unread<\/textarea>/);
-});
-
-test('dropping a CSV with Name and Description columns fills the box and the list', async () => {
+test('dropping a CSV with Name and Description columns replaces the list, keeping matching IDs', async () => {
   const h = await harness();
   await h.optionsBoxFile(csv('Name,Description\nAlpha,"Fresh, precise"\nOrbital Empire,An empire in orbit'));
   assert.deepEqual(plain(h.q.criteria.a), { label: 'Alpha', description: 'Fresh, precise', note: 'custom' });
@@ -191,12 +208,20 @@ test('dropping a CSV with Name and Description columns fills the box and the lis
   assert.equal(h.S.dirty, true);
 });
 
+test('an imported list of 14 options shows as 14 rows with no pager', async () => {
+  const h = await harness();
+  await h.optionsBoxFile(csv('Name\n' + Array.from({ length: 14 }, (_, i) => 'Option ' + (i + 1)).join('\n')));
+  const html = h.flowInspector(h.study, h.poll);
+  assert.equal((html.match(/class="options-row" data-option-key=/g) || []).length, 14);
+  assert.doesNotMatch(html, /listPage|1–4 of/);
+});
+
 test('dropping a JSON file reads names, pairs and objects, and a plain CSV column reads every value', async () => {
   const h = await harness();
   await h.optionsBoxFile(csv(JSON.stringify(['One', ['Two', 'Second'], { name: 'Three', description: 'Third' }]), 'names.json'));
   assert.deepEqual(plain(Object.values(h.q.criteria)), ['One', { label: 'Two', description: 'Second' }, { label: 'Three', description: 'Third' }]);
   await h.optionsBoxFile(csv('Red\nGreen\nBlue'));
-  assert.deepEqual(plain(Object.values(h.q.criteria).map((v: any) => v.label ?? v)), ['Red', 'Green', 'Blue']);
+  assert.deepEqual(labels(h.q), ['Red', 'Green', 'Blue']);
 });
 
 test('a dropped file with a problem shows it and leaves the list alone', async () => {
@@ -219,7 +244,7 @@ test('the drop listener takes one file at a time and ignores drops elsewhere', a
   h.fire('drop', { target: { closest: () => null }, dataTransfer: { files: [csv('x')] }, preventDefault() { throw Error('must not intercept other drops'); } });
 });
 
-test('Draft with your AI swaps the box for the drafting panel and Back to options returns', async () => {
+test('Draft with your AI swaps the list for the drafting panel and Back to options returns', async () => {
   const h = await harness();
   h.setupAction('setup-input', { dataset: { source: 'agent' } });
   let html = h.flowInspector(h.study, h.poll);
@@ -230,11 +255,11 @@ test('Draft with your AI swaps the box for the drafting panel and Back to option
   assert.match(html, /data-options-box/);
 });
 
-test('the Options tab turns done as soon as two options are read', async () => {
+test('the Options tab turns done as soon as two options are named', async () => {
   const h = await harness();
-  h.optionsBoxCommit('');
+  h.q.criteria = { option_1: '', option_2: '' };
   assert.match(h.flowInspector(h.study, h.poll), /data-section="answers" aria-selected="true" data-todo="true"/);
-  h.optionsBoxCommit('Alpha\nBeta');
+  h.optionsBoxAdd('Alpha\nBeta');
   assert.match(h.flowInspector(h.study, h.poll), /data-section="answers" aria-selected="true" data-done="true"/);
 });
 

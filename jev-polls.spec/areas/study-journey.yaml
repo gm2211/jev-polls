@@ -130,26 +130,33 @@ behaviors:
       reference: jev-polls project thread, Giulio, 2026-10-10 (both quotes)
   - id: one-step-options
     description: >-
-      The Options stop is one box: type or paste one option per line, with an optional description
-      after a colon and a space or a tab ("Orbital Empire: an empire, but in orbit"). The compact
-      option list below fills in as you type, with the count ("14 options").
+      The Options stop is one light list and the only copy of the options: a row per option with
+      its name, an optional description and a remove button, edited in place, then an "Add an
+      option, or paste a list" row. Every option shows, unpaged, with the count ("14 options")
+      on one line underneath. What the step returns (a probability for each option) shows with the
+      step output on the flow card, not on this stop.
     details: >-
-      The box is read after a short pause and again when the step is left, saved, or reviewed, so
-      nothing typed is lost. A name that already exists keeps its option ID and custom fields; its
-      description comes from the line, so a line without one clears it. A tab wins
-      over a colon, so a name that contains a colon is written "Name: with colon<tab>description"
-      and the box shows it that way. Blank lines are ignored; duplicate names or more than 255
-      options show the problem and leave the previous list untouched; fewer than two options keep
-      the stop unfinished. A CSV or JSON file dropped on the box replaces its contents, read by the
-      same parsers as the import dialog (name and description headers, names, [name, description]
-      pairs, objects). Import file, Draft with your AI and the Paste dialog (comma-separated or CSV
-      with columns) remain as secondary actions beside the box. Edits made in the list (rename,
-      remove) show in the box. Ordered-scale levels keep their own editor. Part of guided-demo-path.
+      Edits apply as you type and keep the option ID and custom fields; a plain name stays a plain
+      string until it gets a description. Enter in the add row adds it and keeps focus there;
+      Enter in a row moves to the add row instead of submitting the form. Pasting several lines
+      into the add row (or a row's name, which inserts after that row) adds one option per line,
+      splitting "Name: description" at a tab or a colon and a space; a tab wins, so names may
+      contain a colon. Blank placeholder rows give way to the first options added. Text left in
+      the add row is added when the step is left or saved. Duplicate names show the problem until
+      renamed; more than 255 options is refused with the limit named; fewer than two keep the stop
+      unfinished. A CSV or JSON file dropped on the list replaces it, read by the same parsers as
+      the import dialog; matching names keep their IDs. Importing a file or drafting with AI is
+      one small link beside the list's label, which opens the exclusive source choice. Rows are
+      one line high at every width so a typical imported list (a dozen or two) fits the step panel
+      without scrolling. Ordered-scale levels keep their own editor. Part of guided-demo-path.
     source:
       text: >-
         a 1 minute demo that shows very simple, streamlined, almost guided process, without needing
-        to jump between screens
-      reference: jev-polls project thread, Giulio, 2026-10-10 (task brief for the one-step options box)
+        to jump between screens // still requires scrolling and quite messy after drag and drop
+        import // would be nice to have a light-weigth list instead of free text
+      reference: >-
+        jev-polls project thread, Giulio, 2026-10-10 (task brief for the one-step options box);
+        Giulio, 2026-10-11 (Options tab after a 14-option drop, and the follow-up asking for a list)
   - id: inline-audience-creation
     description: >-
       The Who answers stop lists saved audiences and, in the same panel, offers "Create the
