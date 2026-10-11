@@ -1,6 +1,7 @@
 import { spawn as spawnProcess, type ChildProcessWithoutNullStreams, type SpawnOptionsWithoutStdio } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { chmod, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -76,7 +77,7 @@ export type LocalAgentCommandResult =
   | { kind: 'draft'; target: 'project' | 'cohort' | 'study'; prompt: string; destination?: string; name?: string };
 export interface LocalAgentInput { projectId?: string; engine: LocalAgentEngine; model?: string; prompt: string; revision: number; document: WorkspaceDocument; cohort?: { id: string; size: number; step?: AudienceStep }; persona?: { cohortId: string; personaId: string }; options?: { pipelineId: string; stageId: string; questionId: string; material?: string }; material?: string; materialName?: string; command?: boolean; commandTargets?: CommandTarget[] }
 export type LocalAgentSpawner = (command: string, args: readonly string[], options: SpawnOptionsWithoutStdio) => ChildProcessWithoutNullStreams;
-export interface LocalAgentOptions { chatgpt?: ChatGptDraftClient; byos?: Pick<ByosConnections, 'engines' | 'generate'>; spawn?: LocalAgentSpawner; timeoutMs?: number; probeTimeoutMs?: number; maxOutputBytes?: number; temporaryRoot?: string }
+export interface LocalAgentOptions { chatgpt?: ChatGptDraftClient; byos?: Pick<ByosConnections, 'engines' | 'generate'>; spawn?: LocalAgentSpawner; timeoutMs?: number; probeTimeoutMs?: number; maxOutputBytes?: number; temporaryRoot?: string; /** Receives one structured line for every failed batch attempt and failed job. The workspace server writes them to stderr as JSON lines. */ log?: (line: Record<string, unknown>) => void }
 export class LocalAgentError extends Error {
   constructor(readonly code: 'INVALID_AGENT_REQUEST' | 'AGENT_BUSY' | 'AGENT_SERVICE_CLOSED', message: string) { super(message); }
 }
@@ -84,6 +85,8 @@ export class LocalAgentError extends Error {
 const MAX_DOCUMENT_BYTES = 120_000;
 const MAX_PROMPT_BYTES = 20_000;
 const OUTPUT_BYTES = 1_000_000;
+/** Stream-json event output may be this many times the reply-size limit. */
+const STREAM_EVENT_ROOM = 4;
 const TIMEOUT_MS = 240_000;
 const MAX_JOBS = 20;
 const PERSONAS_PER_BATCH = 25;
@@ -118,10 +121,10 @@ export function claudeStreamDelta(line: string): { text: string; tokens?: number
   return { text: typeof text === 'string' ? text : '' };
 }
 /** The final Claude CLI envelope: the `result` event of a stream-json run, or the single JSON object of a plain json run. */
-export function claudeEnvelope(stdout: string): { is_error?: boolean; structured_output?: unknown; result?: string } {
+export function claudeEnvelope(stdout: string): { is_error?: boolean; structured_output?: unknown; result?: string; subtype?: string; api_error_status?: number | string | null } {
   const lines = stdout.split('\n').map(line => line.trim()).filter(line => line.startsWith('{'));
   for (let index = lines.length - 1; index >= 0; index--) {
-    try { const event = JSON.parse(lines[index]!) as { type?: unknown; is_error?: boolean; structured_output?: unknown; result?: string }; if (event.type === 'result') return event; } catch { /* a partial line is not the result */ }
+    try { const event = JSON.parse(lines[index]!) as { type?: unknown; is_error?: boolean; structured_output?: unknown; result?: string; subtype?: string; api_error_status?: number | string | null }; if (event.type === 'result') return event; } catch { /* a partial line is not the result */ }
   }
   return JSON.parse(stdout);
 }
@@ -301,11 +304,89 @@ function optionQuestion(document: WorkspaceDocument, request: NonNullable<LocalA
   return question;
 }
 
+/** With JEV_AGENT_DEBUG_DIR set, every drafting CLI call leaves its prompt, stdout, stderr and exit status in that directory. */
+let debugCalls = 0;
+function dumpCliCall(jobId: string | undefined, engine: string, slot: number, prompt: string, result: ProcessResult): void {
+  const directory = process.env.JEV_AGENT_DEBUG_DIR;
+  if (!directory || !prompt) return;
+  try {
+    mkdirSync(directory, { recursive: true });
+    const base = join(directory, `${String(++debugCalls).padStart(3, '0')}-${(jobId ?? 'job').slice(0, 8)}-${engine}-batch${slot + 1}`);
+    writeFileSync(`${base}.prompt.txt`, prompt); writeFileSync(`${base}.stdout.txt`, result.stdout); writeFileSync(`${base}.stderr.txt`, result.stderr);
+    writeFileSync(`${base}.status.json`, JSON.stringify({ code: result.code, missing: result.missing, limited: result.limited }));
+  } catch { /* Debug output never affects drafting. */ }
+}
 interface ProcessResult { code: number | null; stdout: string; stderr: string; missing: boolean; limited: boolean }
 interface ProviderSlot { chars: number; tokens?: number }
 interface StreamedBatch { personas: number; chars: number; tokens?: number }
 interface Entry { public: LocalAgentJob; work?: Promise<void>; aborts: Set<() => void>; slots: Map<number, ProviderSlot>; streamed: Map<number, StreamedBatch>; cancelled: boolean; settled: boolean; command?: boolean; describeBatches?: () => { batchDetails: BatchDetail[]; inFlightPersonas: number; estimate?: LocalAgentProgress['estimate'] }; disposition?: 'applied' | 'discarded' }
 class DraftFailure extends Error {}
+/** The AI call itself failed or returned something unreadable; `reason` names what, `excerpt` is the start of the offending output. */
+class RequestFailure extends DraftFailure { constructor(message: string, readonly reason: string, readonly excerpt = '') { super(message); } }
+/** A batch reply that failed one of the batch checks. The reason names the check and is shown to the user and sent back with the next attempt. */
+export class BatchRejected extends Error { constructor(message: string, readonly excerpt = '') { super(message); } }
+const GENERIC_DRAFT_FAILURE = 'Agent did not return a valid workspace draft. Try a smaller or more specific request. Workspace unchanged.';
+const EXCERPT_CHARS = 300;
+const excerptOf = (text: unknown): string => (typeof text === 'string' ? text : text === undefined ? '' : JSON.stringify(text) ?? '').slice(0, EXCERPT_CHARS);
+/** First failed field of a cohort reply in plain words, such as “persona 3 has no segment”. */
+export function zodReason(error: z.ZodError): string {
+  const issue = error.issues[0];
+  if (!issue) return 'the reply is not a cohort object';
+  const path = issue.path.map(String);
+  const inPersona = path[0] === 'personas' && /^\d+$/.test(path[1] ?? '');
+  const subject = inPersona ? `persona ${Number(path[1]) + 1}` : path.join('.');
+  const field = inPersona ? path.slice(2).join('.') : '';
+  const more = error.issues.length > 1 ? ` (and ${error.issues.length - 1} more)` : '';
+  if (!subject) return `the reply is not a cohort object${more}`;
+  if (issue.code === 'unrecognized_keys') return `${subject || 'the reply'} has unexpected ${issue.keys.length === 1 ? 'field' : 'fields'} ${issue.keys.map(key => `"${key}"`).join(', ')}${more}`;
+  if (/received undefined/.test(issue.message)) return inPersona ? `${subject} has no ${field}${more}` : `${subject} is missing${more}`;
+  return `${inPersona && field ? `${subject} ${field}` : subject} is invalid (${issue.message.slice(0, 120)})${more}`;
+}
+/** A one-line reason for any failure, with the start of the offending output when there is one. */
+function failureDetail(error: unknown): { reason: string; excerpt: string } {
+  if (error instanceof RequestFailure) return { reason: error.reason, excerpt: error.excerpt };
+  if (error instanceof BatchRejected) return { reason: error.message, excerpt: error.excerpt };
+  if (error instanceof z.ZodError) return { reason: zodReason(error), excerpt: '' };
+  if (error instanceof DraftFailure) return { reason: error.message.replace(/\s*(Try again\.|Draft again\.)?\s*Workspace unchanged\.?$/, '').replace(/[.\s]+$/, ''), excerpt: '' };
+  return { reason: error instanceof Error && error.message ? error.message.slice(0, 200) : 'an unexpected error', excerpt: '' };
+}
+export interface CohortBatchExpectation { id: string; size: number; /** Cohort details every batch after the first must copy exactly. */ metadata?: Record<string, unknown> }
+/**
+ * Checks one batch reply: valid JSON, the cohort format, the expected id and persona count, details copied exactly,
+ * and persona segments and sources that exist in the cohort. Throws BatchRejected naming the first failed check.
+ */
+export function checkCohortBatch(documentJson: string, expected: CohortBatchExpectation): Cohort {
+  let raw: unknown;
+  try { raw = JSON.parse(documentJson); } catch (error) { throw new BatchRejected(`documentJson is not valid JSON (${error instanceof Error ? error.message.slice(0, 100) : 'unreadable'})`, excerptOf(documentJson)); }
+  const parsed = cohortSchema.safeParse(raw);
+  if (!parsed.success) throw new BatchRejected(zodReason(parsed.error), excerptOf(documentJson));
+  const candidate = parsed.data as Cohort;
+  if (candidate.id !== expected.id) throw new BatchRejected(`the cohort id is “${candidate.id}”, not “${expected.id}”`, excerptOf(documentJson));
+  if (candidate.personas.length !== expected.size) throw new BatchRejected(`it returned ${candidate.personas.length} ${candidate.personas.length === 1 ? 'persona' : 'personas'} where this batch needs exactly ${expected.size}`, excerptOf(documentJson));
+  const details = Object.fromEntries(Object.entries(candidate).filter(([key]) => key !== 'personas' && key !== 'generationPrompt'));
+  if (expected.metadata) {
+    const changed = [...new Set([...Object.keys(details), ...Object.keys(expected.metadata)])].filter(key => !isDeepStrictEqual(details[key], expected.metadata![key]));
+    if (changed.length) throw new BatchRejected(`it changed cohort details that must be copied exactly (${changed.join(', ')})`, excerptOf(documentJson));
+  } else {
+    const sourceIds = new Set(candidate.sources.map(source => source.id));
+    if (sourceIds.size !== candidate.sources.length) throw new BatchRejected('two sources share an id', excerptOf(documentJson));
+    if (new Set(candidate.segments.map(segment => segment.id)).size !== candidate.segments.length) throw new BatchRejected('two segments share an id', excerptOf(documentJson));
+    if (!candidate.segments.some(segment => segment.weight > 0)) throw new BatchRejected('no segment has a weight above zero', excerptOf(documentJson));
+    for (const segment of candidate.segments) {
+      const unknown = segment.sourceIds.find(id => !sourceIds.has(id));
+      if (unknown) throw new BatchRejected(`segment ${segment.id} cites unknown source ${unknown}`, excerptOf(documentJson));
+      if (segment.weightBasis === 'sourced' && !segment.sourceIds.length) throw new BatchRejected(`segment ${segment.id} has a sourced weight without a source`, excerptOf(documentJson));
+    }
+  }
+  const segments = new Set(((expected.metadata?.segments ?? candidate.segments) as Cohort['segments']).map(segment => segment.id));
+  const sources = new Set(((expected.metadata?.sources ?? candidate.sources) as Cohort['sources']).map(source => source.id));
+  for (const [index, persona] of candidate.personas.entries()) {
+    if (!segments.has(persona.segment)) throw new BatchRejected(`persona ${index + 1} has segment “${persona.segment}”, which is not one of ${[...segments].join(', ')}`, excerptOf(documentJson));
+    const unknown = persona.sourceIds.find(id => !sources.has(id));
+    if (unknown) throw new BatchRejected(`persona ${index + 1} cites unknown source ${unknown}`, excerptOf(documentJson));
+  }
+  return candidate;
+}
 /** A failure that another attempt cannot fix, so the batch is not retried. */
 class FatalDraftFailure extends DraftFailure {}
 /** Raised inside a batch when the job was cancelled or another batch already failed it. */
@@ -396,6 +477,7 @@ export class LocalAgentService {
   private readonly probeTimeoutMs: number;
   private readonly maxOutputBytes: number;
   private readonly temporaryRoot: string;
+  private readonly logLine: (line: Record<string, unknown>) => void;
   private closed = false;
   private status?: { at: number; value: LocalAgentAvailability };
   private probing?: Promise<LocalAgentAvailability>;
@@ -408,6 +490,7 @@ export class LocalAgentService {
     this.probeTimeoutMs = Math.max(1, Math.min(options.probeTimeoutMs ?? 8000, 8000));
     this.maxOutputBytes = Math.max(100, Math.min(options.maxOutputBytes ?? OUTPUT_BYTES, OUTPUT_BYTES));
     this.temporaryRoot = options.temporaryRoot ?? tmpdir();
+    this.logLine = options.log ?? (() => undefined);
   }
 
   async availability(): Promise<LocalAgentAvailability> {
@@ -562,6 +645,8 @@ export class LocalAgentService {
   }
 
   private command(engine: LocalAgentEngine, args: string[], cwd: string | undefined, input: string, timeoutMs: number, maxBytes: number, entry?: Entry, captureStderr = false, slot = 0, stream: 'raw' | 'claude-events' = 'raw'): Promise<ProcessResult> {
+    // A stream-json run prints the reply as deltas, again in the assistant message and again in the result, wrapped in events: a 25-persona batch measured 545 KB against the 1,000 KB limit. Its stdout gets more room than the reply it carries.
+    if (stream === 'claude-events') maxBytes *= STREAM_EVENT_ROOM;
     return new Promise(resolve => {
       let child: ChildProcessWithoutNullStreams;
       try { child = this.spawn(engine, args, { cwd, env: childEnvironment(), detached: process.platform !== 'win32', windowsHide: true }); }
@@ -570,7 +655,12 @@ export class LocalAgentService {
       const stdout: Buffer[] = []; const stdoutDecoder = new StringDecoder('utf8'); const stderr: Buffer[] = []; let bytes = 0; let outputChars = 0; let streamedPersonas = 0; let tail = ''; let lineBuffer = ''; let limited = false; let done = false; let killTimer: NodeJS.Timeout | undefined;
       const stop = () => { if (done) return; limited = true; terminate(child); killTimer ??= setTimeout(() => { terminate(child, 'SIGKILL'); finish(null, false); }, 1000); killTimer.unref(); };
       const timer = setTimeout(stop, timeoutMs); timer.unref();
-      const finish = (code: number | null, missing: boolean) => { if (done) return; done = true; clearTimeout(timer); if (killTimer) clearTimeout(killTimer); this.children.delete(child); entry?.aborts.delete(stop); resolve({ code, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8'), missing, limited }); };
+      const finish = (code: number | null, missing: boolean) => {
+        if (done) return; done = true; clearTimeout(timer); if (killTimer) clearTimeout(killTimer); this.children.delete(child); entry?.aborts.delete(stop);
+        const result = { code, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8'), missing, limited };
+        dumpCliCall(entry?.public.id, engine, slot, input, result);
+        resolve(result);
+      };
       entry?.aborts.add(stop);
       child.stdout.on('data', (data: Buffer) => { bytes += data.length; if (bytes > maxBytes) { stop(); return; } stdout.push(Buffer.from(data)); if (entry && !done && !entry.cancelled) {
         let text = stdoutDecoder.write(data); let tokens: number | undefined;
@@ -584,7 +674,7 @@ export class LocalAgentService {
         outputChars += text.length; const window = tail + text; for (const match of window.matchAll(PERSONA_KEY)) if (match.index + match[0].length > tail.length) streamedPersonas++; tail = window.slice(-PERSONA_KEY_TAIL);
         this.recordActivity(entry, { phase: 'receiving', outputChars, streamedPersonas, ...(tokens !== undefined ? { outputTokens: tokens } : {}) }, 'cli-stdout', slot);
       } });
-      child.stderr.on('data', (data: Buffer) => { bytes += data.length; if (bytes > maxBytes) { stop(); return; } if (captureStderr) stderr.push(Buffer.from(data)); });
+      child.stderr.on('data', (data: Buffer) => { bytes += data.length; if (bytes > maxBytes) { stop(); return; } if (captureStderr || process.env.JEV_AGENT_DEBUG_DIR) stderr.push(Buffer.from(data)); });
       child.once('error', error => finish(null, (error as NodeJS.ErrnoException).code === 'ENOENT'));
       child.once('close', code => finish(code, false));
       child.stdin.on('error', () => { /* Broken pipes are reported through exit status, never raw diagnostics. */ });
@@ -617,7 +707,11 @@ export class LocalAgentService {
       entry.public.proposal = result;
       this.updateProgress(entry, 'ready', 'Draft ready. Review changes before applying them to your workspace.');
     } catch (error) {
-      if (!entry.cancelled) this.updateProgress(entry, 'failed', error instanceof DraftFailure ? error.message : 'Agent did not return a valid workspace draft. Try a smaller or more specific request. Workspace unchanged.');
+      if (!entry.cancelled) {
+        const { reason, excerpt } = failureDetail(error);
+        this.logLine({ event: 'draft-failed', jobId: entry.public.id, task: input.cohort ? 'cohort' : input.persona ? 'persona' : input.options ? 'options' : input.command ? 'command' : 'workspace', reason, output: excerpt });
+        this.updateProgress(entry, 'failed', error instanceof DraftFailure ? error.message : GENERIC_DRAFT_FAILURE);
+      }
     } finally { entry.settled = true; }
   }
 
@@ -872,6 +966,9 @@ export class LocalAgentService {
       const cohortGuidance = guidance.replace('documentJson is a string containing the COMPLETE workspace document;', 'documentJson is a string containing the COMPLETE target cohort object;');
       const prompt = `${cohortGuidance} Prepare one bounded batch for cohort ${request.id}. Return documentJson as one cohort object matching the cohort schema, not a workspace. This is batch ${batchIndex + 1} of ${batches}, covering final positions ${offset + 1}–${offset + batchSize} of ${request.size}; return exactly ${batchSize} new personas. Keep every persona an adult and question-independent. Make this batch distinct from the listed recent examples while remaining plausible for the same population. ${original ? 'Copy originalCohortMetadata exactly, preserving sources, assumptions, segments, weights, weight provenance and distributionTargets.' : 'The first batch establishes cohort metadata, sources, assumptions, segments and weights. Later batches must copy that metadata exactly.'} Add only new personas. Include at least one persona for every positive-weight segment in the final complete cohort. Obey each distributionAssignments slot in the exact returned persona order. Numeric buckets include min and exclude max; categorical buckets require the exact value. Targets control unweighted synthetic persona counts, never study weights. Do not approximate quotas or invent missing evidence. No unrelated workspace data is provided or needed.\n\nCohort schema:\n${JSON.stringify(jsonSchema('cohort'))}\n\nRequest data:\n${JSON.stringify(requestData)}`;
       const firstStartedAt = new Date().toISOString();
+      let feedback = '';
+      // The reason a previous attempt was rejected goes before the request data, which stays last and unchanged.
+      const withFeedback = (text: string, note: string) => { const at = text.lastIndexOf('\n\nRequest data:\n'); return note && at >= 0 ? text.slice(0, at) + note + text.slice(at) : text; };
       for (let attempt = 1; ; attempt++) {
         if (entry.cancelled || stopped) throw new StopBatch();
         justAccepted = [];
@@ -879,18 +976,16 @@ export class LocalAgentService {
         running.set(batchIndex, { firstStartedAt, attempt, attemptStartedAt: new Date().toISOString(), checking: false });
         publishRunning({ validation: undefined });
         try {
-          const output = await this.requestDraft(entry, input, prompt, batchIndex);
+          const output = await this.requestDraft(entry, input, withFeedback(prompt, feedback), batchIndex);
           if (entry.cancelled || stopped) throw new StopBatch();
           running.get(batchIndex)!.checking = true;
           this.updateProgress(entry, entry.public.progress?.phase ?? 'generating', entry.public.message, { validation: { scope: 'batch', status: 'checking', checks: [], checkedPersonas: 0 }, ...describe() });
-          const candidate = cohortSchema.parse(JSON.parse(output.documentJson)) as Cohort;
-          if (candidate.id !== request.id || candidate.personas.length !== batchSize) throw Error();
+          const candidate = checkCohortBatch(output.documentJson, { id: request.id, size: batchSize, ...(metadata ?? originalMetadata ? { metadata: (metadata ?? originalMetadata)! } : {}) });
           const candidateMetadata = Object.fromEntries(Object.entries(candidate).filter(([key]) => key !== 'personas' && key !== 'generationPrompt'));
-          if (!isDeepStrictEqual(candidateMetadata, metadata ?? originalMetadata ?? candidateMetadata)) throw new DraftFailure('The regenerated cohort changed saved metadata or provenance. Try again. Workspace unchanged.');
           for (const [index, persona] of candidate.personas.entries()) {
             for (const [targetIndex, target] of targets.entries()) {
               const bucket = target.buckets[targetAssignments[offset + index]![targetIndex]!]!;
-              if (!matchesDistributionBucket(getPersonaFieldValue(persona, target.field), bucket, target.kind)) throw new DraftFailure(`The generated cohort did not meet the assigned distribution target for ${target.field} at persona ${offset + index + 1}. Try again. Workspace unchanged.`);
+              if (!matchesDistributionBucket(getPersonaFieldValue(persona, target.field), bucket, target.kind)) throw new BatchRejected(`persona ${index + 1} does not meet the assigned distribution target for ${target.field}`);
             }
           }
           // Acceptance is synchronous, so batches finishing together cannot interleave.
@@ -921,7 +1016,16 @@ export class LocalAgentService {
           else this.updateProgress(entry, 'validating', `Checked batch ${batchIndex + 1} of ${batches} (${acceptedPersonas}/${request.size} personas)…`, { ...done, activeBatches: [], retries, retry: undefined, ...describe() });
           return;
         } catch (error) {
-          if (entry.cancelled || stopped || error instanceof StopBatch || error instanceof FatalDraftFailure || attempt > BATCH_RETRIES) { running.delete(batchIndex); retrying.delete(batchIndex); throw error; }
+          if (entry.cancelled || stopped || error instanceof StopBatch) { running.delete(batchIndex); retrying.delete(batchIndex); throw error; }
+          const { reason, excerpt } = failureDetail(error);
+          this.logLine({ event: 'cohort-batch-failed', jobId: entry.public.id, batch: batchIndex + 1, totalBatches: batches, attempt, maxAttempts: 1 + BATCH_RETRIES, reason, output: excerpt });
+          if (error instanceof FatalDraftFailure || attempt > BATCH_RETRIES) {
+            running.delete(batchIndex); retrying.delete(batchIndex);
+            if (error instanceof FatalDraftFailure) throw error;
+            const what = error instanceof BatchRejected || error instanceof z.ZodError ? `failed its checks ${attempt} times` : `could not be drafted after ${attempt} attempts`;
+            throw new DraftFailure(`Batch ${batchIndex + 1} ${what}: ${reason}. Workspace unchanged.`);
+          }
+          feedback = `\n\nYour previous attempt at this batch was rejected: ${reason}. Return the complete batch again and fix exactly that.`;
           retries++; retrying.set(batchIndex, attempt + 1);
         }
       }
@@ -947,16 +1051,23 @@ export class LocalAgentService {
 
     const uncoveredSegment = (metadata.segments as Cohort['segments']).find(segment => segment.weight > 0 && !segmentCounts.get(segment.id));
     if (uncoveredSegment) throw new DraftFailure(`No personas were generated for positive-weight segment "${uncoveredSegment.id}". Increase the cohort size or revise segment target shares; set its segment weight to zero only if it should be excluded. Workspace unchanged.`);
-    const complete = parseCohort({
-      ...metadata,
-      generationPrompt: input.prompt,
-      personas,
-    });
-    const scoped = projectDocument(input.document, input.projectId);
-    const cohorts = original
-      ? scoped.cohorts.map(cohort => cohort.id === request.id ? complete : cohort)
-      : [...scoped.cohorts, complete];
-    const document = mergeProjectDraft(input.document, input.projectId, { ...scoped, cohorts });
+    let document: WorkspaceDocument; let complete: Cohort;
+    try {
+      complete = parseCohort({
+        ...metadata,
+        generationPrompt: input.prompt,
+        personas,
+      });
+      const scoped = projectDocument(input.document, input.projectId);
+      const cohorts = original
+        ? scoped.cohorts.map(cohort => cohort.id === request.id ? complete : cohort)
+        : [...scoped.cohorts, complete];
+      document = mergeProjectDraft(input.document, input.projectId, { ...scoped, cohorts });
+    } catch (error) {
+      const reason = error instanceof z.ZodError ? zodReason(error) : error instanceof Error && error.message ? error.message.slice(0, 200) : 'an unexpected error';
+      this.logLine({ event: 'cohort-final-check-failed', jobId: entry.public.id, reason });
+      throw new DraftFailure(`All ${batches} batches passed, but the finished audience failed its final checks: ${reason}. Workspace unchanged.`);
+    }
     this.updateProgress(entry, 'validating', 'Complete cohort and workspace checked. Preparing them for review…', { validation: { scope: 'final', status: 'passed', checks: ['Complete cohort schema and source references', 'Unique IDs', 'Positive-weight segment coverage', 'Workspace references and project ownership'], checkedPersonas: personas.length } });
     return { document, explanation: `Prepared ${request.size} synthetic personas in ${batches} batches. ${targets.length ? 'Saved distribution targets matched deterministic whole-person quotas (largest remainder rounding); these are synthetic counts, not observed population data. ' : ''}${firstExplanation}`.slice(0, 5000) };
   }
@@ -982,7 +1093,7 @@ export class LocalAgentService {
           if (controller.signal.aborted || entry.cancelled) throw Error();
           if (Buffer.byteLength(result.text) > this.maxOutputBytes) throw new DraftFailure('Agent reached its time or output limit. Try a smaller drafting request.');
           this.recordActivity(entry, { phase: 'receiving', outputChars: result.text.length }, 'response', slot);
-          payload = JSON.parse(result.text);
+          try { payload = JSON.parse(result.text); } catch { throw new RequestFailure(GENERIC_DRAFT_FAILURE, 'the reply was not valid JSON', excerptOf(result.text)); }
         } catch (error) {
           if (error instanceof DraftFailure) throw error;
           if (entry.cancelled) throw error;
@@ -999,7 +1110,7 @@ export class LocalAgentService {
             onProgress: progress => { if (active && !controller.signal.aborted) this.recordActivity(entry, progress, 'response', slot); } });
           if (controller.signal.aborted || entry.cancelled) throw Error();
           if (Buffer.byteLength(text) > this.maxOutputBytes) throw new DraftFailure('Agent reached its time or output limit. Try a smaller drafting request.');
-          payload = extractJsonObject(text);
+          try { payload = extractJsonObject(text); } catch { throw new RequestFailure(GENERIC_DRAFT_FAILURE, 'the reply held no JSON object', excerptOf(text)); }
         } catch (error) {
           if (error instanceof DraftFailure || entry.cancelled) throw error;
           if (error instanceof ByosConnectionError) throw new DraftFailure(error.message);
@@ -1025,22 +1136,28 @@ export class LocalAgentService {
           outcome = await this.command(input.engine, plain, directory, prompt, this.timeoutMs, this.maxOutputBytes, entry, false, slot);
         }
         if (entry.cancelled) throw Error();
-        if (outcome.limited) throw new DraftFailure('Agent reached its time or output limit. Try a smaller drafting request.');
-        if (outcome.code !== 0) throw new DraftFailure('Agent could not finish. Check your CLI login and subscription availability, then try again. Workspace unchanged.');
+        const tail = outcome.stdout.slice(-EXCERPT_CHARS);
+        if (outcome.limited) throw new RequestFailure('Agent reached its time or output limit. Try a smaller drafting request.', `the AI ran past its ${Math.round(this.timeoutMs / 1000)}-second time limit or its output size limit`, tail);
+        if (outcome.code !== 0) throw new RequestFailure('Agent could not finish. Check your CLI login and subscription availability, then try again. Workspace unchanged.', `the ${input.engine} CLI exited with status ${outcome.code ?? 'none'}`, excerptOf(outcome.stderr) || tail);
         if (input.engine === 'codex') {
-          if ((await stat(resultPath)).size > this.maxOutputBytes) throw new DraftFailure('Agent reached its time or output limit. Try a smaller drafting request.');
-          payload = JSON.parse(await readFile(resultPath, 'utf8'));
+          if ((await stat(resultPath)).size > this.maxOutputBytes) throw new RequestFailure('Agent reached its time or output limit. Try a smaller drafting request.', 'the reply was larger than the output limit');
+          const text = await readFile(resultPath, 'utf8');
+          try { payload = JSON.parse(text); } catch { throw new RequestFailure(GENERIC_DRAFT_FAILURE, 'the reply was not valid JSON', excerptOf(text)); }
         } else {
-          const envelope = claudeEnvelope(outcome.stdout);
-          if (envelope.is_error) throw new DraftFailure('Agent did not return a valid workspace draft. Try a smaller or more specific request. Workspace unchanged.');
-          payload = envelope.structured_output ?? JSON.parse(envelope.result ?? '');
+          let envelope: ReturnType<typeof claudeEnvelope>;
+          try { envelope = claudeEnvelope(outcome.stdout); } catch { throw new RequestFailure(GENERIC_DRAFT_FAILURE, 'the CLI output had no readable result event', tail); }
+          if (envelope.is_error) throw new RequestFailure(GENERIC_DRAFT_FAILURE, `the CLI reported an error${envelope.subtype ? ` (${envelope.subtype}${envelope.api_error_status ? `, status ${envelope.api_error_status}` : ''})` : ''}`, excerptOf(envelope.result));
+          if (envelope.structured_output !== undefined && envelope.structured_output !== null) payload = envelope.structured_output;
+          else { try { payload = JSON.parse(envelope.result ?? ''); } catch { throw new RequestFailure(GENERIC_DRAFT_FAILURE, 'the reply had no structured output', excerptOf(envelope.result)); } }
         }
       }
-      return resultSchema.parse(payload);
+      const checked = resultSchema.safeParse(payload);
+      if (!checked.success) throw new RequestFailure(GENERIC_DRAFT_FAILURE, `the reply is missing documentJson or explanation, or one is too large (${checked.error.issues[0]?.path.join('.') || 'reply'})`, excerptOf(payload));
+      return checked.data;
     } catch (error) {
       if (error instanceof DraftFailure) throw error;
       if (entry.cancelled) throw error;
-      throw new DraftFailure('Agent did not return a valid workspace draft. Try a smaller or more specific request. Workspace unchanged.');
+      throw new RequestFailure(GENERIC_DRAFT_FAILURE, error instanceof Error && error.message ? error.message.slice(0, 200) : 'the reply could not be read');
     } finally {
       entry.slots.delete(slot);
       if (directory) await rm(directory, { recursive: true, force: true }).catch(() => undefined);
