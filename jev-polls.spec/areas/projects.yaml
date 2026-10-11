@@ -32,6 +32,20 @@ behaviors:
     source:
       text: I should be able to rename project right here
       reference: 2026-10-09 jev-polls project chat, Giulio, on the project list row
+  - id: list-times
+    description: >-
+      Project, study and cohort rows show when each was created and last updated in relative
+      words ("today 1am", "1 day ago", "2 months ago"); run cards show when they started the same
+      way. The exact time is in the hover title.
+    details: >-
+      The server stamps createdAt and updatedAt on Save from what actually changed; client-sent
+      stamps are ignored. A project's updated time rolls up its own edits, its studies' and
+      cohorts' edits and its latest run. Items saved before stamping existed fall back to a cohort's
+      own createdAt and to run start times; Updated is omitted while it reads the same as Created.
+    source:
+      text: >-
+        wanna see created and last updated .... Like "today 1am" or "1 day ago" or "2 months ago"
+      reference: 2026-10-11 jev-polls project chat, Giulio, on the project list card
   - id: explicit-save
     description: >-
       Edits are committed to the shared workspace only by one Save action (button or Cmd/Ctrl+S);
