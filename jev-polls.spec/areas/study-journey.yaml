@@ -156,7 +156,10 @@ behaviors:
       click first. The recovered-job path restores the step from the remembered target, so the
       draft is not left on the Cohorts page. A draft started in another session or tab still
       shows on the Cohorts page notice. The copy says the user's drafting AI writes the people and
-      Jev only answers as them; nothing is real data and the user reviews them first.
+      Jev only answers as them; nothing is real data and the user reviews them first. The whole
+      form, Generate included, fits the step panel without scrolling at laptop height: the brief's
+      hint is its placeholder, the count sits beside the drafting AI choice, and a ready CLI
+      provider shows no extra status line.
     source:
       text: >-
         needs a cohort assigned that I can create right there and then and navigate back to

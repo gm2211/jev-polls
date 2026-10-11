@@ -247,6 +247,16 @@ test('Who answers says the drafting AI writes the people and Jev only answers', 
   assert.doesNotMatch(html, /Jev drafts|Jev generates/);
 });
 
+test('the audience form stays compact: hint as placeholder, count beside a ready AI with no extra status line', async () => {
+  const h = await harness();
+  h.S.localEngines = [{ id: 'claude', label: 'Claude Code', available: true, message: 'Ready with your existing Claude Code login.' }];
+  h.S.localEngine = 'claude'; h.S.draftProviderInline = true;
+  const html = h.setupAudienceForm(h.study, h.poll, false, false);
+  assert.match(html, /<textarea placeholder="Their context, habits and how they differ\. A few sentences are enough\." id="f-cohortPrompt-audience"/);
+  assert.match(html, /<div class="setup-audience-row">[\s\S]*?name="cohortSize"[\s\S]*?data-inline-provider/);
+  assert.doesNotMatch(html, /Ready with your existing Claude Code login|Refresh connections/);
+});
+
 test('with no usable drafting AI the audience form offers the same choice and labels in place', async () => {
   const h = await harness();
   h.S.localEngines = [{ id: 'claude', label: 'Claude Code', available: false, message: 'Sign in with claude login.' }, { id: 'codex', label: 'Codex', available: true }];
