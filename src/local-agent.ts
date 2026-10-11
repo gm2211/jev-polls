@@ -96,16 +96,48 @@ const STREAM_EVENT_ROOM = 4;
 const TIMEOUT_MS = 240_000;
 const MAX_JOBS = 20;
 const PERSONAS_PER_BATCH = 25;
-/** The first batch of a larger cohort is small: it only has to establish the metadata, so the parallel phase starts sooner. */
-const FIRST_BATCH_PERSONAS = 10;
-/** Batches after the first run this many provider calls at once. */
-const CONCURRENT_BATCHES = 12;
-/** Cohorts of at most PERSONAS_PER_BATCH are one batch; larger ones open with a small metadata batch, then full batches. */
-function batchCount(size: number): number { return size <= PERSONAS_PER_BATCH ? 1 : 1 + Math.ceil((size - FIRST_BATCH_PERSONAS) / PERSONAS_PER_BATCH); }
-function batchSpan(size: number, index: number): { offset: number; size: number } {
-  if (size <= PERSONAS_PER_BATCH) return { offset: 0, size };
-  const offset = index === 0 ? 0 : FIRST_BATCH_PERSONAS + (index - 1) * PERSONAS_PER_BATCH;
-  return { offset, size: Math.min(index === 0 ? FIRST_BATCH_PERSONAS : PERSONAS_PER_BATCH, size - offset) };
+/** A cohort split into batches never gets batches smaller than this: a smaller batch spends more on its prompt and CLI start than on writing personas. */
+const MIN_PERSONAS_PER_BATCH = 10;
+/** Persona batches run this many provider calls at once. */
+const CONCURRENT_BATCHES = 16;
+/**
+ * Persona counts of each batch. A cohort of at most PERSONAS_PER_BATCH is one batch that also sets the cohort metadata.
+ * A larger one is split evenly so its last round of concurrent batches is as full as the first: 1,000 personas are
+ * 48 batches of 20 or 21, three rounds of sixteen, where 25-persona batches would need a fourth, mostly idle round.
+ */
+export function batchSizes(size: number): number[] {
+  if (size <= PERSONAS_PER_BATCH) return [size];
+  const rounds = Math.ceil(size / (CONCURRENT_BATCHES * PERSONAS_PER_BATCH));
+  const perBatch = Math.max(MIN_PERSONAS_PER_BATCH, Math.ceil(size / (CONCURRENT_BATCHES * rounds)));
+  const count = Math.ceil(size / perBatch);
+  return Array.from({ length: count }, (_, index) => Math.floor(size / count) + (index < size % count ? 1 : 0));
+}
+/**
+ * Which segment each position should get: whole-person counts in proportion to segment weights (largest remainder), with
+ * at least one person for every positive-weight segment when there are enough people, interleaved by smooth weighted
+ * round robin so batches written at the same time each carry their share.
+ */
+export function segmentSequence(segments: { id: string; weight: number }[], size: number): string[] {
+  const positive = segments.filter(segment => segment.weight > 0);
+  if (!positive.length || size < 1) return [];
+  const total = positive.reduce((sum, segment) => sum + segment.weight, 0);
+  const exact = positive.map(segment => size * segment.weight / total);
+  const counts = exact.map(Math.floor);
+  const order = exact.map((value, index) => ({ index, remainder: value - counts[index]! })).sort((a, b) => b.remainder - a.remainder || a.index - b.index);
+  for (let left = size - counts.reduce((sum, count) => sum + count, 0), at = 0; left > 0; left--, at++) counts[order[at % order.length]!.index]!++;
+  // A segment rounded down to nobody takes one person from the largest segment that can spare one.
+  for (const [index, count] of counts.entries()) {
+    if (count > 0) continue;
+    const donor = counts.reduce((best, value, at) => value > counts[best]! ? at : best, 0);
+    if (counts[donor]! > 1) { counts[donor]!--; counts[index] = 1; }
+  }
+  const current = counts.map(() => 0);
+  return Array.from({ length: size }, () => {
+    let best = 0;
+    counts.forEach((count, index) => { current[index]! += count; if (current[index]! > current[best]!) best = index; });
+    current[best]! -= size;
+    return positive[best]!.id;
+  });
 }
 /** A failed batch is retried this many more times before the whole generation fails. */
 const BATCH_RETRIES = 2;
@@ -136,6 +168,9 @@ export function backoffCause(status: unknown, ...texts: unknown[]): BackoffCause
   return undefined;
 }
 const MAX_BATCH_TIMINGS = 20;
+const personaJsonSchema = z.toJSONSchema(cohortSchema.shape.personas.element);
+/** Provider slot of the cohort setup call; batch slots are their indexes. */
+const SETUP_SLOT = -1;
 interface ProviderProgress { phase: 'starting' | 'generating' | 'receiving'; outputChars: number; outputTokens?: number; streamedPersonas?: number }
 /** A persona object carries a background key; the CLI envelope escapes it, so the quotes may be preceded by backslashes. */
 const PERSONA_KEY = /\\*"background\\*"\s*:/g;
@@ -383,13 +418,37 @@ function failureDetail(error: unknown): { reason: string; excerpt: string } {
   return { reason: error instanceof Error && error.message ? error.message.slice(0, 200) : 'an unexpected error', excerpt: '' };
 }
 export interface CohortBatchExpectation { id: string; size: number; /** Cohort details every batch after the first must copy exactly. */ metadata?: Record<string, unknown> }
+/** Cohort details a batch's personas build on: unique sources and segments, a positive weight, and segment sources that exist. */
+function checkCohortMetadata(candidate: Pick<Cohort, 'sources' | 'segments'>, excerpt: string): void {
+  const sourceIds = new Set(candidate.sources.map(source => source.id));
+  if (sourceIds.size !== candidate.sources.length) throw new BatchRejected('two sources share an id', excerpt);
+  if (new Set(candidate.segments.map(segment => segment.id)).size !== candidate.segments.length) throw new BatchRejected('two segments share an id', excerpt);
+  if (!candidate.segments.some(segment => segment.weight > 0)) throw new BatchRejected('no segment has a weight above zero', excerpt);
+  for (const segment of candidate.segments) {
+    const unknown = segment.sourceIds.find(id => !sourceIds.has(id));
+    if (unknown) throw new BatchRejected(`segment ${segment.id} cites unknown source ${unknown}`, excerpt);
+    if (segment.weightBasis === 'sourced' && !segment.sourceIds.length) throw new BatchRejected(`segment ${segment.id} has a sourced weight without a source`, excerpt);
+  }
+}
+/** Each persona names a segment and only sources the cohort has. */
+function checkPersonaReferences(cohort: Pick<Cohort, 'sources' | 'segments' | 'personas'>, excerpt: string): void {
+  const segments = new Set(cohort.segments.map(segment => segment.id));
+  const sources = new Set(cohort.sources.map(source => source.id));
+  for (const [index, persona] of cohort.personas.entries()) {
+    if (!segments.has(persona.segment)) throw new BatchRejected(`persona ${index + 1} has segment “${persona.segment}”, which is not one of ${[...segments].join(', ')}`, excerpt);
+    const unknown = persona.sourceIds.find(id => !sources.has(id));
+    if (unknown) throw new BatchRejected(`persona ${index + 1} cites unknown source ${unknown}`, excerpt);
+  }
+}
+const parseBatchJson = (documentJson: string): unknown => {
+  try { return JSON.parse(documentJson); } catch (error) { throw new BatchRejected(`documentJson is not valid JSON (${error instanceof Error ? error.message.slice(0, 100) : 'unreadable'})`, excerptOf(documentJson)); }
+};
 /**
  * Checks one batch reply: valid JSON, the cohort format, the expected id and persona count, details copied exactly,
  * and persona segments and sources that exist in the cohort. Throws BatchRejected naming the first failed check.
  */
 export function checkCohortBatch(documentJson: string, expected: CohortBatchExpectation): Cohort {
-  let raw: unknown;
-  try { raw = JSON.parse(documentJson); } catch (error) { throw new BatchRejected(`documentJson is not valid JSON (${error instanceof Error ? error.message.slice(0, 100) : 'unreadable'})`, excerptOf(documentJson)); }
+  const raw = parseBatchJson(documentJson);
   const parsed = cohortSchema.safeParse(raw);
   if (!parsed.success) throw new BatchRejected(zodReason(parsed.error), excerptOf(documentJson));
   const candidate = parsed.data as Cohort;
@@ -399,24 +458,40 @@ export function checkCohortBatch(documentJson: string, expected: CohortBatchExpe
   if (expected.metadata) {
     const changed = [...new Set([...Object.keys(details), ...Object.keys(expected.metadata)])].filter(key => !isDeepStrictEqual(details[key], expected.metadata![key]));
     if (changed.length) throw new BatchRejected(`it changed cohort details that must be copied exactly (${changed.join(', ')})`, excerptOf(documentJson));
-  } else {
-    const sourceIds = new Set(candidate.sources.map(source => source.id));
-    if (sourceIds.size !== candidate.sources.length) throw new BatchRejected('two sources share an id', excerptOf(documentJson));
-    if (new Set(candidate.segments.map(segment => segment.id)).size !== candidate.segments.length) throw new BatchRejected('two segments share an id', excerptOf(documentJson));
-    if (!candidate.segments.some(segment => segment.weight > 0)) throw new BatchRejected('no segment has a weight above zero', excerptOf(documentJson));
-    for (const segment of candidate.segments) {
-      const unknown = segment.sourceIds.find(id => !sourceIds.has(id));
-      if (unknown) throw new BatchRejected(`segment ${segment.id} cites unknown source ${unknown}`, excerptOf(documentJson));
-      if (segment.weightBasis === 'sourced' && !segment.sourceIds.length) throw new BatchRejected(`segment ${segment.id} has a sourced weight without a source`, excerptOf(documentJson));
-    }
-  }
-  const segments = new Set(((expected.metadata?.segments ?? candidate.segments) as Cohort['segments']).map(segment => segment.id));
-  const sources = new Set(((expected.metadata?.sources ?? candidate.sources) as Cohort['sources']).map(source => source.id));
-  for (const [index, persona] of candidate.personas.entries()) {
-    if (!segments.has(persona.segment)) throw new BatchRejected(`persona ${index + 1} has segment “${persona.segment}”, which is not one of ${[...segments].join(', ')}`, excerptOf(documentJson));
-    const unknown = persona.sourceIds.find(id => !sources.has(id));
-    if (unknown) throw new BatchRejected(`persona ${index + 1} cites unknown source ${unknown}`, excerptOf(documentJson));
-  }
+  } else checkCohortMetadata(candidate, excerptOf(documentJson));
+  checkPersonaReferences({ ...((expected.metadata ?? candidate) as Pick<Cohort, 'sources' | 'segments'>), personas: candidate.personas }, excerptOf(documentJson));
+  return candidate;
+}
+const cohortMetadataSchema = cohortSchema.omit({ personas: true, generationPrompt: true });
+/**
+ * Checks the setup reply of a cohort written in several batches: the cohort details alone, with no personas or an empty list.
+ * Returns the details every persona batch builds on.
+ */
+export function checkCohortSetup(documentJson: string, id: string): Record<string, unknown> {
+  const raw = parseBatchJson(documentJson);
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new BatchRejected('the reply is not a cohort object', excerptOf(documentJson));
+  // Personas written here anyway are dropped: the batches write every persona.
+  const { personas: _personas, generationPrompt: _prompt, ...details } = raw as Record<string, unknown>;
+  const parsed = cohortMetadataSchema.safeParse(details);
+  if (!parsed.success) throw new BatchRejected(zodReason(parsed.error), excerptOf(documentJson));
+  if (parsed.data.id !== id) throw new BatchRejected(`the cohort id is “${parsed.data.id}”, not “${id}”`, excerptOf(documentJson));
+  checkCohortMetadata(parsed.data as Pick<Cohort, 'sources' | 'segments'>, excerptOf(documentJson));
+  return Object.fromEntries(Object.entries(parsed.data).filter(([, value]) => value !== undefined));
+}
+/**
+ * Checks one persona batch of a cohort whose details are already set: a JSON array of personas (or an object carrying
+ * one under personas, whose other fields are ignored), the persona format, the exact count, and segments and sources
+ * the cohort has. The cohort details are never taken from the reply, so a batch cannot change them.
+ */
+export function checkPersonaBatch(documentJson: string, expected: { id: string; size: number; metadata: Record<string, unknown> }): Cohort {
+  const raw = parseBatchJson(documentJson);
+  const personas = Array.isArray(raw) ? raw : raw && typeof raw === 'object' && Array.isArray((raw as { personas?: unknown }).personas) ? (raw as { personas: unknown[] }).personas : undefined;
+  if (!personas) throw new BatchRejected('the reply is not a list of personas', excerptOf(documentJson));
+  if (personas.length !== expected.size) throw new BatchRejected(`it returned ${personas.length} ${personas.length === 1 ? 'persona' : 'personas'} where this batch needs exactly ${expected.size}`, excerptOf(documentJson));
+  const parsed = cohortSchema.safeParse({ ...expected.metadata, id: expected.id, personas });
+  if (!parsed.success) throw new BatchRejected(zodReason(parsed.error), excerptOf(documentJson));
+  const candidate = parsed.data as Cohort;
+  checkPersonaReferences(candidate, excerptOf(documentJson));
   return candidate;
 }
 /** A failure that another attempt cannot fix, so the batch is not retried. */
@@ -600,7 +675,7 @@ export class LocalAgentService {
     }
     while (this.jobs.size >= MAX_JOBS) this.jobs.delete(this.jobs.keys().next().value!);
     const startedAt = new Date().toISOString();
-    const progress: LocalAgentProgress = { phase: 'checking', ...(parsed.cohort ? { completedPersonas: 0, totalPersonas: parsed.cohort.size, completedBatches: 0, totalBatches: batchCount(parsed.cohort.size) } : parsed.persona ? { completedPersonas: 0, totalPersonas: 1 } : {}) };
+    const progress: LocalAgentProgress = { phase: 'checking', ...(parsed.cohort ? { completedPersonas: 0, totalPersonas: parsed.cohort.size, completedBatches: 0, totalBatches: batchSizes(parsed.cohort.size).length } : parsed.persona ? { completedPersonas: 0, totalPersonas: 1 } : {}) };
     const job: LocalAgentJob = { ...(parsed.projectId ? { projectId: parsed.projectId } : {}), id: randomUUID(), engine: parsed.engine, revision: parsed.revision, status: 'running', message: 'Checking your AI connection…', startedAt, updatedAt: startedAt, progress, ...(engineNeedsModel(parsed.engine) ? { model: parsed.model } : {}), ...(parsed.options ? { options: { pipelineId: parsed.options.pipelineId, stageId: parsed.options.stageId, questionId: parsed.options.questionId } } : {}), ...(parsed.persona ? { persona: parsed.persona } : {}), ...(parsed.material !== undefined && parsed.materialName ? { materialName: parsed.materialName } : {}), ...(parsed.cohort ? { cohort: { ...parsed.cohort, prompt: parsed.prompt } } : {}) };
     const entry: Entry = { public: job, aborts: new Set(), slots: new Map(), streamed: new Map(), cancelled: false, settled: false, ...(parsed.command ? { command: true } : {}) };
     this.jobs.set(job.id, entry);
@@ -955,14 +1030,18 @@ export class LocalAgentService {
     let emptyGeneratedBytes = 0;
     let firstExplanation = '';
     let stopped = false;
-    let nextBatch = 1;
-    const batches = batchCount(request.size);
+    let nextBatch = 0;
+    const sizes = batchSizes(request.size);
+    const batches = sizes.length;
+    const offsets = sizes.map((_, index) => sizes.slice(0, index).reduce((sum, size) => sum + size, 0));
     const baseDocument = original
       ? { ...input.document, cohorts: input.document.cohorts.map(cohort => cohort.id === request.id ? { ...cohort, personas: [] } : cohort) }
       : input.document;
     const originalPlaceholderBytes = original ? Buffer.byteLength(JSON.stringify({ ...original, personas: [] })) : 0;
     const unchangedBytes = Buffer.byteLength(JSON.stringify(baseDocument)) - originalPlaceholderBytes + (original ? 0 : (baseDocument.cohorts.length ? 1 : 0));
-    const batchSizeOf = (batchIndex: number) => batchSpan(request.size, batchIndex).size;
+    const batchSizeOf = (batchIndex: number) => sizes[batchIndex]!;
+    // Set once the cohort details are known: the segment each position should get, unless a saved target already assigns segments.
+    let segmentPlan: string[] = [];
     const batchList = (numbers: number[]) => numbers.length < 2 ? `batch ${numbers[0]}` : `batches ${numbers.slice(0, -1).join(', ')} and ${numbers[numbers.length - 1]}`;
 
     // Describes each batch from what its provider has shown so far. Streamed personas are a view of partial output only; acceptance still needs the batch checks.
@@ -983,10 +1062,7 @@ export class LocalAgentService {
       if (acceptedBatches < 2 && inFlightPersonas >= 2 && batchSeconds >= 3) {
         const perBatch = inFlightPersonas / batchSeconds;
         const left = request.size - acceptedPersonas - inFlightPersonas;
-        const parallel = Math.max(1, Math.min(CONCURRENT_BATCHES, batches - Math.max(1, acceptedBatches)));
-        const seconds = acceptedBatches === 0 && running.has(0)
-          ? Math.max(0, batchSizeOf(0) - inFlightPersonas) / perBatch + Math.max(0, request.size - batchSizeOf(0)) / (perBatch * parallel)
-          : left / (perBatch * Math.max(1, Math.min(CONCURRENT_BATCHES, batches - acceptedBatches)));
+        const seconds = left / (perBatch * Math.max(1, Math.min(CONCURRENT_BATCHES, batches - acceptedBatches)));
         if (Number.isFinite(seconds) && seconds > 0) estimate = { seconds: Math.round(seconds), basis: 'streaming', at: new Date(now).toISOString() };
       }
       return { batchDetails: [...batchDetails, ...justAccepted], inFlightPersonas, estimate };
@@ -1006,20 +1082,26 @@ export class LocalAgentService {
       });
     };
 
+    // The reason a previous attempt was rejected goes before the request data, which stays last and unchanged.
+    const withFeedback = (text: string, note: string) => { const at = text.lastIndexOf('\n\nRequest data:\n'); return note && at >= 0 ? text.slice(0, at) + note + text.slice(at) : text; };
     const attemptBatch = async (batchIndex: number): Promise<void> => {
-      const offset = batchSpan(request.size, batchIndex).offset;
+      const offset = offsets[batchIndex]!;
       const batchSize = batchSizeOf(batchIndex);
+      // A cohort in several batches has its details set before any batch starts, so each batch writes only its personas.
+      const personasOnly = batches > 1;
       // Retries reuse these exact inputs.
       const recentExamples = recent.slice(-10).map(({ label, background, segment }) => ({ label: label.slice(0, 80), background: background.slice(0, 240), segment }));
-      const requestData = { request: input.prompt, selectedProject: projectBrief(input.document, input.projectId), cohortId: request.id, totalPersonas: request.size, batch: { number: batchIndex + 1, total: batches, firstPosition: offset + 1, lastPosition: offset + batchSize, size: batchSize }, originalCohortMetadata: batchIndex === 0 ? originalMetadata : metadata, generatedSegmentCounts: Object.fromEntries(segmentCounts), recentExamples, distributionAssignments: targetAssignments.slice(offset, offset + batchSize).map((assignments, index) => ({ position: offset + index + 1, assignments: assignments.map((bucketIndex, targetIndex) => ({ field: targets[targetIndex]!.field, kind: targets[targetIndex]!.kind, bucket: targets[targetIndex]!.buckets[bucketIndex]! })) })) };
+      const segmentMix = segmentPlan.slice(offset, offset + batchSize).reduce<Record<string, number>>((mix, segment) => { mix[segment] = (mix[segment] ?? 0) + 1; return mix; }, {});
+      const requestData = { request: input.prompt, selectedProject: projectBrief(input.document, input.projectId), cohortId: request.id, totalPersonas: request.size, batch: { number: batchIndex + 1, total: batches, firstPosition: offset + 1, lastPosition: offset + batchSize, size: batchSize }, ...(personasOnly ? { cohortMetadata: metadata, ...(segmentPlan.length ? { segmentMix } : {}) } : { originalCohortMetadata: originalMetadata }), generatedSegmentCounts: Object.fromEntries(segmentCounts), recentExamples, distributionAssignments: targetAssignments.slice(offset, offset + batchSize).map((assignments, index) => ({ position: offset + index + 1, assignments: assignments.map((bucketIndex, targetIndex) => ({ field: targets[targetIndex]!.field, kind: targets[targetIndex]!.kind, bucket: targets[targetIndex]!.buckets[bucketIndex]! })) })) };
       if (Buffer.byteLength(JSON.stringify(requestData)) > MAX_DOCUMENT_BYTES) throw new FatalDraftFailure('Cohort context is too large to prepare safely. Reduce its source and segment details and try again.');
       const cohortGuidance = guidance.replace('documentJson is a string containing the COMPLETE workspace document;', 'documentJson is a string containing the COMPLETE target cohort object;');
-      const prompt = `${cohortGuidance} Prepare one bounded batch for cohort ${request.id}. Return documentJson as one cohort object matching the cohort schema, not a workspace. This is batch ${batchIndex + 1} of ${batches}, covering final positions ${offset + 1}–${offset + batchSize} of ${request.size}; return exactly ${batchSize} new personas. Keep every persona an adult and question-independent. Make this batch distinct from the listed recent examples while remaining plausible for the same population. ${original ? 'Copy originalCohortMetadata exactly, preserving sources, assumptions, segments, weights, weight provenance and distributionTargets.' : 'The first batch establishes cohort metadata, sources, assumptions, segments and weights. Later batches must copy that metadata exactly.'} Add only new personas. Include at least one persona for every positive-weight segment in the final complete cohort. Obey each distributionAssignments slot in the exact returned persona order. Numeric buckets include min and exclude max; categorical buckets require the exact value. Targets control unweighted synthetic persona counts, never study weights. Do not approximate quotas or invent missing evidence. No unrelated workspace data is provided or needed.\n\nCohort schema:\n${JSON.stringify(jsonSchema('cohort'))}\n\nRequest data:\n${JSON.stringify(requestData)}`;
+      const quotas = 'Obey each distributionAssignments slot in the exact returned persona order. Numeric buckets include min and exclude max; categorical buckets require the exact value. Targets control unweighted synthetic persona counts, never study weights. Do not approximate quotas or invent missing evidence. No unrelated workspace data is provided or needed.';
+      const prompt = personasOnly
+        ? `${guidance.replace('documentJson is a string containing the COMPLETE workspace document;', 'documentJson is a string containing a JSON array of new persona objects;')} Write batch ${batchIndex + 1} of ${batches} of the personas of cohort ${request.id}, covering final positions ${offset + 1}–${offset + batchSize} of ${request.size}. Return documentJson as a JSON array of exactly ${batchSize} persona objects matching the persona schema, and nothing else: no cohort object and no cohort details. The cohort details (cohortMetadata) are already set and are not yours to change: give each persona one of its segment ids and cite only its source ids. Keep every persona an adult and question-independent. Other batches are written at the same time, so make every person in this batch distinct, from each other and from the listed recent examples, while remaining plausible for the same population.${segmentPlan.length ? ' Give this batch exactly the segment mix in segmentMix (segment id: number of personas), which keeps the whole cohort in proportion to the segment weights.' : ''} ${quotas}\n\nPersona schema:\n${JSON.stringify(personaJsonSchema)}\n\nRequest data:\n${JSON.stringify(requestData)}`
+        : `${cohortGuidance} Prepare one bounded batch for cohort ${request.id}. Return documentJson as one cohort object matching the cohort schema, not a workspace. This is batch ${batchIndex + 1} of ${batches}, covering final positions ${offset + 1}–${offset + batchSize} of ${request.size}; return exactly ${batchSize} new personas. Keep every persona an adult and question-independent. Make this batch distinct from the listed recent examples while remaining plausible for the same population. ${original ? 'Copy originalCohortMetadata exactly, preserving sources, assumptions, segments, weights, weight provenance and distributionTargets.' : 'This batch establishes cohort metadata, sources, assumptions, segments and weights.'} Add only new personas. Include at least one persona for every positive-weight segment in the final complete cohort. ${quotas}\n\nCohort schema:\n${JSON.stringify(jsonSchema('cohort'))}\n\nRequest data:\n${JSON.stringify(requestData)}`;
       const firstStartedAt = new Date().toISOString();
       let feedback = '';
       let transientFailures = 0;
-      // The reason a previous attempt was rejected goes before the request data, which stays last and unchanged.
-      const withFeedback = (text: string, note: string) => { const at = text.lastIndexOf('\n\nRequest data:\n'); return note && at >= 0 ? text.slice(0, at) + note + text.slice(at) : text; };
       for (let attempt = 1; ; attempt++) {
         if (entry.cancelled || stopped) throw new StopBatch();
         justAccepted = [];
@@ -1031,7 +1113,9 @@ export class LocalAgentService {
           if (entry.cancelled || stopped) throw new StopBatch();
           running.get(batchIndex)!.checking = true;
           this.updateProgress(entry, entry.public.progress?.phase ?? 'generating', entry.public.message, { validation: { scope: 'batch', status: 'checking', checks: [], checkedPersonas: 0 }, ...describe() });
-          const candidate = checkCohortBatch(output.documentJson, { id: request.id, size: batchSize, ...(metadata ?? originalMetadata ? { metadata: (metadata ?? originalMetadata)! } : {}) });
+          const candidate = personasOnly
+            ? checkPersonaBatch(output.documentJson, { id: request.id, size: batchSize, metadata: metadata! })
+            : checkCohortBatch(output.documentJson, { id: request.id, size: batchSize, ...(originalMetadata ? { metadata: originalMetadata } : {}) });
           const candidateMetadata = Object.fromEntries(Object.entries(candidate).filter(([key]) => key !== 'personas' && key !== 'generationPrompt'));
           for (const [index, persona] of candidate.personas.entries()) {
             for (const [targetIndex, target] of targets.entries()) {
@@ -1041,7 +1125,7 @@ export class LocalAgentService {
           }
           // Acceptance is synchronous, so batches finishing together cannot interleave.
           if (!metadata) { metadata = candidateMetadata; emptyGeneratedBytes = Buffer.byteLength(JSON.stringify({ ...metadata, generationPrompt: input.prompt, personas: [] })); }
-          if (batchIndex === 0) firstExplanation = output.explanation;
+          if (!personasOnly) firstExplanation = output.explanation;
           const accepted: Cohort['personas'] = [];
           for (const persona of candidate.personas) {
             const indexed = { ...persona, id: `persona-${String(offset + accepted.length + 1).padStart(5, '0')}` };
@@ -1057,7 +1141,7 @@ export class LocalAgentService {
           if (limitCause && ++successStreak >= RECOVERY_SUCCESSES) { allowed = CONCURRENT_BATCHES; limitCause = undefined; successStreak = 0; wakeStarts(); }
           justAccepted = [{ index: batchIndex + 1, size: batchSize, state: 'accepted', attempt, maxAttempts: 1 + BATCH_RETRIES, streamingPersonas: batchSize, outputChars: entry.streamed.get(batchIndex)?.chars ?? 0, contentStreamed: entry.public.progress?.outputSource !== 'response', startedAt: running.get(batchIndex)!.attemptStartedAt }];
           running.delete(batchIndex); retrying.delete(batchIndex); entry.streamed.delete(batchIndex);
-          const validation: NonNullable<LocalAgentProgress['validation']> = { scope: 'batch', status: 'passed', checks: ['Required fields and adult ages', 'Expected cohort ID and batch size', ...(originalMetadata || batchIndex > 0 ? ['Saved cohort details unchanged'] : []), ...(targets.length ? ['Requested distribution targets'] : []), 'Workspace size limit'], checkedPersonas: batchSize };
+          const validation: NonNullable<LocalAgentProgress['validation']> = { scope: 'batch', status: 'passed', checks: ['Required fields and adult ages', 'Expected cohort ID and batch size', ...(originalMetadata || personasOnly ? ['Saved cohort details unchanged'] : []), ...(targets.length ? ['Requested distribution targets'] : []), 'Workspace size limit'], checkedPersonas: batchSize };
           const done = {
             completedPersonas: acceptedPersonas, completedBatches: acceptedBatches,
             batchDurationsMs: [...(entry.public.progress?.batchDurationsMs ?? []), durationMs].slice(-MAX_BATCH_TIMINGS),
@@ -1094,8 +1178,45 @@ export class LocalAgentService {
       }
     };
 
-    // The first batch establishes the cohort metadata every later batch must copy, so it runs alone.
-    await attemptBatch(0);
+    // A cohort in several batches first gets its details (segments, weights, sources, assumptions) from one short call with no
+    // personas, so every persona batch can start at once instead of waiting for a first batch that also writes personas.
+    // A saved cohort being regenerated already has them.
+    const setUp = async (): Promise<Record<string, unknown>> => {
+      const setupData = { request: input.prompt, selectedProject: projectBrief(input.document, input.projectId), cohortId: request.id, totalPersonas: request.size, batches };
+      const prompt = `${guidance.replace('documentJson is a string containing the COMPLETE workspace document;', 'documentJson is a string containing one cohort object with its details and an empty personas list;')} Set up cohort ${request.id} before its ${request.size} personas are written. Return documentJson as one cohort object matching the cohort schema with "personas": [], and write no personas: give its id, name, description, population, createdAt, sources, segments with weights and weight provenance, and assumptions. The personas are written next, in ${batches} batches at the same time, and every batch uses these details exactly, so include every segment the request names and make each segment description specific enough to write distinct people from. No unrelated workspace data is provided or needed.\n\nCohort schema:\n${JSON.stringify(jsonSchema('cohort'))}\n\nRequest data:\n${JSON.stringify(setupData)}`;
+      const startedAt = new Date().toISOString();
+      let feedback = ''; let transientFailures = 0;
+      for (let attempt = 1; ; attempt++) {
+        if (entry.cancelled) throw new StopBatch();
+        this.updateProgress(entry, 'generating', `Setting up the audience: segments, weights and assumptions${attempt > 1 ? ` (attempt ${attempt} of ${1 + BATCH_RETRIES})` : ''}…`, { batchStartedAt: startedAt, activeBatches: [], maxConcurrentBatches: CONCURRENT_BATCHES, retries, validation: undefined });
+        try {
+          const output = await this.requestDraft(entry, input, withFeedback(prompt, feedback), SETUP_SLOT);
+          if (entry.cancelled) throw new StopBatch();
+          const details = checkCohortSetup(output.documentJson, request.id);
+          firstExplanation = output.explanation;
+          return details;
+        } catch (error) {
+          if (entry.cancelled || error instanceof StopBatch) throw error;
+          const { reason, excerpt } = failureDetail(error);
+          this.logLine({ event: 'cohort-setup-failed', jobId: entry.public.id, attempt, maxAttempts: 1 + BATCH_RETRIES, reason, output: excerpt });
+          if (error instanceof FatalDraftFailure) throw error;
+          if (attempt > BATCH_RETRIES) throw new DraftFailure(`Setting up the audience ${error instanceof BatchRejected || error instanceof z.ZodError ? `failed its checks ${attempt} times` : `could not be drafted after ${attempt} attempts`}: ${reason}. Workspace unchanged.`);
+          retries++;
+          const cause = error instanceof RequestFailure ? error.cause : undefined;
+          if (!cause) { feedback = `\n\nYour previous attempt at this setup was rejected: ${reason}. Return the complete cohort details again and fix exactly that.`; continue; }
+          feedback = ''; transientFailures++;
+          const base = BACKOFF_MS[Math.min(transientFailures, BACKOFF_MS.length) - 1]!;
+          const waitMs = Math.round(base * (1 + BACKOFF_JITTER * (2 * this.random() - 1)));
+          this.updateProgress(entry, 'generating', `Setting up the audience: waiting ${Math.round(waitMs / 1000)} s after ${cause === 'rate-limit' ? 'a rate limit' : cause === 'overload' ? 'the AI being overloaded' : 'a connection error'} (attempt ${attempt + 1} of ${1 + BATCH_RETRIES} next)…`, { retries });
+          await this.pause(entry, waitMs);
+        }
+      }
+    };
+    if (batches > 1) {
+      metadata = originalMetadata ?? await setUp();
+      emptyGeneratedBytes = Buffer.byteLength(JSON.stringify({ ...metadata, generationPrompt: input.prompt, personas: [] }));
+      if (!targets.some(target => target.field === 'segment')) segmentPlan = segmentSequence(metadata.segments as Cohort['segments'], request.size);
+    }
     let failure: { error: unknown } | undefined;
     const worker = async () => {
       while (!stopped && !entry.cancelled && nextBatch < batches) {
@@ -1108,7 +1229,7 @@ export class LocalAgentService {
         } finally { inFlight--; wakeStarts(); }
       }
     };
-    await Promise.all(Array.from({ length: Math.min(CONCURRENT_BATCHES, batches - 1) }, worker));
+    await Promise.all(Array.from({ length: Math.min(CONCURRENT_BATCHES, batches) }, worker));
     if (failure) throw (failure as { error: unknown }).error;
     const personas = results.flat();
     if (entry.cancelled || !metadata || personas.length !== request.size || acceptedBatches !== batches) throw Error();

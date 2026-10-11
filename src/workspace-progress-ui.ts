@@ -45,13 +45,12 @@ function draftBatchState(d){
   const again=d.attempt>1?', attempt '+d.attempt+' of '+d.maxAttempts:'';
   if(!d.contentStreamed)return 'writing… ('+(d.outputTokens>0?d.outputTokens.toLocaleString('en-US')+' tokens so far':d.outputChars>0?d.outputChars.toLocaleString('en-US')+' characters so far':'waiting for the first output')+')'+again;
   if(d.streamingPersonas>0)return 'writing persona '+d.streamingPersonas+' of '+d.size+again;
-  return (d.index===1?'writing the audience setup':'writing')+(d.outputChars>0?' ('+d.outputChars.toLocaleString('en-US')+' characters so far)':'')+again;
+  return 'writing'+(d.outputChars>0?' ('+d.outputChars.toLocaleString('en-US')+' characters so far)':'')+again;
 }
 function draftBatchLines(p){
   const details=Array.isArray(p.batchDetails)?p.batchDetails:[];
   if(!details.length)return '';
-  const first=details.some(d=>d.index===1&&d.state!=='accepted')&&p.totalBatches>1?'<p class="draft-progress-note">Batch 1 sets up the audience: segments, weights, assumptions ('+details.find(d=>d.index===1).size+' people), then '+(p.maxConcurrentBatches||12)+' batches run at once.</p>':'';
-  return first+'<ul class="draft-batch-states" aria-label="Batch status">'+details.map(d=>'<li data-batch-state="'+attr(d.state)+'">Batch '+d.index+': '+esc(draftBatchState(d))+'</li>').join('')+'</ul>';
+  return '<ul class="draft-batch-states" aria-label="Batch status">'+details.map(d=>'<li data-batch-state="'+attr(d.state)+'">Batch '+d.index+': '+esc(draftBatchState(d))+'</li>').join('')+'</ul>';
 }
 function updateDraftClocks(){root.querySelectorAll('[data-draft-estimate]').forEach(node=>{try{node.innerHTML=draftEstimate(JSON.parse(node.dataset.draftEstimate))}catch{}});root.querySelectorAll('[data-draft-start]').forEach(node=>{node.textContent=draftElapsed(node.dataset.draftStart)});root.querySelectorAll('[data-batch-start]').forEach(node=>{node.textContent=draftDuration(Date.now()-Date.parse(node.dataset.batchStart))+(node.dataset.batchLabel||' this batch')});root.querySelectorAll('[data-draft-activity]').forEach(node=>{node.textContent=draftLastEvent(node.dataset.draftActivity)})}
 function draftProgress(job){
@@ -62,7 +61,7 @@ function draftProgress(job){
   const title=job.cohort?'Generating '+plural(job.cohort.size,'persona'):job.persona?'Generating replacement persona':'Preparing your proposal';
   const active=Array.isArray(p.activeBatches)?p.activeBatches:[],many=active.length>1&&phase==='generating';
   const batchWords=active.length>1?'batches '+active.slice(0,-1).join(', ')+' and '+active[active.length-1]:'batch '+p.batch;
-  const status=phase==='saving'?'Saving your latest edits':phase==='checking'?'Checking AI connection':finishing?'Checking the complete draft':phase==='validating'?(p.batch?'Checking batch '+p.batch+' of '+p.totalBatches:'Checking the draft'):p.batch?'Generating '+batchWords+' of '+p.totalBatches:'Creating your draft';
+  const status=phase==='saving'?'Saving your latest edits':phase==='checking'?'Checking AI connection':finishing?'Checking the complete draft':phase==='validating'?(p.batch?'Checking batch '+p.batch+' of '+p.totalBatches:'Checking the draft'):p.batch?'Generating '+batchWords+' of '+p.totalBatches:job.cohort&&p.totalBatches>1?'Setting up the audience: segments, weights and assumptions, then '+Math.min(p.maxConcurrentBatches||16,p.totalBatches)+' batches run at once':'Creating your draft';
   const counts=Number.isFinite(total)&&Number.isFinite(completed)?'<div class="draft-metrics"><div class="draft-count"><strong>'+completed.toLocaleString('en-US')+' <span>/ '+total.toLocaleString('en-US')+'</span></strong>accepted'+(p.inFlightPersonas>0&&phase==='generating'?'<span class="draft-inflight">+'+p.inFlightPersonas.toLocaleString('en-US')+' being written'+(many?' across '+active.length+' batches':'')+'</span>':'')+'</div><div class="draft-estimate" data-draft-estimate="'+attr(JSON.stringify({totalPersonas:total,completedPersonas:completed,totalBatches:p.totalBatches,completedBatches:p.completedBatches,maxConcurrentBatches:p.maxConcurrentBatches,batchDurationsMs:p.batchDurationsMs,completedBatchSizes:p.completedBatchSizes,batchStartedAt:p.batchStartedAt,estimate:p.estimate}))+'">'+draftEstimate(p)+'</div></div><progress aria-label="Personas accepted" value="'+completed+'" max="'+total+'"></progress>':'';
   const steps=['Prepare','Generate','Final checks'].map((label,i)=>'<li data-state="'+(i<step?'done':i===step?'current':'pending')+'"'+(i===step?' aria-current="step"':'')+'>'+(i<step?'✓ ':String(i+1)+'. ')+label+'</li>').join('');
   const activity=phase==='validating'?'Validating draft structure':phase==='saving'?'Saving before generation':phase==='checking'?'Connecting':p.activity==='receiving'?(p.outputSource==='cli-stdout'?'CLI output arriving':'Response arriving'):p.activity==='generating'?'Model working':p.activity==='starting'?'Request started':'Request in progress';
