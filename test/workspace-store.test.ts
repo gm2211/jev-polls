@@ -51,8 +51,10 @@ test('reads empty defaults and atomically saves revisioned JSON', async (t) => {
   assert.deepEqual(await store.read(), { revision: 0, document: { version: 1, cohorts: [], pipelines: [], projects: [] } });
   const document = documentWith();
   document.cohorts[0]!.generationPrompt = 'Adults who recently chose a meal kit';
-  assert.deepEqual(await store.save(document, 0), { revision: 1, document: validateWorkspaceDocument(document) });
-  assert.deepEqual(await store.read(), { revision: 1, document: validateWorkspaceDocument(document) });
+  const saved = await store.save(document, 0);
+  assert.deepEqual(saved, { revision: 1, document: { ...validateWorkspaceDocument(document), activity: saved.document.activity } });
+  assert.deepEqual(Object.keys(saved.document.activity!).sort(), ['cohort:people', 'pipeline:study', 'project:existing-research']);
+  assert.deepEqual(await store.read(), saved);
 });
 
 test('serializes competing saves and rejects a stale expected revision', async (t) => {
@@ -291,4 +293,32 @@ test('saved studies keep canvas positions and reject malformed ones', async (t) 
   assert.throws(() => validateWorkspaceDocument(bad), /layout\..*x must be a finite number/);
   bad.pipelines[0].layout[stageId] = { x: 0, y: 0, z: 1 };
   assert.throws(() => validateWorkspaceDocument(bad), /unknown field 'z'/);
+});
+
+test('save stamps created and updated times per project, cohort and study, ignoring client stamps', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'jev-polls-activity-'));
+  let clock = new Date('2026-10-01T09:00:00.000Z');
+  const store = new WorkspaceStore(directory, { now: () => clock });
+  try {
+    const document: WorkspaceDocument = { version: 1, cohorts: [cohort()], pipelines: [pipeline()], projects: [{ id: 'research', name: 'Research', description: '', cohortIds: ['people'], pipelineIds: ['study'] }] };
+    const first = await store.save({ ...document, activity: { 'project:research': { createdAt: '2000-01-01T00:00:00.000Z', updatedAt: '2000-01-01T00:00:00.000Z' } } }, 0);
+    const created = { createdAt: '2026-10-01T09:00:00.000Z', updatedAt: '2026-10-01T09:00:00.000Z' };
+    assert.deepEqual(first.document.activity, { 'project:research': created, 'cohort:people': created, 'pipeline:study': created });
+
+    clock = new Date('2026-10-03T14:30:00.000Z');
+    const edited = structuredClone(first.document);
+    edited.pipelines[0]!.description = 'Sharper question';
+    const second = await store.save(edited, first.revision);
+    assert.deepEqual(second.document.activity, { 'project:research': created, 'cohort:people': created, 'pipeline:study': { createdAt: created.createdAt, updatedAt: '2026-10-03T14:30:00.000Z' } });
+    assert.deepEqual((await store.read()).document.activity, second.document.activity);
+
+    clock = new Date('2026-10-04T08:00:00.000Z');
+    const reordered = structuredClone(second.document);
+    reordered.projects = reordered.projects!.map(({ pipelineIds, cohortIds, description, name, id }) => ({ pipelineIds, cohortIds, description, name, id }));
+    const third = await store.save(reordered, second.revision);
+    assert.deepEqual(third.document.activity, second.document.activity, 'key order alone is not an edit');
+
+    assert.throws(() => validateWorkspaceDocument({ ...document, activity: { 'study:x': { updatedAt: created.updatedAt } } }), /project:, cohort: or pipeline:/);
+    assert.throws(() => validateWorkspaceDocument({ ...document, activity: { 'project:research': { updatedAt: 'yesterday' } } }), /ISO timestamp/);
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });
