@@ -182,7 +182,29 @@ export function backoffCause(status: unknown, ...texts: unknown[]): BackoffCause
   return undefined;
 }
 const MAX_BATCH_TIMINGS = 20;
-const personaJsonSchema = z.toJSONSchema(cohortSchema.shape.personas.element);
+/**
+ * What a persona batch writes: only the fields that differ between people. The app fills id, weight, syntheticFields and
+ * (when no source is cited) sourceIds, which were the same for every persona yet cost about a third of each batch's output.
+ */
+const personaJsonSchema = z.toJSONSchema(cohortSchema.shape.personas.element.omit({ id: true, weight: true, syntheticFields: true }).partial({ sourceIds: true }));
+/** A generated persona that names no synthetic fields has every written field marked synthetic, never presented as sourced. */
+const DEFAULT_SYNTHETIC_FIELDS = ['label', 'age', 'background', 'attributes'];
+/** Fills the fields a persona batch leaves to the app. Fields the reply did write are kept and checked as usual. */
+function withPersonaDefaults(persona: unknown, index: number): unknown {
+  if (!persona || typeof persona !== 'object' || Array.isArray(persona)) return persona;
+  return { id: `persona-${index + 1}`, weight: 1, sourceIds: [], syntheticFields: DEFAULT_SYNTHETIC_FIELDS, ...persona };
+}
+/**
+ * Claude Code and API engines return a persona batch as real JSON under personas. Inside the documentJson string every
+ * quote is escaped and an explanation is added, measured at 11% more output for the same 21 personas.
+ */
+const personaOutputSchema = { type: 'object', properties: { personas: { type: 'array', items: { type: 'object' } } }, required: ['personas'], additionalProperties: false };
+const nativePersonas = (engine: LocalAgentEngine) => engine !== 'codex';
+/**
+ * Effort for persona batches on Claude Code. Writing people from fixed cohort details needs little reasoning: at the
+ * default effort an Opus batch of 21 spent about 2,000 tokens (20 s) thinking before its first persona, at low about 120.
+ */
+const PERSONA_EFFORT = 'low';
 /** Provider slot of the cohort setup call; batch slots are their indexes. */
 const SETUP_SLOT = -1;
 interface ProviderProgress { phase: 'starting' | 'generating' | 'receiving'; outputChars: number; outputTokens?: number; streamedPersonas?: number; /** The model is reasoning before it writes; its reasoning is never counted as output. */ thinking?: boolean }
@@ -504,17 +526,23 @@ export function checkCohortSetup(documentJson: string, id: string): Record<strin
  * one under personas, whose other fields are ignored), the persona format, the exact count, and segments and sources
  * the cohort has. The cohort details are never taken from the reply, so a batch cannot change them.
  */
-export function checkPersonaBatch(documentJson: string, expected: { id: string; size: number; metadata: Record<string, unknown> }): Cohort {
+export function checkPersonaBatch(documentJson: string, expected: { id: string; size: number; metadata: Record<string, unknown> }, partial = false): Cohort {
   const raw = parseBatchJson(documentJson);
-  const personas = Array.isArray(raw) ? raw : raw && typeof raw === 'object' && Array.isArray((raw as { personas?: unknown }).personas) ? (raw as { personas: unknown[] }).personas : undefined;
+  let personas = Array.isArray(raw) ? raw : raw && typeof raw === 'object' && Array.isArray((raw as { personas?: unknown }).personas) ? (raw as { personas: unknown[] }).personas : undefined;
   if (!personas) throw new BatchRejected('the reply is not a list of personas', excerptOf(documentJson));
-  if (personas.length !== expected.size) throw new BatchRejected(`it returned ${personas.length} ${personas.length === 1 ? 'persona' : 'personas'} where this batch needs exactly ${expected.size}`, excerptOf(documentJson));
-  const parsed = cohortSchema.safeParse({ ...expected.metadata, id: expected.id, personas });
+  const miscount = `it returned ${personas.length} ${personas.length === 1 ? 'persona' : 'personas'} where this batch needs exactly ${expected.size}`;
+  if (personas.length !== expected.size && !(partial && personas.length)) throw new BatchRejected(miscount, excerptOf(documentJson));
+  // With partial, extra people are dropped and a short reply's people are checked and handed back for a top-up.
+  if (personas.length > expected.size) personas = personas.slice(0, expected.size);
+  const parsed = cohortSchema.safeParse({ ...expected.metadata, id: expected.id, personas: personas.map(withPersonaDefaults) });
   if (!parsed.success) throw new BatchRejected(zodReason(parsed.error), excerptOf(documentJson));
   const candidate = parsed.data as Cohort;
   checkPersonaReferences(candidate, excerptOf(documentJson));
+  if (candidate.personas.length < expected.size) throw new ShortBatch(miscount, candidate.personas, excerptOf(documentJson));
   return candidate;
 }
+/** A persona batch whose people all passed but were too few: they are kept and only the missing ones are requested again. */
+export class ShortBatch extends BatchRejected { constructor(message: string, readonly personas: Cohort['personas'], excerpt = '') { super(message, excerpt); } }
 /** A failure that another attempt cannot fix, so the batch is not retried. */
 class FatalDraftFailure extends DraftFailure {}
 /** Raised inside a batch when the job was cancelled or another batch already failed it. */
@@ -611,6 +639,8 @@ export class LocalAgentService {
   private readonly hedgeMinMs: number;
   private readonly hedgeCheckMs: number;
   private closed = false;
+  /** Set once the Claude CLI drafted after --effort was dropped, so later persona batches skip the flag. */
+  private claudeEffortUnsupported = false;
   private status?: { at: number; value: LocalAgentAvailability };
   private probing?: Promise<LocalAgentAvailability>;
 
@@ -1117,7 +1147,7 @@ export class LocalAgentService {
     const withFeedback = (text: string, note: string) => { const at = text.lastIndexOf('\n\nRequest data:\n'); return note && at >= 0 ? text.slice(0, at) + note + text.slice(at) : text; };
     // Sends a batch's request and, if hedging starts a second identical one, resolves with whichever reply arrives first and
     // stops the other. It fails only when every request it started has failed, with the first failure.
-    const raceRequests = (batchIndex: number, prompt: string) => new Promise<{ documentJson: string; explanation: string }>((resolve, reject) => {
+    const raceRequests = (batchIndex: number, prompt: string, personasOnly: boolean) => new Promise<{ documentJson: string; explanation: string }>((resolve, reject) => {
       const controllers: AbortController[] = [];
       let pending = 0; let settled = false; let firstError: unknown;
       const finish = () => {
@@ -1127,7 +1157,7 @@ export class LocalAgentService {
       };
       const launch = (slot: number) => {
         const controller = new AbortController(); controllers.push(controller); pending++;
-        this.requestDraft(entry, input, prompt, slot, controller.signal).then(
+        this.requestDraft(entry, input, prompt, slot, controller.signal, personasOnly).then(
           output => { if (settled) return; finish(); resolve(output); },
           error => { if (settled) return; firstError ??= error; if (--pending === 0) { finish(); reject(firstError); } });
       };
@@ -1163,14 +1193,29 @@ export class LocalAgentService {
       // A cohort in several batches has its details set before any batch starts, so each batch writes only its personas.
       const personasOnly = batches > 1;
       // Retries reuse these exact inputs.
-      const recentExamples = recent.slice(-10).map(({ label, background, segment }) => ({ label: label.slice(0, 80), background: background.slice(0, 240), segment }));
-      const segmentMix = segmentPlan.slice(offset, offset + batchSize).reduce<Record<string, number>>((mix, segment) => { mix[segment] = (mix[segment] ?? 0) + 1; return mix; }, {});
-      const requestData = { request: input.prompt, selectedProject: projectBrief(input.document, input.projectId), cohortId: request.id, totalPersonas: request.size, batch: { number: batchIndex + 1, total: batches, firstPosition: offset + 1, lastPosition: offset + batchSize, size: batchSize }, ...(personasOnly ? { cohortMetadata: metadata, ...(segmentPlan.length ? { segmentMix } : {}) } : { originalCohortMetadata: originalMetadata }), generatedSegmentCounts: Object.fromEntries(segmentCounts), recentExamples, distributionAssignments: targetAssignments.slice(offset, offset + batchSize).map((assignments, index) => ({ position: offset + index + 1, assignments: assignments.map((bucketIndex, targetIndex) => ({ field: targets[targetIndex]!.field, kind: targets[targetIndex]!.kind, bucket: targets[targetIndex]!.buckets[bucketIndex]! })) })) };
-      if (Buffer.byteLength(JSON.stringify(requestData)) > MAX_DOCUMENT_BYTES) throw new FatalDraftFailure('Cohort context is too large to prepare safely. Reduce its source and segment details and try again.');
+      // A persona batch that comes back a few people short keeps the people it wrote, and its next attempt writes only the rest.
+      // Not with distribution targets, whose slots are matched by position.
+      const topUp = personasOnly && !targets.length;
+      let kept: Cohort['personas'] = [];
+      const recentBase = recent.slice(-10);
+      // Retries reuse these exact inputs, except a top-up, which covers only the positions still to write.
+      const dataFor = (first: number, count: number) => {
+        const recentExamples = [...recentBase, ...kept].slice(-10).map(({ label, background, segment }) => ({ label: label.slice(0, 80), background: background.slice(0, 240), segment }));
+        const segmentMix = segmentPlan.slice(offset, offset + batchSize).reduce<Record<string, number>>((mix, segment) => { mix[segment] = (mix[segment] ?? 0) + 1; return mix; }, {});
+        for (const persona of kept) if (segmentMix[persona.segment]) segmentMix[persona.segment]!--;
+        for (const [segment, count] of Object.entries(segmentMix)) if (!count) delete segmentMix[segment];
+        const data = { request: input.prompt, selectedProject: projectBrief(input.document, input.projectId), cohortId: request.id, totalPersonas: request.size, batch: { number: batchIndex + 1, total: batches, firstPosition: first + 1, lastPosition: first + count, size: count }, ...(personasOnly ? { cohortMetadata: metadata, ...(segmentPlan.length ? { segmentMix } : {}) } : { originalCohortMetadata: originalMetadata }), generatedSegmentCounts: Object.fromEntries(segmentCounts), recentExamples, distributionAssignments: targetAssignments.slice(first, first + count).map((assignments, index) => ({ position: first + index + 1, assignments: assignments.map((bucketIndex, targetIndex) => ({ field: targets[targetIndex]!.field, kind: targets[targetIndex]!.kind, bucket: targets[targetIndex]!.buckets[bucketIndex]! })) })) };
+        if (Buffer.byteLength(JSON.stringify(data)) > MAX_DOCUMENT_BYTES) throw new FatalDraftFailure('Cohort context is too large to prepare safely. Reduce its source and segment details and try again.');
+        return data;
+      };
+      const requestData = dataFor(offset, batchSize);
       const cohortGuidance = guidance.replace('documentJson is a string containing the COMPLETE workspace document;', 'documentJson is a string containing the COMPLETE target cohort object;');
       const quotas = 'Obey each distributionAssignments slot in the exact returned persona order. Numeric buckets include min and exclude max; categorical buckets require the exact value. Targets control unweighted synthetic persona counts, never study weights. Do not approximate quotas or invent missing evidence. No unrelated workspace data is provided or needed.';
-      const prompt = personasOnly
-        ? `${guidance.replace('documentJson is a string containing the COMPLETE workspace document;', 'documentJson is a string containing a JSON array of new persona objects;')} Write batch ${batchIndex + 1} of ${batches} of the personas of cohort ${request.id}, covering final positions ${offset + 1}–${offset + batchSize} of ${request.size}. Return documentJson as a JSON array of exactly ${batchSize} persona objects matching the persona schema, and nothing else: no cohort object and no cohort details. The cohort details (cohortMetadata) are already set and are not yours to change: give each persona one of its segment ids and cite only its source ids. Keep every persona an adult and question-independent. Other batches are written at the same time, so make every person in this batch distinct, from each other and from the listed recent examples, while remaining plausible for the same population.${segmentPlan.length ? ' Give this batch exactly the segment mix in segmentMix (segment id: number of personas), which keeps the whole cohort in proportion to the segment weights.' : ''} ${quotas}\n\nPersona schema:\n${JSON.stringify(personaJsonSchema)}\n\nRequest data:\n${JSON.stringify(requestData)}`
+      const personasPrompt = (first: number, count: number) => `${(nativePersonas(input.engine)
+          ? guidance.replace('Return only the required JSON response: documentJson is a string containing the COMPLETE workspace document; explanation briefly describes changes and assumptions.', 'Return only the required JSON object: personas is a JSON array of new persona objects, written as real JSON and not as a string.')
+          : guidance.replace('documentJson is a string containing the COMPLETE workspace document;', 'documentJson is a string containing a JSON array of new persona objects;')).replace(' Include source IDs and syntheticFields.', '')} Write batch ${batchIndex + 1} of ${batches} of the personas of cohort ${request.id}, covering final positions ${first + 1}–${first + count} of ${request.size}. Return ${nativePersonas(input.engine) ? 'personas as an array' : 'documentJson as a JSON array'} of exactly ${count} persona objects matching the persona schema, and nothing else: no cohort object and no cohort details.${kept.length ? ` Your previous reply for this batch had ${kept.length} of its ${batchSize} people, which are kept; write only the remaining ${count}, different from them.` : ''} Write only the fields in the persona schema; the app adds ids, weights and synthetic-field labels. The cohort details (cohortMetadata) are already set and are not yours to change: give each persona one of its segment ids, and add sourceIds only to cite its source ids. Keep every persona an adult and question-independent. Other batches are written at the same time, so make every person in this batch distinct, from each other and from the listed recent examples, while remaining plausible for the same population.${segmentPlan.length ? ' Give this batch exactly the segment mix in segmentMix (segment id: number of personas), which keeps the whole cohort in proportion to the segment weights.' : ''} ${quotas}\n\nPersona schema:\n${JSON.stringify(personaJsonSchema)}\n\nRequest data:\n${JSON.stringify(dataFor(first, count))}`;
+      let prompt = personasOnly
+        ? personasPrompt(offset, batchSize)
         : `${cohortGuidance} Prepare one bounded batch for cohort ${request.id}. Return documentJson as one cohort object matching the cohort schema, not a workspace. This is batch ${batchIndex + 1} of ${batches}, covering final positions ${offset + 1}–${offset + batchSize} of ${request.size}; return exactly ${batchSize} new personas. Keep every persona an adult and question-independent. Make this batch distinct from the listed recent examples while remaining plausible for the same population. ${original ? 'Copy originalCohortMetadata exactly, preserving sources, assumptions, segments, weights, weight provenance and distributionTargets.' : 'This batch establishes cohort metadata, sources, assumptions, segments and weights.'} Add only new personas. Include at least one persona for every positive-weight segment in the final complete cohort. ${quotas}\n\nCohort schema:\n${JSON.stringify(jsonSchema('cohort'))}\n\nRequest data:\n${JSON.stringify(requestData)}`;
       const firstStartedAt = new Date().toISOString();
       let feedback = '';
@@ -1182,13 +1227,15 @@ export class LocalAgentService {
         running.set(batchIndex, { firstStartedAt, attempt, attemptStartedAt: new Date().toISOString(), checking: false });
         publishRunning({ validation: undefined });
         try {
-          const output = await raceRequests(batchIndex, withFeedback(prompt, feedback));
+          const output = await raceRequests(batchIndex, withFeedback(prompt, feedback), personasOnly);
           if (entry.cancelled || stopped) throw new StopBatch();
           running.get(batchIndex)!.checking = true;
           this.updateProgress(entry, entry.public.progress?.phase ?? 'generating', entry.public.message, { validation: { scope: 'batch', status: 'checking', checks: [], checkedPersonas: 0 }, ...describe() });
           const candidate = personasOnly
-            ? checkPersonaBatch(output.documentJson, { id: request.id, size: batchSize, metadata: metadata! })
+            ? checkPersonaBatch(output.documentJson, { id: request.id, size: batchSize - kept.length, metadata: metadata! }, topUp)
             : checkCohortBatch(output.documentJson, { id: request.id, size: batchSize, ...(originalMetadata ? { metadata: originalMetadata } : {}) });
+          const written = candidate.personas.length;
+          if (kept.length) candidate.personas = [...kept, ...candidate.personas];
           const candidateMetadata = Object.fromEntries(Object.entries(candidate).filter(([key]) => key !== 'personas' && key !== 'generationPrompt'));
           for (const [index, persona] of candidate.personas.entries()) {
             for (const [targetIndex, target] of targets.entries()) {
@@ -1207,7 +1254,7 @@ export class LocalAgentService {
             if (unchangedBytes + emptyGeneratedBytes - 2 + serializedPersonaBytes > MAX_WORKSPACE_BYTES) throw new FatalDraftFailure('The completed cohort would exceed the workspace size limit. Use a smaller persona count or reduce saved workspace data.');
           }
           const durationMs = Math.max(0, Date.now() - Date.parse(firstStartedAt));
-          acceptedMsPerPersona.push(Math.max(0, Date.now() - Date.parse(running.get(batchIndex)!.attemptStartedAt)) / batchSize);
+          acceptedMsPerPersona.push(Math.max(0, Date.now() - Date.parse(running.get(batchIndex)!.attemptStartedAt)) / written);
           results[batchIndex] = accepted;
           for (const persona of accepted) segmentCounts.set(persona.segment, (segmentCounts.get(persona.segment) ?? 0) + 1);
           recent.push(...accepted);
@@ -1238,6 +1285,7 @@ export class LocalAgentService {
           }
           const cause = error instanceof RequestFailure ? error.cause : undefined;
           retries++; retrying.set(batchIndex, { attempt: attempt + 1, ...(cause ? { cause } : {}) });
+          if (error instanceof ShortBatch) { kept = [...kept, ...error.personas]; prompt = personasPrompt(offset + kept.length, batchSize - kept.length); feedback = ''; continue; }
           if (!cause) { feedback = `\n\nYour previous attempt at this batch was rejected: ${reason}. Return the complete batch again and fix exactly that.`; continue; }
           // The AI could not be reached or declined for load, so the same request goes again after a wait, and fewer batches start meanwhile.
           feedback = '';
@@ -1335,8 +1383,13 @@ export class LocalAgentService {
     return { document, explanation: `Prepared ${request.size} synthetic personas in ${batches} batches. ${targets.length ? 'Saved distribution targets matched deterministic whole-person quotas (largest remainder rounding); these are synthetic counts, not observed population data. ' : ''}${firstExplanation}`.slice(0, 5000) };
   }
 
-  /** `signal` stops this one request without cancelling the job: the slower of a batch's two requests. */
-  private async requestDraft(entry: Entry, input: LocalAgentInput, prompt: string, slot = 0, signal?: AbortSignal): Promise<{ documentJson: string; explanation: string }> {
+  /**
+   * `signal` stops this one request without cancelling the job: the slower of a batch's two requests. `personas` marks a
+   * persona batch: engines other than Codex return it as {personas: [...]}, and Claude Code writes it at low effort.
+   */
+  private async requestDraft(entry: Entry, input: LocalAgentInput, prompt: string, slot = 0, signal?: AbortSignal, personas = false): Promise<{ documentJson: string; explanation: string }> {
+    const native = personas && nativePersonas(input.engine);
+    const shape = native ? 'Return only a JSON object with exactly personas (a JSON array of persona objects). No markdown fences. No tools.' : undefined;
     let directory: string | undefined;
     const startedAt = new Date().toISOString();
     entry.slots.set(slot, { chars: 0 });
@@ -1350,7 +1403,7 @@ export class LocalAgentService {
         const timer = setTimeout(() => controller.abort(), this.timeoutMs); timer.unref();
         let active = true;
         try {
-          const request = { model: input.model, input: prompt, instructions: 'Return a JSON object with exactly documentJson (a JSON string) and explanation (a string). No markdown fences. No tools.', signal: controller.signal,
+          const request = { model: input.model, input: prompt, instructions: shape ?? 'Return a JSON object with exactly documentJson (a JSON string) and explanation (a string). No markdown fences. No tools.', signal: controller.signal,
             onProgress: (progress: ProviderProgress) => { if (active && !controller.signal.aborted) this.recordActivity(entry, progress, 'response', slot); },
           };
           const result = await this.chatgpt.generate(request);
@@ -1370,7 +1423,7 @@ export class LocalAgentService {
         let active = true;
         try {
           const text = await this.byos.generate({ engine: input.engine, model: input.model, input: prompt, signal: controller.signal,
-            instructions: 'Return only a JSON object with exactly documentJson (a JSON string) and explanation (a string). No markdown fences. No tools.',
+            instructions: shape ?? 'Return only a JSON object with exactly documentJson (a JSON string) and explanation (a string). No markdown fences. No tools.',
             onProgress: progress => { if (active && !controller.signal.aborted) this.recordActivity(entry, progress, 'response', slot); } });
           if (controller.signal.aborted || entry.cancelled) throw Error();
           if (Buffer.byteLength(text) > this.maxOutputBytes) throw new DraftFailure('Agent reached its time or output limit. Try a smaller drafting request.');
@@ -1390,11 +1443,19 @@ export class LocalAgentService {
           const config = ['approval_policy="never"', 'web_search="disabled"', 'project_doc_max_bytes=0', 'agents.enabled=false', 'apps._default.enabled=false', 'mcp_servers={}', 'features.shell_tool=false', 'features.unified_exec=false', 'features.view_image=false', 'features.apps=false', 'features.plugins=false', 'features.hooks=false', 'features.memories=false', 'features.multi_agent=false', 'features.multi_agent_v2=false', 'features.browser_use=false', 'features.computer_use=false', 'features.image_generation=false', 'features.code_mode=false', 'features.skip_host_skill_discovery=true'];
           args = ['exec', '--json', '--ignore-user-config', '--ephemeral', '--skip-git-repo-check', '--sandbox', 'read-only', '--color', 'never', '--output-schema', schemaPath, '--output-last-message', resultPath, ...config.flatMap(value => ['-c', value]), '-'];
         } else {
-          args = ['--print', '--safe-mode', '--restricted', '--tools', '', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--permission-mode', 'dontAsk', '--no-session-persistence', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--json-schema', JSON.stringify(outputSchema)];
+          args = ['--print', '--safe-mode', '--restricted', '--tools', '', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--permission-mode', 'dontAsk', '--no-session-persistence', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--json-schema', JSON.stringify(native ? personaOutputSchema : outputSchema), ...(personas && !this.claudeEffortUnsupported ? ['--effort', PERSONA_EFFORT] : [])];
         }
         if (entry.cancelled) throw Error();
         let outcome = await this.command(input.engine, args, directory, prompt, this.timeoutMs, this.maxOutputBytes, entry, false, slot, input.engine === 'claude' ? 'claude-events' : 'raw', signal);
-        if (input.engine === 'claude' && outcome.code !== 0 && !outcome.limited && !outcome.missing && !entry.cancelled && !signal?.aborted && !outcome.stdout.includes('"type":"result"')) {
+        const failedEarly = () => input.engine === 'claude' && outcome.code !== 0 && !outcome.limited && !outcome.missing && !entry.cancelled && !signal?.aborted && !outcome.stdout.includes('"type":"result"');
+        if (failedEarly() && args.includes('--effort')) {
+          // An older CLI without --effort: drop it, and stop asking for it once the CLI works without it.
+          const withoutEffort = args.filter((value, index) => value !== '--effort' && args[index - 1] !== '--effort');
+          const retried = await this.command(input.engine, withoutEffort, directory, prompt, this.timeoutMs, this.maxOutputBytes, entry, false, slot, 'claude-events', signal);
+          if (retried.code === 0) this.claudeEffortUnsupported = true;
+          outcome = retried; args = withoutEffort;
+        }
+        if (failedEarly()) {
           // A CLI that rejects the streaming flags still drafts, with its result printed only at the end.
           const plain = args.map((value, index) => args[index - 1] === '--output-format' ? 'json' : value).filter(value => value !== '--verbose' && value !== '--include-partial-messages');
           outcome = await this.command(input.engine, plain, directory, prompt, this.timeoutMs, this.maxOutputBytes, entry, false, slot, 'raw', signal);
@@ -1415,6 +1476,8 @@ export class LocalAgentService {
           else { try { payload = JSON.parse(envelope.result ?? ''); } catch { throw new RequestFailure(GENERIC_DRAFT_FAILURE, 'the reply had no structured output', excerptOf(envelope.result)); } }
         }
       }
+      // A native persona batch becomes the usual envelope, so the batch checks read every engine the same way.
+      if (native && payload && typeof payload === 'object' && Array.isArray((payload as { personas?: unknown }).personas)) payload = { documentJson: JSON.stringify((payload as { personas: unknown[] }).personas), explanation: 'Persona batch.' };
       const checked = resultSchema.safeParse(payload);
       if (!checked.success) throw new RequestFailure(GENERIC_DRAFT_FAILURE, `the reply is missing documentJson or explanation, or one is too large (${checked.error.issues[0]?.path.join('.') || 'reply'})`, excerptOf(payload));
       return checked.data;
