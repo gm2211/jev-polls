@@ -77,7 +77,8 @@ test('the Options stop is one light list of rows once options exist, and the way
   assert.match(html, /id="optionsBoxStatus"[^>]*>2 options</);
   assert.doesNotMatch(html, /Probabilities 0–1|totaling 1/, 'the output format is not part of filling in options');
   assert.doesNotMatch(html, /Edit option Alpha|Paste dialog|data-act="answer-list-open"|options-source"|list-pager|listPage/, 'the options show once, unpaged');
-  assert.match(html, /data-act="setup-input" data-source="choose">Import or draft with AI/);
+  assert.match(html, /class="button small" data-act="answer-list-import"><svg[^]*?<\/svg> Import</, 'importing is a small icon button, not a text link');
+  assert.match(html, /class="button small" data-act="setup-input" data-source="agent"><svg[^]*?<\/svg> Draft with AI</, 'drafting is a small icon button, not a text link');
   h.S.sections['setup-input-study-ask-answer'] = 'choose';
   const choose = h.flowInspector(h.study, h.poll);
   assert.match(choose, /How do you want to add options\?/);
