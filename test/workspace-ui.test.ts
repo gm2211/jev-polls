@@ -2288,7 +2288,7 @@ test('option comparisons preserve descriptions, stable keys and paginated answer
   q.criteria={a:{label:'Afterlight',description:'A hopeful title about exploration.'},b:{label:'Project Dawn',description:'A bold title about a new beginning.'},c:'None of these',d:'Other',e:{label:'Hidden option',description:'Preserve this off-page description.'}};
   const html=stageForm(p,s);
   assert.match(html,/data-options-box/);assert.doesNotMatch(html,/name="setupOption"|name="setupDescription"|>Rating</);
-  assert.match(html,/A hopeful title/);assert.doesNotMatch(html,/data-options-list/,'the box is the one list');assert.match(html,/Hidden option: Preserve this off-page description\./);
+  assert.match(html,/A hopeful title/);assert.doesNotMatch(html,/data-options-list/,'the list is the one copy');assert.match(html,/value="Hidden option"[^>]*><input data-option-field="description" value="Preserve this off-page description\."/,'every option shows, unpaged');
   const beforeEditing=JSON.stringify(q);setupAction('setup-edit-option',{dataset:{key:'a'}});
   const editor=stageForm(p,s);assert.match(editor,/Option 1 name/);assert.match(editor,/Option 1 description/);assert.doesNotMatch(editor,/Option 2 name/);
   assert.equal(JSON.stringify(q),beforeEditing,'opening an option does not mutate criteria');
@@ -2544,7 +2544,7 @@ test('option input tabs isolate sources and preserve drafts and reachable blank 
   applyStudySetup({dataset:{questionId:'answer'},values:{setupPrompt:'Choose a title'},querySelectorAll:()=>[row]});
   setupAction('setup-option-back',{dataset:{}});setupAction('setup-input',{dataset:{source:'file'}});setupAction('setup-input',{dataset:{source:'manual'}});
   assert.equal(q.label,'Choose a title');assert.equal(q.criteria.a.description,'A hopeful title.');assert.equal(q.criteria.b,'');
-  html=stageForm(p,s);assert.match(html,/Afterlight: A hopeful title\./);assert.doesNotMatch(html,/How do you want to add options/,'once an option exists the box is the one list');
+  html=stageForm(p,s);assert.match(html,/value="Afterlight"[^>]*><input data-option-field="description" value="A hopeful title\."/);assert.doesNotMatch(html,/How do you want to add options/,'once an option exists the list is the one place to edit');
   const other={...s,id:'other',questions:{answer:{...q,criteria:{a:'',b:''}}}};
   setupAction('setup-input',{dataset:{source:'agent'}});assert.doesNotMatch(stageForm(p,other),/optionAgentPrompt/,'source selection belongs to one step');assert.match(stageForm(p,other),/data-options-box/);
 });
