@@ -3640,6 +3640,13 @@ test('drafting progress separates accepted from being written and describes each
   assert.match(draftProgress({ id: 'j', engine: 'claude', status: 'running', message: 'Setting up the audience: waiting 20 s after a rate limit', cohort: { id: 'c', size: 1000 }, progress: { phase: 'generating', totalBatches: 48, completedBatches: 0, completedPersonas: 0, totalPersonas: 1000, activeBatches: [] } }), /paused briefly/);
   assert.doesNotMatch(html.replace(/<[^>]*>/g,' '), /batch|segments|weights|assumptions|tokens|characters|partial output/, 'no internal jargon');
   assert.match(draftProgress({ id: 'j', engine: 'chatgpt', status: 'running', startedAt: new Date().toISOString(), cohort: { id: 'c', size: 1000 }, progress: { ...progress, inFlightPersonas: 0, batchDetails: undefined } }), /<strong>160<\/strong>/);
+  const before = { phase: 'generating', totalBatches: 48, completedBatches: 0, completedPersonas: 0, totalPersonas: 1000, activeBatches: [1, 2, 3], inFlightPersonas: 0, batchDetails: [detail(1, 'thinking'), detail(2, 'thinking'), detail(3, 'connecting')] };
+  const thinking = draftProgress({ id: 'j', engine: 'claude', status: 'running', cohort: { id: 'c', size: 1000 }, progress: before });
+  assert.match(thinking, /Claude Code is thinking through the first personas before writing them\./);
+  assert.match(thinking, /Groups: 2 thinking, 1 waiting to start/);
+  const firstWords = draftProgress({ id: 'j', engine: 'claude', status: 'running', cohort: { id: 'c', size: 1000 }, progress: { ...before, batchDetails: [detail(1, 'writing'), detail(2, 'thinking'), detail(3, 'thinking')] } });
+  assert.match(firstWords, /Writing the first personas\./); assert.match(firstWords, /Groups: 1 writing, 2 thinking/);
+  assert.match(draftProgress({ id: 'j', engine: 'claude', status: 'running', cohort: { id: 'c', size: 1000 }, progress: { ...before, batchDetails: [detail(1, 'connecting')] } }), /Waiting for Claude Code to start writing\./);
   const early = draftEstimate({ ...progress, estimate: { seconds: 240, basis: 'streaming', at: new Date().toISOString() } });
   assert.match(early, /^About 2–7 min left$/);
   assert.match(draftEstimate({ ...progress, estimate: undefined }), /Estimating time left…/);
