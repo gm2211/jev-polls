@@ -198,7 +198,9 @@ test('a tile tooltip follows the pointer or keyboard focus and never survives a 
   assert.equal(next(null, { type: 'hover', key: 'a', touch: true }), null, 'touch never shows a hover tooltip');
   assert.equal(next(null, { type: 'focus', key: 'a', keyboard: true }), 'a');
   assert.equal(next(null, { type: 'focus', key: 'a', keyboard: false }), null, 'focus from a click does not bring the tooltip back');
-  for (const type of ['click', 'leave', 'scroll', 'escape', 'blur', 'select'] as const) assert.equal(next('a', { type }), null, type);
+  assert.equal(next(null, { type: 'focus', key: 'a', keyboard: true, restored: true }), null, 'focus put back after a rebuild is not a user gesture');
+  assert.equal(next('b', { type: 'focus', key: 'a', keyboard: true, restored: true }), 'b', 'a restored focus leaves a resting hover alone');
+  for (const type of ['click', 'pointerdown', 'leave', 'scroll', 'wheel', 'escape', 'blur', 'select', 'rebuild'] as const) assert.equal(next('a', { type }), null, type);
   // hover, click (hides), pointer leaves, click's focus arrives pointer-driven: nothing is pinned.
   let state: string | null = next(null, { type: 'hover', key: 'a' });
   state = next(state, { type: 'click' });
