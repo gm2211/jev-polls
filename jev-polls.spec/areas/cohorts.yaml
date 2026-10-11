@@ -66,6 +66,8 @@ behaviors:
       Replaced on 2026-10-10 a five-tab layout (Background, Attributes, Weight & sources, Edit with
       three sub-tabs, Regenerate) that split six fields across tabs and hid the edit form behind a
       second tab row. Previous and Next step through the cohort from the header.
+      Since 2026-10-11 attributes appear once, in the editable JSON field; the read-only copy of
+      the same values above it was removed.
     source:
       text: "Persona page: five tabs for six fields (UI audit, item 9)"
       reference: jev-polls project thread "UI audit in a headless browser", 2026-10-10

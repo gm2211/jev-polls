@@ -3,6 +3,7 @@ export const STUDY_START_CLIENT = String.raw`
 function emptyCreate(act,title,hint){
   return '<button type="button" class="empty-create" data-act="'+act+'"><span class="empty-create-plus" aria-hidden="true">'+icon('plus')+'</span><strong>'+esc(title)+'</strong><span class="empty-create-hint">'+esc(hint)+'</span></button>';
 }
+function afterList(tile){return tile.replace('class="empty-create"','class="empty-create after-list"')}
 function createRow(act,label,cls=''){return '<button type="button" class="create-row '+cls+'" data-act="'+act+'">'+icon('plus')+'<span>'+esc(label)+'</span></button>'}
 function createStudy(){
   /* A new study starts as an empty canvas: the first question is added on the canvas, not pre-made. */

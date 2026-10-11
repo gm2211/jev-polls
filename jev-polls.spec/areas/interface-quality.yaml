@@ -75,13 +75,14 @@ behaviors:
     description: >-
       Projects, Studies and Cohorts lists use the same row: title, an optional one-line subtitle,
       small counts, a chevron, and trailing icon actions (rename, delete); each list has one create
-      control: New study and New cohort on the title line, and a New project tile at the end of the
-      Projects list (projects.new-project-tile).
+      control, a dashed New project, New study or New cohort tile after the list that is also the
+      empty state (projects.new-project-tile).
     details: >-
       Before 2026-10-10 the three lists had three designs: project cards with counts and a chevron,
       study rows with a chevron, and cohort cards with a large persona count, no chevron, a dashed
       New cohort card at the end and a header button that said Generate cohort. The shared row is
-      listRow in the workspace client.
+      listRow in the workspace client. On 2026-10-11 the title-line New study and New cohort
+      buttons gave way to the same tile Projects uses.
     source:
       text: Three sibling list pages, three card designs (UI audit, item 8)
   - id: no-redundant-controls

@@ -1675,8 +1675,8 @@ test('project detail submission saves metadata and pipeline creation assigns own
   act(null, { dataset: { act: 'study-title-cancel' } });
   assert.doesNotMatch(browser.element('app').innerHTML, /data-form="study-title"/);
   act(null, { dataset: { act: 'back-studies' } });
-  assert.equal((browser.element('app').innerHTML.match(/data-act="create-study"/g) || []).length, 1, 'a study list offers a single New study button');
-  assert.match(browser.element('app').innerHTML, /class="button primary" data-act="create-study"/);
+  assert.equal((browser.element('app').innerHTML.match(/data-act="create-study"/g) || []).length, 1, 'a study list offers a single New study tile');
+  assert.match(browser.element('app').innerHTML, /class="empty-create after-list" data-act="create-study"/);
   act(null, { dataset: { act: 'create-study' } });
   assert.equal(S.doc.pipelines.length, 2, 'a project holds several studies');
   assert.equal(S.doc.pipelines[1].name, 'Study 2');
@@ -2997,8 +2997,7 @@ test('page anatomy keeps brand, breadcrumbs, project tabs and header actions dis
   S.dirty = true; render();
   assert.match(html(), /class="button primary save-button"[^>]*aria-label="Save changes"[^>]*>[\s\S]*?<span aria-hidden="true">Save<\/span>/);
   act(null, { dataset: { act: 'tab', tab: 'cohorts' } });
-  const header = html().match(/<div class="header-actions">[\s\S]*?<\/div>/)![0];
-  assert.ok(header.indexOf('data-act="save"') < header.indexOf('data-act="new-cohort"'), 'Save leads every header action group');
+  assert.doesNotMatch(html().match(/<div class="header-actions">[\s\S]*?<\/div>/)?.[0] ?? '', /data-act="save"/, 'list headers carry no Save');
   act(null, { dataset: { act: 'open-cohort', id: 'cohort' } });
   act(null, { dataset: { act: 'open-persona', id: 'person' } });
   assert.doesNotMatch(html(), /Back to cohort/);
@@ -3043,8 +3042,8 @@ test('an empty cohort list is one click target and a full one ends with a create
   const { S, act, render } = browser.client;
   const html = () => browser.element('app').innerHTML;
   act(null, { dataset: { act: 'tab', tab: 'cohorts' } });
-  // One create affordance: the title-line button, matching the Studies list.
-  assert.match(html(), /<button class="button primary" data-act="new-cohort">[\s\S]*?New cohort<\/button>/);
+  // One create affordance: the New cohort tile after the list, matching Projects and Studies.
+  assert.match(html(), /class="empty-create after-list" data-act="new-cohort">[\s\S]*?New cohort/);
   assert.doesNotMatch(html(), /create-row|Generate cohort/);
   S.doc.projects.find((p: any) => p.id === S.projectId).cohortIds = []; render();
   assert.match(html(), /<button type="button" class="empty-create" data-act="new-cohort">[\s\S]*?<strong>New cohort<\/strong>/);
@@ -3119,7 +3118,7 @@ test('a new tab reattaches to a running cohort generation and offers it on the C
   const html = browser.element('app').innerHTML;
   assert.match(html, /Generating 1,000 personas · 375 done/);
   assert.match(html, /data-act="cohort-job-open"/);
-  assert.doesNotMatch(html, /Click anywhere here to describe an audience/, 'the empty state is replaced');
+  assert.doesNotMatch(html, /class="empty-create" data-act="new-cohort"/, 'the empty state is replaced');
   assert.equal(S.localJob.status, 'running');
   assert.equal(commandState.draftProject, null);
   S.localJob = { ...running, status: 'completed', proposal: { document: browser.snapshot().document, explanation: 'Done' } };
@@ -3448,4 +3447,21 @@ test('a run takes the whole window: no sidebar or page chrome, Esc and Back retu
   // Opened from Runs: Back goes to the study the run belongs to.
   S.tab='runs';S.liveRunId='run-full';render();html=browser.element('app').innerHTML;
   assert.match(html,/data-full="true"/);assert.match(html,/data-act="run-open-study" data-id="study">Back to study/);
+});
+
+test('unsaved edits show a top-bar pill on pages without their own Save, and personas list attributes once', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, render, act } = browser.client;
+  const pill = browser.element('unsavedPill');
+  S.tab = 'cohorts'; S.cohortId = null; render();
+  assert.equal(pill.hidden, true, 'nothing unsaved, no pill');
+  S.dirty = true; render();
+  assert.equal(pill.hidden, false, 'a list page shows the pill when edits are unsaved');
+  S.dirty = false; render();
+  assert.equal(pill.hidden, true);
+  act(null, { dataset: { act: 'open-cohort', id: 'cohort' } });
+  act(null, { dataset: { act: 'open-persona', id: 'person' } });
+  const html = browser.element('app').innerHTML;
+  assert.match(html, /Attributes · JSON/);
+  assert.doesNotMatch(html, /No structured attributes yet/);
 });
