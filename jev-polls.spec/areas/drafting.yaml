@@ -1,8 +1,8 @@
 id: drafting
 name: Drafting assistants
 prose: >-
-  The drafting assistant uses the user's ChatGPT subscription or an installed, authenticated Codex
-  or Claude CLI to propose cohorts and studies. It cannot browse for evidence. Proposal (not yet
+  The drafting assistant uses the user's ChatGPT subscription, an installed, authenticated Codex
+  or Claude CLI, or a BYOS API-key provider to propose cohorts and studies. It cannot browse for evidence. Proposal (not yet
   decided, from the 2026-10-09 game-name demo request): connecting the user's own AI could become
   the main experience, with chat as the primary way to author a study, each request landing on the
   study canvas where steps can then be reconnected and edited by hand. Giulio: "maybe the main
@@ -13,6 +13,15 @@ behaviors:
     description: >-
       The AI pill lets the user choose a drafting provider and model once for every cohort and
       study.
+  - id: byos-provider-list
+    description: >-
+      The drafting provider picker lists every BYOS API-key provider (Grok, OpenRouter, Claude API,
+      Groq, Hugging Face) beside ChatGPT, Codex and Claude Code, each marked ready or needing a key;
+      a pasted key is checked by listing models, kept in the OS credential store and never returned
+      to the browser.
+    source:
+      text: shoudl use byos, too few options here
+      reference: jev-polls project thread, Giulio, 2026-10-11 (screenshot of the provider picker)
   - id: ready-provider-default
     description: When any drafting provider is ready, a ready one is selected by default.
   - id: proposals-explicit

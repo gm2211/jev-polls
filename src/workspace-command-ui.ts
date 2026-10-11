@@ -85,7 +85,7 @@ async function commandAskAI(){
     if(S.localLoading||S.chatgptLoading)throw Error('AI connection is still loading. Try again in a moment.');
     if(!draftReady())throw Error('Connect a drafting provider and choose a model in AI settings to use AI commands.');
     const projectId=S.projectId,revision=S.revision,documentVersion=JSON.stringify(S.doc),prompt=commandState.query.trim();
-    let job=await api('/api/agent/commands','POST',{...(projectId?{projectId}:{}),engine:S.localEngine,...(S.localEngine==='chatgpt'?{model:S.chatgptModel}:{}),prompt,revision,document:S.doc});
+    let job=await api('/api/agent/commands','POST',{...(projectId?{projectId}:{}),engine:S.localEngine,...(S.localEngine==='chatgpt'?{model:S.chatgptModel}:S.byos?.model?.[S.localEngine]?{model:S.byos.model[S.localEngine]}:{}),prompt,revision,document:S.doc});
     if(request!==commandState.request){if(job.status==='running')void api('/api/agent/jobs/'+encodeURIComponent(job.id)+'/cancel','POST',{}).catch(()=>{});return}
     commandState.job=job.status==='running'?job.id:null;
     while(job.status==='running'){
