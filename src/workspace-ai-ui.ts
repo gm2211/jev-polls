@@ -9,7 +9,59 @@ export const AI_SETTINGS_CLIENT = String.raw`
 function savedAISelection(){try{return JSON.parse(localStorage.getItem('jev-ai-selection')||'null')}catch{return null}}
 function rememberAISelection(){try{localStorage.setItem('jev-ai-selection',JSON.stringify({provider:S.localEngine,accountId:S.chatgpt?.account?.id,model:S.chatgptModel,custom:S.chatgptCustomModel}))}catch{}}
 function restoreAIModel(){const saved=savedAISelection();if(S.chatgpt?.connected&&saved?.accountId===S.chatgpt.account?.id&&typeof saved?.model==='string'){S.chatgptModel=saved.model;S.chatgptCustomModel=!!saved.custom}}
-{const saved=savedAISelection();if(['chatgpt','codex','claude'].includes(saved?.provider))S.localEngine=saved.provider}
+{const saved=savedAISelection();if(typeof saved?.provider==='string'&&/^[a-z-]{1,40}$/.test(saved.provider))S.localEngine=saved.provider}
+/* BYOS API-key providers (Grok, OpenRouter, Claude API, Groq, Hugging Face). Keys go to the local server once and are kept in the OS credential store; the page never stores or receives them back. */
+const BYOS_ENGINES=['grok','openrouter','claude-api','groq','huggingface'];
+function isByosEngine(id){return BYOS_ENGINES.includes(id)}
+S.byos={models:{},model:{},loading:false,error:null,key:''};
+try{const saved=JSON.parse(localStorage.getItem('jev-byos-models')||'{}');for(const id of BYOS_ENGINES)if(typeof saved?.[id]==='string'&&saved[id].length<=200)S.byos.model[id]=saved[id]}catch{}
+function rememberByosModels(){try{localStorage.setItem('jev-byos-models',JSON.stringify(S.byos.model))}catch{}}
+/** The model a draft request sends, for providers that need one. */
+function draftModel(engine=S.localEngine){return engine==='chatgpt'?S.chatgptModel:isByosEngine(engine)?(S.byos.model[engine]||''):''}
+function draftModelBody(){const model=draftModel();return model?{model}:{}}
+function draftProviderName(){const provider=S.localEngines?.find(e=>e.id===S.localEngine),name=S.localEngine==='chatgpt'?'ChatGPT':provider?.label||S.localEngine,model=draftModel();return name+(model?' · '+model:'')}
+async function loadByosModels(engine=S.localEngine){
+  const provider=S.localEngines?.find(e=>e.id===engine);if(!isByosEngine(engine)||!provider?.available||S.byos.models[engine]||S.byos.loading)return;
+  S.byos.loading=true;S.byos.error=null;updateAISettings();
+  try{const result=await api('/api/byos/models?provider='+encodeURIComponent(engine));S.byos.models[engine]=Array.isArray(result.models)?result.models:[];if(S.byos.model[engine]&&!S.byos.models[engine].some(m=>m.id===S.byos.model[engine]))S.byos.model[engine]='';if(!S.byos.model[engine])S.byos.model[engine]=S.byos.models[engine].find(m=>m.recommended)?.id||''}
+  catch(error){S.byos.error=error.message;S.byos.models[engine]=[]}
+  finally{S.byos.loading=false;updateAISettings();updateDraftReadiness()}
+}
+async function changeByos(action){
+  const engine=S.localEngine;if(!isByosEngine(engine)||S.byos.loading)return;
+  const key=S.byos.key.trim();if(action==='connect'&&!key){S.byos.error='Paste your API key first.';updateAISettings();return}
+  S.byos.loading=true;S.byos.error=null;updateAISettings();
+  try{
+    const result=await api('/api/byos/'+action,'POST',action==='connect'?{provider:engine,key}:{provider:engine});
+    S.byos.key='';
+    if(action==='connect'){S.byos.models[engine]=Array.isArray(result.models)?result.models:[];const recommended=S.byos.models[engine].find(m=>m.recommended);if(!S.byos.model[engine]&&recommended)S.byos.model[engine]=recommended.id;rememberByosModels()}
+    else{delete S.byos.models[engine];S.byos.model[engine]='';rememberByosModels()}
+  }catch(error){S.byos.error=error.message}
+  finally{S.byos.loading=false}
+  await loadLocalAgents();
+}
+function byosControlsBody(provider){
+  const engine=S.localEngine,busy=S.byos.loading||S.localJob?.status==='running',label=provider?.label||engine;
+  let body;
+  if(provider?.available){
+    const models=S.byos.models[engine];
+    body=(models?select('byosModel',[{value:'',label:'Choose a model'},...models.map(m=>({value:m.id,label:m.name+(m.recommended?' · recommended':'')}))],S.byos.model[engine]||'','Drafting model'):'<p class="subtle" role="status">Loading models…</p>')
+      +'<p class="subtle ai-status">'+esc(provider.message)+'</p><div class="toolbar"><button type="button" class="button" data-act="byos-disconnect" '+(busy?'disabled':'')+'>Remove '+esc(label)+' key</button></div>';
+  }else{
+    const links=(provider?.setup||[]).map(step=>'<a class="button" href="'+attr(step.url)+'" target="_blank" rel="noopener noreferrer">'+esc(step.label)+' <span aria-hidden="true">↗</span></a>').join('');
+    body='<p class="subtle ai-status">'+esc(provider?.message||'Paste an API key to connect.')+'</p>'
+      +(provider?.installed===false||!provider?.keyHint?'':field(label+' API key','byosKey',S.byos.key,'password',provider.keyHint.replace(/\.?$/,'. ')+'Saved in your Keychain on this computer, never in the workspace.','autocomplete="off" spellcheck="false" maxlength="1000"')
+      +'<div class="toolbar"><button type="button" class="button" data-act="byos-connect" '+(busy?'disabled':'')+'>'+(S.byos.loading?'Checking key…':'Connect '+esc(label))+'</button></div>')
+      +(links?'<div class="toolbar">'+links+'</div>':'');
+  }
+  return '<section aria-label="'+attr(label)+' connection">'+body+(S.byos.error?'<p class="warning" role="alert">'+esc(S.byos.error)+'</p>':'')+'</section>';
+}
+/** The connection controls under the provider picker: ChatGPT sign-in, a BYOS key and model, or the CLI login note. */
+function draftControlsBody(provider){
+  if(S.localEngine==='chatgpt')return chatGptControlsBody();
+  if(isByosEngine(S.localEngine)){void loadByosModels();return byosControlsBody(provider)}
+  return '<p class="subtle ai-status">'+esc(provider?.message||'Uses your existing CLI sign-in.')+'</p>';
+}
 try{if(localStorage.getItem('jev-evaluation-provider')==='gliner')S.evaluationProvider='gliner'}catch{}
 function evaluationProviderName(provider){return provider==='gliner'?'GLiNER2.5-Decide · local':'TypeSafe · Jev'}
 function evaluationReady(provider=S.evaluationProvider){return provider==='gliner'?!!S.snap?.gliner?.ready:!!S.snap?.auth?.configured}
@@ -21,19 +73,18 @@ function evaluationSettings(){
   return picker+'<p class="subtle">Jev evaluates your personas through TypeSafe when you run a study.</p><p class="ai-status">'+esc(ready?'Connected · '+S.snap.auth.source:'Not connected')+'</p><button class="button" data-act="auth-open">'+(ready?'Update API key':'Connect TypeSafe')+'</button>';
 }
 function updateAIPill(){
-  const provider=S.localEngines?.find(e=>e.id===S.localEngine),name=S.localEngine==='chatgpt'?'ChatGPT':provider?.label||S.localEngine;
-  const label=!S.localEngines||S.chatgptLoading&&S.localEngine==='chatgpt'?'AI · Connecting…':draftReady()?'AI · '+name+(S.localEngine==='chatgpt'?' · '+S.chatgptModel:''):'AI · Set up';
+    const label=!S.localEngines||S.chatgptLoading&&S.localEngine==='chatgpt'?'AI · Connecting…':draftReady()?'AI · '+draftProviderName():'AI · Set up';
   document.getElementById('aiLabel').textContent=label;
   document.getElementById('aiDot').classList.toggle('good',!!draftReady());
   document.getElementById('aiSettingsPill').disabled=S.loading||S.localStarting;
 }
-function draftingProviderOptions(){return (S.localEngines||[]).map(e=>({value:e.id,label:(e.label||e.id)+(e.available?' · ready':' · unavailable')}))}
+function draftingProviderOptions(){return (S.localEngines||[]).map(e=>({value:e.id,label:(e.label||e.id)+(e.available?' · ready':isByosEngine(e.id)&&e.keyHint?' · add API key':' · unavailable')}))}
 /** The drafting AI choice in place, for the audience form: the same select and ready / unavailable labels as the AI button's Drafting section. It shows once no usable provider is selected and stays for the session so choosing one does not make it vanish. */
 function draftProviderChoice(){
   if(!draftReady())S.draftProviderInline=true;
   if(!S.draftProviderInline)return '';
   const options=draftingProviderOptions(),provider=S.localEngines?.find(e=>e.id===S.localEngine),busy=S.localLoading||S.localStarting||S.localJob?.status==='running';
-  return '<fieldset class="draft-provider" data-inline-provider '+(busy?'disabled':'')+'>'+select('localEngine',options.length?options:[{value:S.localEngine,label:'Checking providers…'}],S.localEngine,'Which AI drafts them?','inline')+(S.localEngine==='chatgpt'?chatGptControlsBody():'<p class="subtle ai-status">'+esc(provider?.message||'Uses your existing CLI sign-in.')+'</p>')+'<div class="toolbar"><button type="button" class="button small" data-act="assistant-refresh" '+(S.localLoading?'disabled':'')+'>Refresh connections</button></div></fieldset>';
+  return '<fieldset class="draft-provider" data-inline-provider '+(busy?'disabled':'')+'>'+select('localEngine',options.length?options:[{value:S.localEngine,label:'Checking providers…'}],S.localEngine,'Which AI drafts them?','inline')+draftControlsBody(provider)+'<div class="toolbar"><button type="button" class="button small" data-act="assistant-refresh" '+(S.localLoading?'disabled':'')+'>Refresh connections</button></div></fieldset>';
 }
 function aiSettingsContent(){
   const options=draftingProviderOptions();
@@ -42,7 +93,7 @@ function aiSettingsContent(){
   let content;
   if(S.aiSection==='evaluations')content=evaluationSettings();
   else if(S.aiSection==='external')content=mcpSetup();
-  else content='<fieldset '+(busy?'disabled':'')+' style="border:0;margin:0;padding:0;min-width:0">'+select('localEngine',options.length?options:[{value:S.localEngine,label:'Checking providers…'}],S.localEngine,'Drafting provider')+(S.localEngine==='chatgpt'?chatGptControlsBody():'<p class="subtle ai-status">'+esc(provider?.message||'Uses your existing CLI sign-in.')+'</p>')+'<div class="toolbar"><button class="button small" data-act="assistant-refresh" '+(S.localLoading?'disabled':'')+'>Refresh connections</button></div></fieldset>';
+  else content='<fieldset '+(busy?'disabled':'')+' style="border:0;margin:0;padding:0;min-width:0">'+select('localEngine',options.length?options:[{value:S.localEngine,label:'Checking providers…'}],S.localEngine,'Drafting provider')+draftControlsBody(provider)+'<div class="toolbar"><button class="button small" data-act="assistant-refresh" '+(S.localLoading?'disabled':'')+'>Refresh connections</button></div></fieldset>';
   return nav+content+(S.localError?'<p class="warning" role="alert">'+esc(S.localError)+'</p>':'');
 }
 function updateAISettings(){
@@ -55,6 +106,8 @@ function aiSettingsAction(action,el){
   if(action==='evaluation-refresh'){void refresh().then(updateAISettings).catch(fail);return true}
   if(action==='gliner-copy-setup'){void navigator.clipboard.writeText('npm run setup:gliner').then(()=>say('Setup command copied.')).catch(fail);return true}
   if(action==='ai-open'){document.getElementById('aiSettingsBody').innerHTML=aiSettingsContent();document.getElementById('aiSettingsDialog').showModal();void loadLocalAgents();return true}
+  if(action==='byos-connect'){void changeByos('connect');return true}
+  if(action==='byos-disconnect'){void changeByos('disconnect');return true}
   if(action==='ai-close'){document.getElementById('aiSettingsDialog').close();return true}
   if(action==='ai-section'){S.aiSection=el.dataset.section;updateAISettings();if(S.aiSection==='external'&&!S.agentConfig)void loadAgentConfig();return true}
   return false;

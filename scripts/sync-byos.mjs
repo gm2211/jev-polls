@@ -22,7 +22,7 @@ if (!sourceArgument || !revisionArgument || extra.length || !/^[0-9a-f]{40}$/i.t
     temporary = await mkdtemp(join(tmpdir(), 'jev-byos-sync-'));
     const script = join(temporary, 'vendor.mjs');
     await writeFile(script, exporter, { mode: 0o600 });
-    execFileSync(process.execPath, [script, '--source', source, '--ref', revision, '--out', join(root, 'vendor'), '--mode', 'packages', '--packages', 'chatgpt-local', '--name-prefix', 'byos-', '--revision', join(root, 'vendor', 'BYOS_REVISION'), '--engine', 'omit'], { cwd: root, stdio: 'inherit' });
+    execFileSync(process.execPath, [script, '--source', source, '--ref', revision, '--out', join(root, 'vendor'), '--mode', 'packages', '--packages', 'core,providers,chatgpt-local', '--name-prefix', 'byos-', '--revision', join(root, 'vendor', 'BYOS_REVISION'), '--engine', 'omit'], { cwd: root, stdio: 'inherit' });
     const recorded = await readFile(join(root, 'vendor', 'BYOS_REVISION'), 'utf8');
     if (!recorded.includes(revision)) throw Error('Exporter did not record the requested revision.');
     console.log('BYOS synced. Run npm install, npm run verify, and npm run demo; review and commit vendor files and package-lock.json.');
