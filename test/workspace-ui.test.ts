@@ -59,7 +59,7 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={retryCohortJob,locationHash,plural,recoverDraftingJob,recoverableDraftingJob,loadLocalAgents,cohortJobNotice,cohortJobNoticeVisible,commandState,adoptCohortProposal,commandEntries,commandExecute,inlineCohortJobVisible,inlineCohortTarget,setupCohortPicker,runCaveats,beginRun,commandApplyProposal,commandJobVisible,S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,locationHash,restoreLocation,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,studies,review,say,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,studyQuestionList,validateSetupAnswers,questionParts,upsertQuestion,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList,studyNextAction,studyReviewPanel,rememberRunSignature,ensureStudyQuestion,audienceNext,audienceAdd,audienceState,audienceResume,audienceNote,audienceProposalList};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={retryCohortJob,locationHash,plural,recoverDraftingJob,recoverableDraftingJob,loadLocalAgents,cohortJobNotice,cohortJobNoticeVisible,commandState,adoptCohortProposal,commandEntries,commandExecute,inlineCohortJobVisible,inlineCohortTarget,setupCohortPicker,runCaveats,beginRun,commandApplyProposal,commandJobVisible,S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,locationHash,restoreLocation,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,studies,review,say,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,studyQuestionList,validateSetupAnswers,upsertQuestion,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList,studyNextAction,studyReviewPanel,rememberRunSignature,ensureStudyQuestion,audienceNext,audienceAdd,audienceState,audienceResume,audienceNote,audienceProposalList};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
   if (openExistingProject) (context as any).clientTest.S.projectId = 'existing-research';
@@ -312,63 +312,40 @@ test('invalid form blocks a tab change and hidden field validation reveals every
   assert.equal(S.sections['persona-edit'], 'attributes');
 });
 
-test('phase editor keeps question and cohort together with advanced controls in tabs', async () => {
+test('step settings are one flat form with no heading, mode or section tabs', async () => {
   const browser = browserHarness(); await settle();
   const { S, advancedStageForm } = browser.client;
   S.pipelineId = 'study'; S.stageId = 'panel';
-  S.sections['step-settings-study-panel'] = 'advanced';
   const pipeline = S.doc.pipelines[0], html = advancedStageForm(pipeline, pipeline.stages[0]);
   assert.equal((html.match(/data-form="stage"/g) ?? []).length, 1);
-  for (const name of ['label', 'size', 'questionId', 'questionInstructions', 'criteria', 'repeats', 'stageContext']) {
+  for (const name of ['label', 'size', 'repeats', 'stageContext', 'questionId', 'questionInstructions', 'questionType', 'criteria']) {
     assert.match(html, new RegExp(`name="${name}"`));
   }
-  assert.match(html, /data-section-id="rules" >/);assert.doesNotMatch(html,/name="phasePool"/);
-  assert.doesNotMatch(html, /data-section-id="cohort"/);
-  assert.equal((html.match(/name="label"/g)??[]).length,1);
-  assert.match(html, /data-section-id="inputs" hidden/);
-  assert.match(html, /data-section-id="instructions" hidden/);
+  assert.doesNotMatch(html, /data-act="section-view"|data-section-panel|<h2>|Simple|Advanced/);
+  assert.equal((html.match(/name="label"/g) ?? []).length, 1); assert.doesNotMatch(html, /name="phasePool"/);
+  assert.doesNotMatch(html, /name="(?:join|dependsOn|hasWhen)"|data-inputs-editor/, 'a lone step shows no dependency, branch or input blocks');
+  assert.match(html, /data-act="add-question"[\s\S]*data-act="delete-stage"/, 'both step actions share the footer');
 });
 
-test('simple step settings preserve advanced execution contracts when switching modes', async () => {
+test('saving flat step settings keeps the contracts it does not show', async () => {
   const browser = browserHarness(); await settle();
   const { S, advancedStageForm, applyStage } = browser.client;
-  S.tab = 'studies'; S.pipelineId = 'study'; S.stageId = 'panel'; S.sections.pipeline = 'flow'; S.flowPanel = true; S.sections['flow-inspector'] = 'settings';
+  S.tab = 'studies'; S.pipelineId = 'study'; S.stageId = 'panel';
   const p = S.doc.pipelines[0], step = p.stages[0];
-  Object.assign(step, { repeats: 4, context: { product: 'Game' }, join: 'any', dependsOn: ['earlier'], inputs: { result: { stage: 'earlier', question: 'answer', select: 'summary' } }, when: { stage: 'earlier', question: 'answer', metric: 'winner', op: 'eq', value: 'a' } });
+  Object.assign(step, { repeats: 4, context: { product: 'Game' }, join: 'any', inputs: {}, when: { stage: 'earlier', question: 'answer', metric: 'winner', op: 'eq', value: 'a' } });
   const original = JSON.parse(JSON.stringify(step));
-  let html = advancedStageForm(p, step);
-  assert.match(html, /data-settings-mode="simple"/);
-  assert.match(html, /Active advanced settings: 4 evaluations per persona/);
-  assert.match(html, /name="size"/);
-  assert.doesNotMatch(html, /name="(?:repeats|stageContext|join|questionInstructions|hasWhen)"/);
-  const form = { dataset: { form: 'stage', settingsMode: 'simple' }, values: { label: 'Edited step', size: '7' }, reportValidity: () => true, querySelectorAll: () => [], requestSubmit: () => applyStage(form) };
-  S.dirty = true;
-  let currentForm: any = form;
-  browser.element('app').querySelectorAll = (selector: string) => selector === '[data-form]' ? [currentForm] : [];
-  const clickMode = (mode: string) => browser.listeners.get('click')!({ preventDefault() {}, target: { closest: () => ({ dataset: { act: 'section-view', sectionKey: 'step-settings-study-panel', sectionId: mode } }) } });
-  clickMode('advanced');
-  assert.equal(S.sections['step-settings-study-panel'], 'advanced');
-  assert.deepEqual(JSON.parse(JSON.stringify(step)), { ...original, label: 'Edited step', size: 7 });
-  html = browser.element('app').innerHTML;
-  assert.match(html, /name="repeats"[^>]*value="4"|value="4"[^>]*name="repeats"/);
-  assert.match(html, /name="stageContext"/);
-  assert.match(html, /name="hasWhen"/);
-  const advancedValues: Record<string, string> = { label: 'Edited step', size: '7', repeats: '5', stageContext: JSON.stringify(original.context), join: original.join, hasWhen: 'on', bindingName0: 'result', bindingStage0: 'earlier', bindingQuestion0: 'answer', bindingSelect0: 'summary', questionId: 'answer', questionLabel: step.questions.answer.label, questionType: 'choice', questionInstructions: 'Updated guidance', criteria: JSON.stringify(step.questions.answer.criteria) };
-  const questionCard = { querySelector: (selector: string) => ({ value: advancedValues[selector.match(/name="(.+)"/)![1]!] }) };
-  const advancedForm = { dataset: { form: 'stage' }, values: advancedValues, reportValidity: () => true, querySelector: () => null, querySelectorAll: (selector: string) => selector === '.question-card' ? [questionCard] : selector === '[data-phase-input]' ? [{}] : selector === '[name=dependsOn]:checked' ? [{ value: 'earlier' }] : [], requestSubmit: () => applyStage(advancedForm) };
-  currentForm = advancedForm;
-  clickMode('simple');
-  assert.match(browser.element('app').innerHTML, /data-settings-mode="simple"/);
-  const expected = { ...original, label: 'Edited step', size: 7, repeats: 5, questions: { answer: { ...original.questions.answer, instructions: 'Updated guidance' } } };
-  assert.deepEqual(JSON.parse(JSON.stringify(step)), expected, 'Advanced fields flush before returning to Simple');
-  currentForm = form; clickMode('advanced');
-  assert.deepEqual(JSON.parse(JSON.stringify(step)), expected, 'Simple cannot reset the edited Advanced fields');
-  const another = { ...p, id: 'another-study' };
-  S.sections['step-settings-study-panel'] = 'advanced';
-  assert.match(advancedStageForm(another, step), /data-settings-mode="simple"/, 'mode preference belongs to its study and step');
+  const html = advancedStageForm(p, step);
+  assert.match(html, /name="repeats"[^>]*value="4"/);
+  const values: Record<string, string> = { label: 'Edited step', size: '7', repeats: '5', stageContext: JSON.stringify(original.context), questionId: 'answer', questionLabel: step.questions.answer.label, questionType: step.questions.answer.type, questionInstructions: 'Updated guidance', criteria: JSON.stringify(step.questions.answer.criteria) };
+  const card = { querySelector: (selector: string) => ({ value: values[selector.match(/name="(.+)"/)![1]!] }) };
+  applyStage({ dataset: { form: 'stage' }, values, querySelector: () => null, querySelectorAll: (selector: string) => selector === '.question-card' ? [card] : [] });
+  assert.deepEqual(JSON.parse(JSON.stringify(step)), { ...original, label: 'Edited step', size: 7, repeats: 5, questions: { answer: { ...original.questions.answer, instructions: 'Updated guidance' } } }, 'join, inputs and branch survive when their blocks are not shown');
+  const score = { querySelector: (selector: string) => ({ value: ({ questionId: 'level', questionType: 'score', questionLabel: 'Level', questionInstructions: '', criteria: JSON.stringify(['Low', 'High']) } as Record<string, string>)[selector.match(/name="(.+)"/)![1]!] }) };
+  applyStage({ dataset: { form: 'stage' }, values, querySelector: () => null, querySelectorAll: (selector: string) => selector === '.question-card' ? [score] : [] });
+  assert.deepEqual(JSON.parse(JSON.stringify(step.questions.level.criteria)), ['Low', 'High'], 'hidden score levels round-trip as JSON');
 });
 
-test('simple aggregate and decision settings preserve inputs, outputs, weights and branching', async () => {
+test('aggregate and decision settings are flat and preserve inputs, outputs, weights and branching', async () => {
   const browser = browserHarness(); await settle();
   const { S, advancedStageForm, applyStage } = browser.client;
   S.pipelineId = 'study';
@@ -378,12 +355,10 @@ test('simple aggregate and decision settings preserve inputs, outputs, weights a
     { id: 'decide', label: 'Decide', kind: 'decision', from: { stage: 'combine', question: 'combined' }, outputQuestion: 'decision', dependsOn: ['combine'] },
   ]) {
     p.stages.push(step); S.stageId = step.id;
-    const before = JSON.parse(JSON.stringify(step));
-    assert.match(advancedStageForm(p, step), /data-settings-mode="simple"/);
-    applyStage({ dataset: { settingsMode: 'simple' }, values: { label: 'Renamed '+step.id }, querySelectorAll: () => [] });
-    assert.deepEqual(JSON.parse(JSON.stringify(step)), { ...before, label: 'Renamed '+step.id });
-    S.sections['step-settings-study-'+step.id] = 'advanced';
-    assert.match(advancedStageForm(p, step), /name="outputQuestion"/);
+    const before = JSON.parse(JSON.stringify(step)), html = advancedStageForm(p, step);
+    assert.match(html, /name="outputQuestion"/); assert.match(html, /name="join"/); assert.doesNotMatch(html, /data-act="section-view"/);
+    applyStage({ dataset: { form: 'stage' }, values: { label: 'Renamed '+step.id, outputQuestion: before.outputQuestion, join: before.join ?? 'all', hasWhen: before.when ? 'on' : '', ...(step.kind === 'decision' ? { fromStage: before.from.stage, fromQuestion: before.from.question } : { inputStage0: 'panel', inputQuestion0: 'answer', inputWeight0: '0.75' }) }, querySelector: () => null, querySelectorAll: (selector: string) => selector === '[name=dependsOn]:checked' ? before.dependsOn.map((value: string) => ({ value })) : [] });
+    assert.deepEqual(JSON.parse(JSON.stringify(step)), { ...before, label: 'Renamed '+step.id, join: before.join ?? 'all' });
   }
 });
 
@@ -2099,7 +2074,7 @@ test('simple study setup preserves hidden contracts, stable option keys, and oth
   assert.deepEqual(JSON.parse(JSON.stringify(s.questions.answer.criteria)), { a: {label:'Project Dawn',description:''}, b: {label:'Afterlight',description:''} });
   setupAction('setup-cohort', { dataset: { id: 'cohort' } });
   assert.equal(p.cohorts[s.cohort], 'cohort');
-  S.sections['step-settings-'+p.id+'-'+s.id]='advanced'; html = browser.client.advancedStageForm(p, s);
+  html = browser.client.advancedStageForm(p, s);
   assert.match(html, /name="questionInstructions"/);
   assert.doesNotMatch(html, /data-form="study-setup"/, 'only one editor can submit changes for a phase');
 });
@@ -2122,8 +2097,9 @@ test('earlier context stays beside follow-up questions without an empty setup ta
   assert.equal((next as any).inputs, undefined, 'legacy summary bindings remain implicit');
   (next as any).inputs = {};
   assert.equal(setupContextSummary(p, next), '', 'ordering alone does not imply receiving results');
-  S.sections['step-settings-study-review']='advanced'; S.sections['phase-review'] = 'inputs';
-  assert.match(browser.client.advancedStageForm(p, next), /Connect output/);
+  assert.doesNotMatch(browser.client.advancedStageForm(p, next), /Connect output|data-inputs-editor/, 'connecting starts on the Inputs tab, not in settings');
+  next.inputs = { custom: { stage: 'panel', question: 'answer', select: 'winner' } };
+  assert.match(browser.client.advancedStageForm(p, next), /data-inputs-editor[\s\S]*name="bindingName0"[^>]*value="custom"/, 'named inputs stay editable in settings');
 });
 
 test('review saves pending setup before planning and stops on save failure or empty answer options', async () => {
@@ -2307,7 +2283,7 @@ test('typing a question keeps the current form and pending document intact',asyn
 
 test('option comparisons preserve descriptions, stable keys and paginated answers across format and advanced edits', async () => {
   const browser=browserHarness();await settle();
-  const {S,stageForm,applyStudySetup,setupAction,questionParts,upsertQuestion,openAnswerList,applyAnswerList,validateSetupAnswers}=browser.client;
+  const {S,stageForm,applyStudySetup,setupAction,advancedStageForm,upsertQuestion,openAnswerList,applyAnswerList,validateSetupAnswers}=browser.client;
   S.pipelineId='study';S.stageId='panel';const p=S.doc.pipelines[0],s=p.stages[0],q=s.questions.answer;
   q.criteria={a:{label:'Afterlight',description:'A hopeful title about exploration.'},b:{label:'Project Dawn',description:'A bold title about a new beginning.'},c:'None of these',d:'Other',e:{label:'Hidden option',description:'Preserve this off-page description.'}};
   const html=stageForm(p,s);
@@ -2328,7 +2304,7 @@ test('option comparisons preserve descriptions, stable keys and paginated answer
   openAnswerList();browser.element('answerListText').value='Project Dawn, Afterglow, New title';applyAnswerList(false);
   const edited=s.questions.answer;assert.equal(edited.criteria.a.description,'Warm and reflective.');assert.equal(edited.criteria.b.description,'A bold title about a new beginning.');
   assert.equal(Object.keys(edited.criteria).length,3);assert.doesNotThrow(()=>validateSetupAnswers(p));
-  const advanced=questionParts('answer',edited)[1].html;assert.doesNotMatch(advanced,/\[object Object\]/);assert.match(advanced,/Option definitions \(JSON\)/);
+  const advanced=advancedStageForm(p,s);assert.doesNotMatch(advanced,/\[object Object\]/);assert.match(advanced,/type="hidden" name="criteria" value="[^"]*&quot;Afterglow&quot;,&quot;description&quot;:&quot;Warm and reflective\.&quot;/,'settings carry the option definitions whole');
   const values={questionId:'answer',questionType:'choice',questionLabel:edited.label,questionInstructions:edited.instructions,criteria:JSON.stringify(edited.criteria)};
   const restored={questions:{}};upsertQuestion(restored,{querySelector:(selector:string)=>({value:values[selector.match(/name="([^"\]]+)"/)![1] as keyof typeof values]})});
   assert.equal(JSON.stringify(restored.questions),JSON.stringify({answer:edited}));
@@ -2336,7 +2312,7 @@ test('option comparisons preserve descriptions, stable keys and paginated answer
 });
 
 
-test('choosing the kind of answer comes first in the step editor and step settings',async()=>{
+test('choosing the kind of answer comes first in the step editor, and step settings do not repeat it',async()=>{
   const browser=browserHarness();await settle();const {S,stageForm,setupAction,render}=browser.client;
   S.tab='studies';S.pipelineId='study';S.stageId='panel';const p=S.doc.pipelines[0],s=p.stages[0];
   for(const html of [stageForm(p,s,'question'),stageForm(p,s)]){
@@ -2347,7 +2323,7 @@ test('choosing the kind of answer comes first in the step editor and step settin
   setupAction('setup-type',{dataset:{type:'noul'}});
   assert.match(stageForm(p,s,'question'),/data-type="noul" aria-pressed="true"/);
   S.sections.pipeline='flow';S.flowPanel=true;S.sections['flow-inspector']='settings';render();const settings=browser.element('app').innerHTML;
-  assert.ok(settings.indexOf('What kind of answer?')>=0&&settings.indexOf('What kind of answer?')<settings.indexOf('Step name'),'step settings lead with the answer kind');
+  assert.ok(settings.includes('Step name'));assert.doesNotMatch(settings,/What kind of answer\?/,'the answer kind lives on What to ask only');
 });
 
 test('answer setup distinguishes hosted probabilities from local classifier evidence for every format',async()=>{
@@ -2403,7 +2379,7 @@ test('breadcrumbs step down one level at a time and opening a study lands on its
   assert.equal(h1(),'Original study','the heading names the last crumb');
   act(null,{dataset:{act:'stage',id:'panel'}});assert.equal(crumbs(),'Projects / Existing research / Studies / Original study','the step panel is an overlay, not a page');
   S.flowPanel=true;act(null,{dataset:{act:'flow-inspector',section:'settings'}});assert.equal(crumbs(),'Projects / Existing research / Studies / Original study','step settings are a panel tab, not a page');assert.equal(h1(),'Original study');
-  assert.match(browser.element('app').innerHTML,/data-settings-mode="simple"/);
+  assert.match(browser.element('app').innerHTML,/data-form="stage" class="step-settings"/);
   act(null,{dataset:{act:'breadcrumb-study'}});assert.equal(S.flowPanel,false);
   act(null,{dataset:{act:'section-view',sectionKey:'pipeline',sectionId:'context'}});assert.equal(crumbs(),'Projects / Existing research / Studies / Original study / Study settings');assert.equal(h1(),'Study settings');
   act(null,{dataset:{act:'breadcrumb-study'}});assert.equal(S.sections.pipeline,'flow');assert.equal(h1(),'Original study');
@@ -2460,9 +2436,8 @@ test('study navigation has clear scope, a reachable single-study library and con
   assert.doesNotMatch(html,/Back to question|Back to flow|study-step-settings|Step 1 settings|data-act="flow-settings"/,'step settings live on a panel tab with no page of their own');
   assert.match(html,/<span aria-current="page">Original study<\/span>/,'the study stays the current crumb');
   assert.doesNotMatch(html,/aria-label="Study sections"|Apply phase|name="phasePicker"/);
-  assert.match(html,/data-inspector-tab="settings"/,'the Settings tab is open');assert.match(html,/data-settings-mode="simple"/,'Simple mode leads');
-  act(null,{dataset:{act:'section-view',sectionKey:'step-settings-study-panel',sectionId:'advanced'}});html=browser.element('app').innerHTML;
-  for(const field of ['questionInstructions','criteria','stageContext','repeats'])assert.match(html,new RegExp('name="'+field+'"'),'Advanced shows '+field);
+  assert.match(html,/data-inspector-tab="settings"/,'the Settings tab is open');assert.doesNotMatch(html,/data-settings-mode|section-key="step-settings-|section-key="phase-/,'one flat settings form, with no mode or section tabs');
+  for(const field of ['questionInstructions','criteria','stageContext','repeats'])assert.match(html,new RegExp('name="'+field+'"'),'Settings carries '+field);
   act(null,{dataset:{act:'section-view',sectionKey:'pipeline',sectionId:'phase'}});
   assert.match(browser.element('app').innerHTML,/Keep typed detail/,'the phase editor keeps typed detail');
   act(null,{dataset:{act:'back-studies'}});assert.equal(S.pipelineId,null);render();html=browser.element('app').innerHTML;
