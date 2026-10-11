@@ -509,10 +509,11 @@ export function createArenaModel() {
   /**
    * Which tile's hover tooltip is showing after an event. A tooltip belongs to a pointer resting on a tile or to keyboard focus, never to a
    * click: clicking moves the detail to the side panel and focus stays on the tile, so a pointer-driven focus must not bring the tooltip back.
+   * Focus the page puts back after it rebuilds the view (`restored`) is never a user gesture, and Chrome calls scripted focus focus-visible.
    */
-  function tooltipNext(current: string | null, event: { type: 'hover' | 'focus' | 'click' | 'leave' | 'scroll' | 'escape' | 'blur' | 'select'; key?: string; touch?: boolean; keyboard?: boolean }): string | null {
+  function tooltipNext(current: string | null, event: { type: 'hover' | 'focus' | 'click' | 'pointerdown' | 'leave' | 'scroll' | 'wheel' | 'escape' | 'blur' | 'select' | 'rebuild'; key?: string; touch?: boolean; keyboard?: boolean; restored?: boolean }): string | null {
     if (event.type === 'hover') return event.touch || !event.key ? current : event.key;
-    if (event.type === 'focus') return event.keyboard && event.key ? event.key : current;
+    if (event.type === 'focus') return event.keyboard && !event.restored && event.key ? event.key : current;
     return null;
   }
 
