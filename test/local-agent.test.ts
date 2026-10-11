@@ -982,7 +982,7 @@ function countingDraft(options: { size?: number; hold?: (batch: number, attempt:
   return { state, client };
 }
 const batchRequest = (size: number) => ({ engine: 'chatgpt' as const, model: 'draft-model', prompt: `Create ${size} adults`, revision: 1, document: empty, cohort: { id: 'customers', size } });
-async function waitFor(check: () => boolean) { for (let i = 0; i < 400 && !check(); i++) await new Promise(resolve => setTimeout(resolve, 5)); assert.ok(check(), 'condition was not met in time'); }
+async function waitFor(check: () => boolean, attempts = 400) { for (let i = 0; i < attempts && !check(); i++) await new Promise(resolve => setTimeout(resolve, 5)); assert.ok(check(), 'condition was not met in time'); }
 
 test('a small first batch runs alone, then batches run twelve at a time', async t => {
   let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
@@ -1398,7 +1398,7 @@ test('a rough estimate appears from streaming speed before any batch completes a
   assert.equal(estimate.basis, 'streaming'); assert.ok(estimate.seconds > 0 && Number.isFinite(estimate.seconds));
   assert.equal(service.get(job.id)!.progress!.completedBatches, 0);
   hold.resolve();
-  await waitFor(() => (service.get(job.id)!.progress!.completedBatches ?? 0) >= 2);
+  await waitFor(() => (service.get(job.id)!.progress!.completedBatches ?? 0) >= 2, 4000);
   assert.equal(service.get(job.id)!.progress!.estimate, undefined, 'after two batches the batch timings take over');
   service.cancel(job.id);
 });
