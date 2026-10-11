@@ -38,8 +38,34 @@ behaviors:
       110 seconds per 25-persona batch, 1,000 personas take about 8 minutes instead of about 15.
   - id: batch-retry
     description: >-
-      A batch that fails parsing or checks is retried with the same inputs up to two more times
-      before the whole job fails with the workspace unchanged; cancellation never retries.
+      A batch that fails parsing or checks is retried with the same request data up to two more times,
+      with the reason it was rejected added to the instructions, before the whole job fails with the
+      workspace unchanged; cancellation never retries.
+  - id: generation-failure-detail
+    description: >-
+      A failed generation says which batch failed and which check it failed ("Batch 7 failed its
+      checks 3 times: persona 3 has no segment. Workspace unchanged."), the server logs one JSON line
+      on stderr for every failed batch attempt and for the final failure, and the failed panel offers
+      Retry generation with the same brief and size.
+    details: >-
+      Added 2026-10-11 after a 1,000-person run failed after about nine minutes with only "Agent did
+      not return a valid workspace draft" and nothing in the server log. Every batch reply is now
+      checked in its own batch for valid JSON, the cohort format (naming the persona and field, such
+      as "persona 3 has no segment"), the cohort id, the persona count, details copied exactly from
+      the first batch, and that each persona names a segment and sources the cohort has; before this,
+      a persona with an unknown segment passed its batch and failed only the final check, after
+      every batch had been paid for, with no reason given. Each log line carries the job id, batch
+      index, attempt, reason and the first 300 characters of the offending output; a failure of the
+      AI call itself (CLI exit status, an error result, a reply without documentJson) is reported the
+      same way. Setting JEV_AGENT_DEBUG_DIR writes the prompt, stdout, stderr and exit status of every
+      drafting CLI call to that directory for diagnosis. A failure in the final whole-cohort checks
+      names the check as well. The Claude stream-json stdout limit is four times the reply limit,
+      because the stream repeats the reply (a 25-persona batch measured 545 KB against 1,000 KB).
+    source:
+      text: >-
+        Generation failed · Agent did not return a valid workspace draft. Try a smaller or more specific
+        request. Workspace unchanged.
+      reference: 2026-10-11 jev-polls project thread, Giulio's failed 1,000-person run
   - id: concurrent-progress-truthful
     description: >-
       Progress names the batches running, counts only accepted batches, shows retries, and divides

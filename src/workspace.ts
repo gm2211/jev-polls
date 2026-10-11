@@ -72,7 +72,7 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
   const store = new WorkspaceStore(directory);
   const chatgpt = new ChatGptConnection(options.chatgpt ?? createDraftClient());
   const byos = options.byos ?? new ByosConnections();
-  const localAgents = options.localAgents ?? new LocalAgentService({ chatgpt: chatgpt.client, byos });
+  const localAgents = options.localAgents ?? new LocalAgentService({ chatgpt: chatgpt.client, byos, log: line => { try { process.stderr.write(`${JSON.stringify({ at: new Date().toISOString(), ...line })}\n`); } catch { /* A closed stderr never affects drafting. */ } } });
   let activeDraftId: string | undefined;
   let changingChatGpt = false;
   const csrf = randomBytes(32).toString('hex');

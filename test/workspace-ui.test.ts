@@ -58,7 +58,7 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={locationHash,plural,recoverDraftingJob,recoverableDraftingJob,loadLocalAgents,cohortJobNotice,cohortJobNoticeVisible,commandState,adoptCohortProposal,commandEntries,commandExecute,inlineCohortJobVisible,inlineCohortTarget,setupCohortPicker,runCaveats,beginRun,commandApplyProposal,commandJobVisible,S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,locationHash,restoreLocation,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,studies,review,say,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,studyQuestionList,validateSetupAnswers,questionParts,upsertQuestion,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList,studyNextAction,studyReviewPanel,rememberRunSignature,ensureStudyQuestion,audienceNext,audienceAdd,audienceState,audienceResume,audienceNote,audienceProposalList};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={retryCohortJob,locationHash,plural,recoverDraftingJob,recoverableDraftingJob,loadLocalAgents,cohortJobNotice,cohortJobNoticeVisible,commandState,adoptCohortProposal,commandEntries,commandExecute,inlineCohortJobVisible,inlineCohortTarget,setupCohortPicker,runCaveats,beginRun,commandApplyProposal,commandJobVisible,S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,locationHash,restoreLocation,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,studies,review,say,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,studyQuestionList,validateSetupAnswers,questionParts,upsertQuestion,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList,studyNextAction,studyReviewPanel,rememberRunSignature,ensureStudyQuestion,audienceNext,audienceAdd,audienceState,audienceResume,audienceNote,audienceProposalList};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
   if (openExistingProject) (context as any).clientTest.S.projectId = 'existing-research';
@@ -802,6 +802,28 @@ test('cohort prompt generation scopes the request and previews personas without 
   assert.match(browser.element('app').innerHTML, /Museum visitors/);
   assert.equal(S.doc.pipelines[0].cohorts[S.doc.pipelines[0].stages[0].cohort], candidate.id);
   assert.equal(browser.bodies.filter(x => x.path === '/api/workspace' || x.path.endsWith('/apply')).length, 0, 'review adoption stays local until explicit save');
+});
+
+test('a failed cohort generation shows which batch failed and retries the same brief in place', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, act, cohortProposalReview } = browser.client;
+  S.tab = 'studies'; S.pipelineId = 'study'; S.stageId = 'panel';
+  act(null, { dataset: { act: 'new-cohort' } }); await settle();
+  S.localEngine = 'claude'; S.localEngines = [{ id: 'claude', label: 'Claude Code', available: true }];
+  const brief = 'Adult gamers who can buy a $20 game.\n\nSegments: Strategy; Shooter.';
+  const failed = { id: 'failed-job', engine: 'claude', revision: S.revision, status: 'failed', message: 'Batch 7 failed its checks 3 times: persona 3 has no segment. Workspace unchanged.', cohort: { id: 'gamers', size: 1000, prompt: brief } };
+  S.localJob = failed;
+  const review = cohortProposalReview(failed);
+  assert.match(review, /Generation failed/); assert.match(review, /Batch 7 failed its checks 3 times: persona 3 has no segment\. Workspace unchanged\./);
+  assert.match(review, /data-act="cohort-retry">Retry generation</);
+  assert.doesNotMatch(cohortProposalReview({ ...failed, status: 'cancelled', message: 'Cancelled.' }), /Retry generation/);
+  assert.doesNotMatch(cohortProposalReview({ ...failed, cohort: undefined }), /Retry generation/);
+  browser.respond('/api/agent/jobs/failed-job/discard', { ...failed, settled: 'discarded' });
+  browser.respond('/api/agent/jobs', { id: 'retry-job', engine: 'claude', revision: S.revision, status: 'running', cohort: failed.cohort });
+  act(null, { dataset: { act: 'cohort-retry' } }); await settle();
+  const sent = browser.bodies.filter(x => x.path === '/api/agent/jobs' && x.body).at(-1)!.body;
+  assert.equal(sent.prompt, brief); assert.deepEqual(JSON.parse(JSON.stringify(sent.cohort)), { id: 'gamers', size: 1000, step: { pipelineId: 'study', stageId: 'panel' } });
+  assert.equal(S.localJob.id, 'retry-job');
 });
 
 test('cohort generation preserves unsaved edits and rejects stale proposal adoption', async () => {

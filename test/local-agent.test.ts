@@ -6,7 +6,7 @@ import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promise
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { ChildProcessWithoutNullStreams, SpawnOptionsWithoutStdio } from 'node:child_process';
-import { LocalAgentError, LocalAgentService, takeAudienceRequests, type LocalAgentJob, type LocalAgentSpawner } from '../src/local-agent.js';
+import { BatchRejected, LocalAgentError, LocalAgentService, checkCohortBatch, claudeEnvelope, takeAudienceRequests, type LocalAgentJob, type LocalAgentSpawner } from '../src/local-agent.js';
 import type { ChatGptDraftClient } from '../src/chatgpt.js';
 import type { Cohort, DistributionTargetBucket, Persona } from '../src/types.js';
 import { validateWorkspaceDocument } from '../src/workspace-store.js';
@@ -646,7 +646,7 @@ test('cohort regeneration rejects target mismatches, changed provenance and excl
   for (const mutate of mutations) {
     const service = new LocalAgentService({ chatgpt: nativeDraft(input => targetedBatchResponse(input, mutate)) });
     const failed = await terminal(service, service.start({ ...personaRequest, persona: undefined, document, cohort: { id: 'customers', size: 30 } }));
-    assert.equal(failed.status, 'failed'); assert.equal(failed.proposal, undefined); assert.match(failed.message, /distribution target|metadata or provenance/); await service.close();
+    assert.equal(failed.status, 'failed'); assert.equal(failed.proposal, undefined); assert.match(failed.message, /^Batch 1 failed its checks 3 times: (persona 1 does not meet the assigned distribution target|it changed cohort details that must be copied exactly)/); await service.close();
   }
 });
 
@@ -1041,7 +1041,11 @@ test('a batch that fails once is retried with the same inputs and the job still 
   await waitFor(() => { const current = service.get(job.id)!; if (current.progress?.retry) { sawRetry = true; assert.equal(current.progress.retry.batch, 3); assert.equal(current.progress.retry.maxAttempts, 3); } return current.status !== 'running'; });
   const done = service.get(job.id)!;
   assert.equal(done.status, 'completed'); assert.equal(state.attempts.get(3), 2); assert.equal(done.progress?.retries, 1); assert.equal(done.proposal!.document.cohorts[0]!.personas.length, 100);
-  assert.equal(prompts.length, 2); assert.equal(prompts[0], prompts[1], 'retry reuses the identical request');
+  assert.equal(prompts.length, 2);
+  const [firstPrompt, retryPrompt] = prompts as [string, string];
+  assert.equal(requestData(firstPrompt).batch.number, 3); assert.deepEqual(requestData(retryPrompt), requestData(firstPrompt), 'retry sends the same request data');
+  assert.match(retryPrompt, /Your previous attempt at this batch was rejected: the reply was not valid JSON/);
+  assert.ok(!firstPrompt.includes('previous attempt'), 'the first attempt carries no rejection note');
   assert.ok(sawRetry || done.progress?.retries === 1);
 });
 
@@ -1462,4 +1466,125 @@ test('ChatGPT streams only counters, so batches show tokens and never a persona 
   assert.equal(service.get(job.id)!.progress!.estimate, undefined);
   reply.resolve(cohortBatchResponse(input));
   assert.equal((await terminal(service, job)).status, 'completed');
+});
+
+// Batch checks and failure reporting.
+const batchCohort = (size: number) => { const cohort = structuredClone(proposed.cohorts[0]!); cohort.personas = Array.from({ length: size }, (_, index) => ({ ...structuredClone(proposed.cohorts[0]!.personas[0]!), id: `p${index + 1}`, label: `Persona ${index + 1}` })); return cohort; };
+const rejection = (json: unknown, expected: Parameters<typeof checkCohortBatch>[1]) => { try { checkCohortBatch(typeof json === 'string' ? json : JSON.stringify(json), expected); } catch (error) { assert.ok(error instanceof BatchRejected, String(error)); return error; } assert.fail('the batch was accepted'); };
+
+test('batch checks name the first failed check in plain words', () => {
+  const expected = { id: 'customers', size: 3 };
+  assert.equal(checkCohortBatch(JSON.stringify(batchCohort(3)), expected).personas.length, 3);
+  const noSegment = batchCohort(3); delete (noSegment.personas[2] as Partial<Persona>).segment;
+  assert.equal(rejection(noSegment, expected).message, 'persona 3 has no segment');
+  const extra = batchCohort(3); (extra.personas[0] as unknown as Record<string, unknown>).notes = 'x';
+  assert.equal(rejection(extra, expected).message, 'persona 1 has unexpected field "notes"');
+  const ghost = batchCohort(3); ghost.personas[1]!.segment = 'ghost';
+  assert.match(rejection(ghost, expected).message, /^persona 2 has segment “ghost”, which is not one of /);
+  const invented = batchCohort(3); invented.personas[0]!.sourceIds = ['nowhere'];
+  assert.equal(rejection(invented, expected).message, 'persona 1 cites unknown source nowhere');
+  assert.equal(rejection(batchCohort(2), expected).message, 'it returned 2 personas where this batch needs exactly 3');
+  assert.equal(rejection(batchCohort(3), { id: 'other', size: 3 }).message, 'the cohort id is “customers”, not “other”');
+  const tooYoung = batchCohort(3); tooYoung.personas[0]!.age = 12;
+  assert.match(rejection(tooYoung, expected).message, /^persona 1 age is invalid/);
+  const broken = rejection('{"id": "customers", "personas": [', expected);
+  assert.match(broken.message, /^documentJson is not valid JSON/); assert.equal(broken.excerpt, '{"id": "customers", "personas": [');
+});
+
+test('batches after the first must copy the cohort details and use only their segments', () => {
+  const first = batchCohort(3); const { personas, ...metadata } = first; void personas;
+  const expected = { id: 'customers', size: 3, metadata: metadata as Record<string, unknown> };
+  assert.equal(checkCohortBatch(JSON.stringify(batchCohort(3)), expected).personas.length, 3);
+  const renamed = batchCohort(3); renamed.name = 'Someone else'; renamed.assumptions = [];
+  assert.equal(rejection(renamed, expected).message, 'it changed cohort details that must be copied exactly (name, assumptions)');
+  const newSegment = batchCohort(3); newSegment.segments = [...newSegment.segments, { ...newSegment.segments[0]!, id: 'extra' }]; newSegment.personas[0]!.segment = 'extra';
+  assert.match(rejection(newSegment, expected).message, /copied exactly \(segments\)/);
+});
+
+test('the first batch needs a positive-weight segment and consistent sources', () => {
+  const noWeight = batchCohort(2); noWeight.segments = noWeight.segments.map(segment => ({ ...segment, weight: 0 }));
+  assert.equal(rejection(noWeight, { id: 'customers', size: 2 }).message, 'no segment has a weight above zero');
+  const sourced = batchCohort(2); sourced.segments[0]!.weightBasis = 'sourced'; sourced.segments[0]!.sourceIds = [];
+  assert.match(rejection(sourced, { id: 'customers', size: 2 }).message, /has a sourced weight without a source/);
+});
+
+test('claudeEnvelope reads the structured output of the result event even when its text holds quotes and braces', () => {
+  const documentJson = JSON.stringify({ id: 'customers', personas: [{ background: 'He said "buy it" {twice}\\n' }] });
+  const stdout = [JSON.stringify({ type: 'stream_event', event: { type: 'message_start' } }), JSON.stringify({ type: 'result', is_error: false, structured_output: { documentJson, explanation: 'x' }, result: 'He said "hi"' })].join('\n') + '\n';
+  assert.equal((claudeEnvelope(stdout).structured_output as { documentJson: string }).documentJson, documentJson);
+  assert.equal(claudeEnvelope(JSON.stringify({ type: 'result', is_error: true, subtype: 'error_max_structured_output_retries' })).subtype, 'error_max_structured_output_retries');
+});
+
+function loggedService(client: ChatGptDraftClient) {
+  const lines: Record<string, unknown>[] = [];
+  return { lines, service: new LocalAgentService({ chatgpt: client, log: line => lines.push(line) }) };
+}
+const replyWith = (input: string, change: (cohort: Cohort) => void) => { const reply = JSON.parse(cohortBatchResponse(input)); const cohort = JSON.parse(reply.documentJson) as Cohort; change(cohort); return JSON.stringify({ ...reply, documentJson: JSON.stringify(cohort) }); };
+
+test('a batch that keeps failing names the batch and the check, logs every attempt, and leaves the workspace unchanged', async t => {
+  const { lines, service } = loggedService(nativeDraft(input => requestData(input).batch.number === 2 ? replyWith(input, cohort => { delete (cohort.personas[2] as Partial<Persona>).segment; }) : cohortBatchResponse(input)));
+  t.after(() => service.close());
+  const done = await terminal(service, service.start(batchRequest(60)));
+  assert.equal(done.status, 'failed'); assert.equal(done.proposal, undefined);
+  assert.equal(done.message, 'Batch 2 failed its checks 3 times: persona 3 has no segment. Workspace unchanged.');
+  const batchLines = lines.filter(line => line.event === 'cohort-batch-failed');
+  assert.deepEqual(batchLines.map(line => [line.batch, line.attempt, line.maxAttempts, line.reason]), [1, 2, 3].map(attempt => [2, attempt, 3, 'persona 3 has no segment']));
+  for (const line of batchLines) { assert.equal(line.jobId, done.id); assert.ok(typeof line.output === 'string' && line.output.length > 0 && line.output.length <= 300); }
+  const final = lines.filter(line => line.event === 'draft-failed');
+  assert.equal(final.length, 1); assert.equal(final[0]!.jobId, done.id); assert.equal(final[0]!.task, 'cohort'); assert.match(String(final[0]!.reason), /^Batch 2 failed its checks 3 times: persona 3 has no segment$/);
+});
+
+test('a persona with a segment the cohort does not have is caught in its batch and fixed by the retry', async t => {
+  const prompts: string[] = []; let calls = 0;
+  const { lines, service } = loggedService(nativeDraft(input => {
+    if (requestData(input).batch.number !== 3) return cohortBatchResponse(input);
+    prompts.push(input);
+    return ++calls === 1 ? replyWith(input, cohort => { cohort.personas[4]!.segment = 'strategy-4x-players'; }) : cohortBatchResponse(input);
+  }));
+  t.after(() => service.close());
+  const done = await terminal(service, service.start(batchRequest(25 * 3)));
+  assert.equal(done.status, 'completed'); assert.equal(done.progress!.retries, 1); assert.equal(done.proposal!.document.cohorts[0]!.personas.length, 75);
+  assert.match(String(lines.find(line => line.event === 'cohort-batch-failed')!.reason), /^persona 5 has segment “strategy-4x-players”, which is not one of /);
+  assert.match(prompts[1]!, /Your previous attempt at this batch was rejected: persona 5 has segment “strategy-4x-players”/);
+});
+
+test('Claude CLI failures are reported with what the CLI said, and the batch is named', async t => {
+  const root = await setup(t); const lines: Record<string, unknown>[] = [];
+  const service = new LocalAgentService({ temporaryRoot: root, log: line => lines.push(line), spawn: fakeSpawner(async ({ child }) => {
+    child.stdout.write(JSON.stringify({ type: 'result', is_error: true, subtype: 'error_during_execution', api_error_status: 529, result: 'Overloaded' }) + '\n'); child.finish();
+  }) });
+  t.after(() => service.close());
+  const done = await terminal(service, service.start({ engine: 'claude', prompt: 'Create 30 adults', revision: 0, document: empty, cohort: { id: 'customers', size: 30 } }));
+  assert.equal(done.status, 'failed');
+  assert.equal(done.message, 'Batch 1 could not be drafted after 3 attempts: the CLI reported an error (error_during_execution, status 529). Workspace unchanged.');
+  assert.equal(lines.filter(line => line.event === 'cohort-batch-failed').length, 3);
+  assert.equal(lines.find(line => line.event === 'cohort-batch-failed')!.output, 'Overloaded');
+});
+
+test('a reply that is not the expected envelope is logged with its first characters', async t => {
+  const root = await setup(t); const lines: Record<string, unknown>[] = [];
+  const service = new LocalAgentService({ temporaryRoot: root, log: line => lines.push(line), spawn: fakeSpawner(async ({ child }) => {
+    child.stdout.write(JSON.stringify({ type: 'result', is_error: false, structured_output: { explanation: 'x'.repeat(600) } }) + '\n'); child.finish();
+  }) });
+  t.after(() => service.close());
+  const done = await terminal(service, service.start({ engine: 'claude', prompt: 'Create 30 adults', revision: 0, document: empty, cohort: { id: 'customers', size: 30 } }));
+  assert.match(done.message, /^Batch 1 could not be drafted after 3 attempts: the reply is missing documentJson or explanation/);
+  const line = lines.find(item => item.event === 'cohort-batch-failed')!;
+  assert.equal((line.output as string).length, 300); assert.match(String(line.output), /^\{"explanation":"xxx/);
+});
+
+test('a Claude stream-json run may print more event bytes than the reply-size limit, but the limit still stops a runaway', async t => {
+  const root = await setup(t);
+  const run = (events: number) => {
+    const service = new LocalAgentService({ temporaryRoot: root, maxOutputBytes: 4000, spawn: fakeSpawner(({ child, args }) => {
+      assert.ok(args.includes('stream-json'));
+      for (let i = 0; i < events; i++) child.stdout.write(claudeDelta('x'.repeat(50)));
+      child.stdout.write(claudeResult(child.input)); child.finish();
+    }) });
+    t.after(() => service.close());
+    return terminal(service, service.start({ engine: 'claude', prompt: 'Create 3 adults', revision: 0, document: empty, cohort: { id: 'customers', size: 3 } }));
+  };
+  assert.equal((await run(40)).status, 'completed', 'more than 4 KB of events passes a 4 KB reply limit');
+  const runaway = await run(400);
+  assert.equal(runaway.status, 'failed'); assert.match(runaway.message, /could not be drafted after 3 attempts: the AI ran past its \d+-second time limit or its output size limit/);
 });
