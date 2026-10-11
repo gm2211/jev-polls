@@ -1,5 +1,5 @@
 /** Study deletion: a quick delete on each study row, confirmed in a dialog, removed from the draft until saved. */
-export const STUDY_DELETION_DIALOG = `<dialog id="deleteStudyDialog" class="auth-dialog" aria-labelledby="deleteStudyTitle" aria-describedby="deleteStudyDescription deleteStudyImpact"><h2 id="deleteStudyTitle">Delete study?</h2><p id="deleteStudyDescription"></p><p id="deleteStudyImpact" class="subtle">Cohorts and past reports stay; the deletion is kept when you save.</p><div class="row"><button type="button" class="button" data-act="delete-study-close" autofocus>Cancel</button><button type="button" class="button danger" data-act="delete-study-confirm">Delete study</button></div></dialog>`;
+export const STUDY_DELETION_DIALOG = `<dialog id="deleteStudyDialog" class="auth-dialog" aria-labelledby="deleteStudyTitle" aria-describedby="deleteStudyDescription deleteStudyImpact"><h2 id="deleteStudyTitle">Delete study?</h2><p id="deleteStudyDescription"></p><p id="deleteStudyImpact" class="subtle">Its cohorts and past reports stay.</p><div class="row"><button type="button" class="button" data-act="delete-study-close" autofocus>Cancel</button><button type="button" class="button danger" data-act="delete-study-confirm">Delete study</button></div></dialog>`;
 
 export const STUDY_DELETION_CLIENT = String.raw`
 function studyDeleteButton(p){return '<button type="button" class="button small danger icon-button list-delete study-delete" data-act="delete-study" data-id="'+attr(p.id)+'" aria-label="Delete study: '+attr(studyQuestion(p))+'" title="Delete study">'+icon('trash')+'</button>'}
@@ -10,7 +10,7 @@ function requestStudyDeletion(pipelineId){
   const target=projectPipelines().find(p=>p.id===pipelineId);if(!target)return;
   studyDeletionGuard(target);
   S.studyDeletion={id:target.id,revision:S.revision};
-  document.getElementById('deleteStudyDescription').textContent='Remove “'+studyQuestion(target)+'” and its '+target.stages.length+' step'+(target.stages.length===1?'':'s')+' from this draft?';
+  document.getElementById('deleteStudyDescription').textContent='Remove “'+studyQuestion(target)+'” and its '+target.stages.length+' step'+(target.stages.length===1?'':'s')+'?';
   document.getElementById('deleteStudyDialog').showModal();
 }
 function deleteStudyFromDraft(){
@@ -29,7 +29,7 @@ function deleteStudyFromDraft(){
   S.studyDeletion=null;S.plan=null;S.dirty=true;
   document.getElementById('deleteStudyDialog').close();render();
   (root.querySelector('.list-open')||root.querySelector('.empty-create'))?.focus();
-  say('Study removed from draft. Save changes to keep the deletion.');
+  commitDeletion('Study deleted.');
 }
 function studyDeletionAction(a,el){
   if(a==='delete-study'){requestStudyDeletion(el.dataset.id);return true}

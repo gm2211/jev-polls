@@ -38,11 +38,35 @@ behaviors:
       a single indicator shows when unsaved changes exist, and no section needs its own Apply.
     details: >-
       Short identity fields such as names keep their check-icon confirm (rename-confirm).
-      Deleting an item is part of the draft and takes effect on Save like any other edit.
+      Deleting a project, study or cohort is confirmed in a dialog and saved at once
+      (list-pages-no-save). Cmd/Ctrl+S saves from any page.
     source:
       text: 1b 2a
       reference: >-
         2026-10-10 jev-polls project thread, Giulio, choosing option B for saving: explicit Save with automatic local drafts
+  - id: list-pages-no-save
+    description: >-
+      The Projects, Studies, Cohorts and Runs lists have no Save button. Their own actions commit
+      immediately: create and rename save on confirm, and a delete saves when its dialog is
+      confirmed. Save appears only on pages that edit something (a study, a cohort, a persona,
+      project settings).
+    details: >-
+      Changed 2026-10-11. Before, deleting from a list only changed the draft, so a Save button
+      appeared beside New project with no visible edit to save. Unsaved edits made in an editor
+      stay in the local draft when the user moves to a list page and are saved from that editor
+      or with Cmd/Ctrl+S. A delete that fails to save leaves the error banner and the draft.
+    source:
+      text: save button for projects makes no sense - scan for other weird things like this
+      reference: 2026-10-11 jev-polls project chat, Giulio, with a screenshot of the Projects list
+  - id: new-project-tile
+    description: >-
+      The Projects list ends with the same dashed New project tile the empty Studies list uses
+      (plus icon, title, one-line hint, click anywhere to start); it replaces the header New
+      project button and is also the empty state.
+    source:
+      text: should have the same for projects
+      reference: >-
+        2026-10-11 jev-polls project chat, Giulio, with a screenshot of the dashed New study tile
   - id: local-drafts-survive
     description: >-
       Unsaved edits are kept locally and automatically, so a refresh, a restart of the browser

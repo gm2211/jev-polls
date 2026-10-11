@@ -76,6 +76,7 @@ function studyStartAction(a,el){
 
 export const STUDY_START_CSS = String.raw`
 .empty-create{appearance:none;display:grid;justify-items:center;align-content:center;gap:8px;width:100%;min-height:240px;padding:32px 20px;border:2px dashed var(--line);border-radius:var(--radius-panel,10px);background:transparent;color:var(--ink);font:inherit;text-align:center;cursor:pointer;transition:border-color 140ms ease-out,background 140ms ease-out}
+.empty-create.after-list{min-height:150px;margin-top:16px;padding:20px}
 .empty-create:hover,.empty-create:focus-visible{border-color:var(--blue);background:var(--action)}
 .empty-create:focus-visible{outline:2px solid var(--focus,var(--blue));outline-offset:2px}
 .empty-create-plus{display:grid;place-items:center;width:44px;height:44px;border-radius:50%;background:var(--action);color:var(--blue)}

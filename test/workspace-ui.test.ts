@@ -48,7 +48,8 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
     fetch: async (path: string, options?: { method?: string; body?: string }) => {
       requests.push(path); if (options?.body) bodies.push({ path, body: JSON.parse(options.body) });
       const key = (options?.method || 'GET') + ' ' + path;
-      const data = await (responses.get(key) ?? responses.get(path) ?? snapshot);
+      const found = responses.get(key) ?? responses.get(path) ?? snapshot;
+      const data = await (typeof found === 'function' ? found(options?.body ? JSON.parse(options.body) : undefined) : found);
       const failure = failures.get(key) ?? failures.get(path);
       return { ok: !failure, json: async () => JSON.parse(JSON.stringify(failure ? { error: { message: failure } } : data)) };
     },
@@ -66,6 +67,7 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
     client: (context as typeof context & { clientTest: any }).clientTest, window: context.window,
     element, listeners, intervals, timeouts, requests, bodies, storage,
     respond: (path: string, value: unknown, method?: string) => responses.set(method ? method + ' ' + path : path, value),
+    echoSaves: () => responses.set('POST /api/workspace', (body: any) => ({ revision: body.revision + 1, document: body.document })),
     fail: (path: string, message: string, method?: string) => failures.set(method ? method + ' ' + path : path, message),
     setSnapshot: (value: typeof snapshot) => { snapshot = value; },
     snapshot: () => structuredClone(snapshot),
@@ -865,8 +867,8 @@ test('ChatGPT drafting requires explicit model and carries selected model withou
 });
 
 
-test('cohort deletion names the target, preserves cancel, and detaches only affected phases before explicit save', async () => {
-  const browser = browserHarness(); await settle();
+test('cohort deletion names the target, preserves cancel, detaches only affected phases, and saves on confirm', async () => {
+  const browser = browserHarness(); browser.echoSaves(); await settle();
   const { S, act, cohortCard } = browser.client;
   S.doc.cohorts.push({ ...structuredClone(S.doc.cohorts[0]), id: 'keep', name: 'Keep cohort' });
   S.doc.pipelines[0].cohorts.other = 'keep';
@@ -890,12 +892,13 @@ test('cohort deletion names the target, preserves cancel, and detaches only affe
   assert.equal(S.doc.pipelines[0].stages[0].cohort, '');
   assert.equal(S.doc.pipelines[0].cohorts.other, 'keep');
   assert.equal(S.doc.pipelines[0].stages[1].cohort, 'other');
-  assert.equal(S.dirty, true); assert.equal(browser.bodies.length, 0);
-  assert.equal(browser.snapshot().document.cohorts.length, 1, 'saved snapshot unchanged');
+  await settle();
+  assert.equal(S.dirty, false); assert.equal(browser.bodies.filter(r => r.path === '/api/workspace').length, 1);
+  assert.equal((browser.bodies.at(-1)!.body as any).document.cohorts.length, 1, 'confirm saves the deletion');
 });
 
-test('last-cohort deletion still offers saving and stale confirmation cannot delete new data', async () => {
-  const browser = browserHarness(); await settle();
+test('last-cohort deletion saves on confirm and stale confirmation cannot delete new data', async () => {
+  const browser = browserHarness(); browser.echoSaves(); await settle();
   const { S, act, cohorts } = browser.client;
   S.cohortId = 'cohort'; S.personId = 'person';
   assert.match(cohorts(), /data-act="delete-cohort" data-id="cohort"/);
@@ -906,8 +909,9 @@ test('last-cohort deletion still offers saving and stale confirmation cannot del
   S.remoteRevision = null;
   act(null, { dataset: { act: 'delete-cohort-confirm' } });
   assert.equal(S.doc.cohorts.length, 0); assert.equal(S.cohortId, null); assert.equal(S.personId, null);
-  assert.match(cohorts(), /data-act="save"/);
-  assert.equal(S.dirty, true);
+  await settle();
+  assert.doesNotMatch(cohorts(), /data-act="save"/);
+  assert.equal(S.dirty, false);
 });
 
 
@@ -1135,12 +1139,11 @@ test('project creation requires explicit entry and cancellation preserves its dr
   assert.equal(S.projectComposer, false);
   assert.doesNotMatch(html(), /data-form="new-project"/);
   S.doc.projects = []; render();
-  assert.match(html(), /Start your first project/);
-  assert.match(html(), /data-act="new-project"/);
+  assert.match(html(), /class="empty-create" data-act="new-project"/);
   assert.doesNotMatch(html(), /data-form="new-project"/);
 });
 
-test('failed project creation exposes the inserted draft and Save changes for recovery', async () => {
+test('failed project creation keeps the inserted draft and Cmd+S retries the save', async () => {
   const browser = browserHarness(false); await settle();
   const { S, act } = browser.client;
   browser.fail('/api/workspace', 'Save unavailable', 'POST');
@@ -1154,9 +1157,12 @@ test('failed project creation exposes the inserted draft and Save changes for re
   assert.equal(S.doc.projects.at(-1).description, 'Keep this brief');
   const html = browser.element('app').innerHTML;
   assert.match(html, /Recoverable project/);
-  assert.match(html, /data-act="save"/);
+  assert.doesNotMatch(html, /data-act="save"/, 'list pages have no Save button');
   assert.doesNotMatch(html, /data-form="new-project"/);
   assert.equal(browser.bodies.filter(r => r.path === '/api/workspace').length, 1);
+  browser.listeners.get('keydown')!({ metaKey: true, key: 's', preventDefault() {} });
+  await settle();
+  assert.equal(browser.bodies.filter(r => r.path === '/api/workspace').length, 2);
 });
 
 test('run navigation requires recorded project ownership and opens reports without replacing the draft', async () => {
@@ -1188,7 +1194,7 @@ test('run navigation requires recorded project ownership and opens reports witho
 });
 
 test('manual cohort creation and deletion update only selected project membership', async () => {
-  const browser = browserHarness(); await settle();
+  const browser = browserHarness(); browser.echoSaves(); await settle();
   const { S, act, deleteCohortFromDraft } = browser.client;
   S.doc.projects.push({ id: 'empty', name: 'Empty', description: '', cohortIds: [], pipelineIds: [] });
   const previous = JSON.stringify(S.doc.projects[1]);
@@ -1200,6 +1206,7 @@ test('manual cohort creation and deletion update only selected project membershi
   assert.equal(S.doc.projects[0].cohortIds.includes(created), false);
   assert.equal(S.doc.cohorts.some((c: any) => c.id === created), false);
   assert.equal(JSON.stringify(S.doc.projects[1]), previous);
+  await settle();
 });
 
 
@@ -2601,7 +2608,7 @@ test('step settings belong to the selected step and never add a step dropdown',a
 
 
 test('project deletion confirms scope, preserves cancel, and removes only owned data from draft',async()=>{
-  const browser=browserHarness(false);await settle();const {S,act,render}=browser.client;
+  const browser=browserHarness(false);browser.echoSaves(); await settle();const {S,act,render}=browser.client;
   const keepCohort=structuredClone(S.doc.cohorts[0]);keepCohort.id='keep-cohort';keepCohort.name='Keep edits';
   const keepPipeline=structuredClone(S.doc.pipelines[0]);keepPipeline.id='keep-study';keepPipeline.cohorts.audience=keepCohort.id;
   const keepProject={id:'keep-project',name:'Keep project',description:'Unsaved brief',cohortIds:[keepCohort.id],pipelineIds:[keepPipeline.id]};
@@ -2619,13 +2626,13 @@ test('project deletion confirms scope, preserves cancel, and removes only owned 
   act(null,{dataset:{act:'delete-project',id:'existing-research'}});act(null,{dataset:{act:'delete-project-confirm'}});
   assert.equal(S.doc.projects.length,1);assert.equal(S.doc.projects[0].id,'keep-project');assert.equal(JSON.stringify(S.doc.projects[0]),JSON.stringify(keepProject));
   assert.equal(JSON.stringify(S.doc.cohorts),JSON.stringify([keepCohort]));assert.equal(JSON.stringify(S.doc.pipelines),JSON.stringify([keepPipeline]));
-  assert.equal(S.dirty,true);assert.equal(browser.bodies.length,0);assert.match(browser.element('app').innerHTML,/data-act="save"/);
+  await settle();assert.equal(S.dirty,false);assert.equal(browser.bodies.filter(r=>r.path==='/api/workspace').length,1);assert.doesNotMatch(browser.element('app').innerHTML,/data-act="save"/);
   assert.equal(S.projectViews['existing-research'],undefined);assert.equal(S.projectViews['keep-project'].tab,'cohorts');
   assert.equal(browser.storage.has('jev-local-job:http://127.0.0.1:4180:existing-research'),false);assert.equal(browser.storage.has('jev-local-job:http://127.0.0.1:4180:keep-project'),true);
 });
 
 test('study rows have a quick delete that confirms before removing only that study',async()=>{
-  const browser=browserHarness();await settle();const {S,act,render}=browser.client;
+  const browser=browserHarness();browser.echoSaves(); await settle();const {S,act,render}=browser.client;
   const other=structuredClone(S.doc.pipelines[0]);other.id='other-study';other.description='Keep this study';S.doc.pipelines.push(other);S.doc.projects[0].pipelineIds.push(other.id);
   const target=S.doc.pipelines[0],cohorts=JSON.stringify(S.doc.cohorts);
   S.tab='studies';S.pipelineId=null;render();
@@ -2636,7 +2643,7 @@ test('study rows have a quick delete that confirms before removing only that stu
   S.snap.activeRun={pipelineId:target.id};assert.throws(()=>act(null,{dataset:{act:'delete-study',id:target.id}}),/run to finish/);
   assert.equal(browser.element('deleteStudyDialog').open,false);S.snap.activeRun=null;
   act(null,{dataset:{act:'delete-study',id:target.id}});
-  assert.equal(browser.element('deleteStudyDialog').open,true);assert.match(browser.element('deleteStudyDescription').textContent,/Remove “.+” and its \d+ steps? from this draft\?/);
+  assert.equal(browser.element('deleteStudyDialog').open,true);assert.match(browser.element('deleteStudyDescription').textContent,/Remove “.+” and its \d+ steps?\?/);
   assert.equal(JSON.stringify(S.doc),before);
   act(null,{dataset:{act:'delete-study-close'}});assert.equal(browser.element('deleteStudyDialog').open,false);assert.equal(JSON.stringify(S.doc),before);
   act(null,{dataset:{act:'delete-study',id:target.id}});
@@ -2644,14 +2651,14 @@ test('study rows have a quick delete that confirms before removing only that stu
   act(null,{dataset:{act:'delete-study-confirm'}});
   assert.equal(browser.element('deleteStudyDialog').open,false);
   assert.equal(JSON.stringify(S.doc.pipelines.map(p=>p.id)),'["other-study"]');assert.equal(JSON.stringify(S.doc.projects[0].pipelineIds),'["other-study"]');
-  assert.equal(JSON.stringify(S.doc.cohorts),cohorts);assert.equal(S.dirty,true);assert.equal(browser.bodies.length,0);
+  await settle();assert.equal(JSON.stringify(S.doc.cohorts),cohorts);assert.equal(S.dirty,false);assert.equal(browser.bodies.filter(r=>r.path==='/api/workspace').length,1);
   assert.doesNotMatch(browser.element('app').innerHTML,new RegExp('data-id="'+target.id+'"'));
   act(null,{dataset:{act:'delete-study',id:'other-study'}});act(null,{dataset:{act:'delete-study-confirm'}});
   assert.equal(S.doc.pipelines.length,0);assert.match(browser.element('app').innerHTML,/class="empty-create" data-act="create-study"/);
 });
 
 test('project deletion handles last project and blocks stale or newly active confirmations',async()=>{
-  const browser=browserHarness();await settle();const {S,act}=browser.client;
+  const browser=browserHarness();browser.echoSaves(); await settle();const {S,act}=browser.client;
   act(null,{dataset:{act:'delete-project',id:'existing-research'}});
   S.remoteRevision=S.revision+1;assert.throws(()=>act(null,{dataset:{act:'delete-project-confirm'}}),/Workspace changed/);S.remoteRevision=null;
   S.doc.projects[0].name='Changed project';assert.throws(()=>act(null,{dataset:{act:'delete-project-confirm'}}),/Workspace changed/);
@@ -2660,8 +2667,8 @@ test('project deletion handles last project and blocks stale or newly active con
   S.localJob={status:'running'};assert.throws(()=>act(null,{dataset:{act:'delete-project-confirm'}}),/drafting job/);S.localJob=null;
   act(null,{dataset:{act:'delete-project-confirm'}});
   assert.equal(S.projectId,null);assert.equal(S.doc.projects.length,0);assert.equal(S.doc.cohorts.length,0);assert.equal(S.doc.pipelines.length,0);
-  assert.match(browser.element('app').innerHTML,/Start your first project/);assert.match(browser.element('app').innerHTML,/data-act="save"/);
-  assert.equal(browser.bodies.length,0);
+  await settle();assert.match(browser.element('app').innerHTML,/class="empty-create" data-act="new-project"/);assert.doesNotMatch(browser.element('app').innerHTML,/data-act="save"/);
+  assert.equal(S.dirty,false);
 });
 
 test('project deletion refuses active target runs and cached drafts before opening confirmation',async()=>{
@@ -3398,4 +3405,20 @@ test('a study whose question was never typed is named by its first written quest
   assert.equal(study.description, 'Typed study question', 'a typed study question is never overwritten');
   study.description = ''; study.stages[0].questions.answer.label = '';
   assert.equal(ensureStudyQuestion(study), false, 'nothing to name the study yet');
+});
+
+test('list pages carry no Save button, Projects offers a New project tile, and Runs has no manual Refresh', async () => {
+  const browser = browserHarness(false); await settle();
+  const { S, render, selectProject } = browser.client;
+  const html = () => browser.element('app').innerHTML;
+  S.dirty = true; render();
+  assert.doesNotMatch(html(), /data-act="save"/);
+  assert.match(html(), /class="empty-create after-list" data-act="new-project"/);
+  assert.doesNotMatch(html(), /class="button primary" data-act="new-project"/);
+  selectProject('existing-research'); S.dirty = true;
+  for (const tab of ['studies', 'cohorts', 'runs']) {
+    S.tab = tab; S.pipelineId = null; S.cohortId = null; render();
+    assert.doesNotMatch(html(), /data-act="save"/, tab + ' list has no Save');
+  }
+  assert.doesNotMatch(html(), /data-act="refresh"/);
 });

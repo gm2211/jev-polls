@@ -78,7 +78,7 @@ ${TEXT_SELECTION_CSS}
 .project-navigation{padding:0 0 12px;margin-bottom:18px}.project-navigation strong{font:600 14px var(--display)}
 .masthead{align-items:center;gap:24px;margin-bottom:24px}.masthead>div:first-child{min-width:0}.masthead p:empty{display:none}.header-actions,.toolbar,.row{gap:8px;align-items:center}.header-actions{flex-shrink:0}.header-actions:empty{display:none}.masthead h1,.detail-header h1{font:600 clamp(22px,2.4vw,30px)/1.16 var(--display);letter-spacing:-.035em}.masthead p{font-size:13px}
 .detail-header{position:static;padding:0 0 12px;margin-bottom:0;border-bottom:1px solid var(--line)}.cohort-detail-page{max-width:none}
-.detail-header .detail-toolbar{padding-top:10px;margin-top:10px}.detail-description{font-size:12px}.detail-description summary{min-height:28px}
+.detail-header .detail-toolbar{padding-top:10px;margin-top:10px}.detail-description{font-size:12px}.detail-lead{grid-column:1;margin:0;color:var(--muted);font-size:14px}.detail-description summary{min-height:28px}
 .eyebrow,.section-kicker{color:var(--muted);font:600 11px var(--body);letter-spacing:.08em}.subtle{font-size:12px;color:var(--muted)}
 .panel,.card{border-radius:var(--radius-panel);border:1px solid var(--line);box-shadow:none;background:var(--surface)}
 .mini-card{background:var(--surface);border-color:var(--line);border-radius:var(--radius-control);box-shadow:none}.panel{padding:20px}.panelhead{margin-bottom:16px;align-items:start;gap:24px}.panel h2,.panelhead h2{font:600 17px var(--display);letter-spacing:-.025em}.panelhead p{font-size:12px;max-width:75ch}
