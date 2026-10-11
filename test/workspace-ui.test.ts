@@ -3448,6 +3448,22 @@ test('the proposal review lists the audiences that will be generated', async () 
   assert.doesNotMatch(browser.client.proposalReview({ ...job, proposal: { ...job.proposal, audienceRequests: undefined } }), /Will generate/);
 });
 
+test('the generation prompt is the full brief: description, every named attribute, the segments and the independence rule', async () => {
+  const browser = browserHarness(); await settle();
+  const { applyLocalProposal, audienceNext } = browser.client;
+  const attributes = ['annualIncomeUsd', 'country', 'ethnicity', 'favoriteFranchises', 'hoursPlayedLastYear', 'seriesLoyalty', 'preferredGenres', 'platform'];
+  const rich = { ...audienceRequest, description: 'Adult gamers who could buy a $20 game. Two-sentence backstories.', attributes, segments: [{ id: 'strategy', label: 'Strategy and 4X', share: 30 }, { id: 'casual', label: 'Casual' }] };
+  audienceProposal(browser, [rich]);
+  browser.respond('/api/agent/jobs', cohortJob('adult-gamers'));
+  await applyLocalProposal(); await audienceNext();
+  const start = browser.bodies.find(entry => entry.path === '/api/agent/jobs')!.body as any;
+  assert.ok(start.prompt.startsWith(rich.description));
+  for (const attribute of attributes) assert.ok(start.prompt.includes(attribute), attribute);
+  assert.match(start.prompt, /Strategy and 4X \(about 30%\); Casual/);
+  assert.match(start.prompt, /nobody a preference for or against any option, name or product/);
+  assert.ok(start.prompt.length <= 10000);
+});
+
 test('applying a proposal with an audience request starts its inline generation in the step panel', async () => {
   const browser = browserHarness(); await settle();
   const { S, applyLocalProposal, audienceNext } = browser.client;
@@ -3456,7 +3472,7 @@ test('applying a proposal with an audience request starts its inline generation 
   await applyLocalProposal(); await audienceNext();
   const start = browser.bodies.find(entry => entry.path === '/api/agent/jobs')!.body as any;
   assert.deepEqual(start.cohort, { id: 'adult-gamers', size: 1000, step: { pipelineId: 'study', stageId: 'panel' } });
-  assert.equal(start.prompt, audienceRequest.description);
+  assert.ok(start.prompt.startsWith(audienceRequest.description));
   assert.deepEqual(JSON.parse(JSON.stringify(S.cohortInlineTarget)), { pipelineId: 'study', stageId: 'panel' });
   assert.equal(S.tab, 'studies'); assert.equal(S.stageId, 'panel'); assert.equal(S.sections['flow-inspector'], 'cohort'); assert.equal(S.flowPanel, true);
   assert.equal(S.localJob.cohort.id, 'adult-gamers');

@@ -18,6 +18,14 @@ function audienceProposalList(job){
   const requests=job?.proposal?.audienceRequests;if(!requests?.length)return '';
   return '<div class="notice proposal-audiences" role="note"><ul>'+requests.map(r=>'<li>Will generate: <strong>'+esc(r.name)+'</strong> · '+esc(audiencePeople(r.size))+'</li>').join('')+'</ul><p class="subtle">'+(requests.length===1?'After you apply, the audience is drafted in its step, and you review it before it is used.':'After you apply, each audience is drafted in its own step, one at a time, and you review each before it is used.')+' The people are synthetic assumptions.</p></div>';
 }
+/** The prompt the audience is generated from: the brief, the attributes and segments the assistant named, and the question-independence rule. */
+function audienceBrief(request){
+  const parts=[String(request.description||'').trim()];
+  if(request.attributes?.length)parts.push('Structured attributes every persona must carry: '+request.attributes.join(', ')+'. Fill each one for every person, and vary them within each segment so people in one segment do not all look alike.');
+  if(request.segments?.length)parts.push('Segments: '+request.segments.map(s=>s.label+(s.share?' (about '+s.share+'%)':'')).join('; ')+'. Give every persona one of these segments.');
+  parts.push('Personas are independent of the questions asked later: give nobody a preference for or against any option, name or product being compared.');
+  return parts.filter(Boolean).join('\n\n');
+}
 function audienceStepFor(step){
   const p=projectPipelines().find(x=>x.id===step?.pipelineId),stage=p?.stages.find(x=>x.id===step?.stageId&&x.kind==='poll');
   return p&&stage&&!p.cohorts?.[stage.cohort]?{p,stage}:null;
@@ -31,7 +39,7 @@ async function audienceNext(){
     if(!steps.length||S.doc.cohorts.some(c=>c.id===request.cohortId)){audienceSave();continue}
     const found=audienceStepFor(steps[0]);
     a.active={cohortId:request.cohortId,name:request.name,steps:steps.slice(1)};audienceSave();
-    S.cohortInlineTarget={pipelineId:found.p.id,stageId:found.stage.id};S.cohortTarget=request.cohortId;S.cohortPrompt=request.description;S.cohortSize=request.size;S.cohortLastSize=request.size;
+    S.cohortInlineTarget={pipelineId:found.p.id,stageId:found.stage.id};S.cohortTarget=request.cohortId;S.cohortPrompt=audienceBrief(request).slice(0,10000);S.cohortSize=request.size;S.cohortLastSize=request.size;
     S.cohortComposer=true;S.cohortAttempted=false;S.sections['cohort-generation']='review';S.localError=null;
     returnToInlineCohortStep();render();
     say('Drafting the audience for this step: '+request.name+' · '+audiencePeople(request.size)+'.');

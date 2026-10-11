@@ -1243,6 +1243,38 @@ test('a large audience becomes a request, not inline personas, and its step keep
   assert.equal(proposal.document.pipelines[0]!.stages.length, 2);
 });
 
+const GAME_PROMPT = 'Ask 1,000 adult gamers who could buy a $20 game, varied by play style (strategy, shooter, builder, casual), country and income';
+const GAME_ATTRIBUTES = ['annualIncomeUsd', 'country', 'ethnicity', 'favoriteFranchises', 'hoursPlayedLastYear', 'seriesLoyalty', 'preferredGenres', 'platform'];
+const gameBrief = { audienceRequest: {
+  description: `Adult gamers (18+) who could comfortably buy a $20 game, spread across countries, ethnicities, ages and incomes: "${GAME_PROMPT}". Keep each persona to a two-sentence backstory about gaming habits. Mix strategy, shooter, builder and casual players.`,
+  size: 1000, attributes: GAME_ATTRIBUTES,
+  segments: [{ id: 'strategy', label: 'Strategy and 4X', share: 30 }, { id: 'shooter', label: 'Shooter', share: 30 }, { id: 'builder', label: 'Sim and builder', share: 20 }, { id: 'casual', label: 'Casual', share: 20 }],
+} };
+
+test('a one-prompt game audience keeps its full brief: every named attribute, the segments and the quoted constraints', async t => {
+  const { document, draft } = audienceDraft([gameBrief]);
+  let sent = '';
+  const service = projectDraftService(t, prompt => { sent = prompt; return draft; });
+  const job = await terminal(service, service.start({ ...projectRequest, document, prompt: GAME_PROMPT }));
+  assert.equal(job.status, 'completed', job.message);
+  assert.match(sent, /full generation brief/); assert.match(sent, /structured attribute/); assert.match(sent, /backstory/); assert.match(sent, /quoted in the user's own words/);
+  const request = job.proposal!.audienceRequests![0]!;
+  assert.deepEqual(request.attributes, GAME_ATTRIBUTES);
+  assert.deepEqual(request.segments!.map(segment => [segment.id, segment.share]), [['strategy', 30], ['shooter', 30], ['builder', 20], ['casual', 20]]);
+  assert.match(request.description, new RegExp(GAME_PROMPT.replace(/[$()]/g, '\\$&')));
+  for (const attribute of GAME_ATTRIBUTES.slice(0, 1)) assert.ok(request.attributes!.includes(attribute));
+});
+
+test('audience request attributes and segments are validated', async t => {
+  const document = optionsWorkspace();
+  for (const [label, extra] of [['empty attribute', { attributes: [''] }], ['bad segment id', { segments: [{ id: 'Bad Id', label: 'X' }] }], ['share over 100', { segments: [{ id: 'a', label: 'A', share: 120 }] }]] as const) {
+    const { draft } = audienceDraft([{ audienceRequest: { description: 'Adults', size: 50, ...extra } }]);
+    const service = projectDraftService(t, () => draft);
+    const job = await terminal(service, service.start({ ...projectRequest, document }));
+    assert.equal(job.status, 'failed', label);
+  }
+});
+
 test('several audience requests are returned in order, each tied to its own step', async t => {
   const { document, draft } = audienceDraft([gamersRequest, { id: 'parents', name: 'Parents of teen gamers', audienceRequest: { description: 'Parents of gamers aged 13 to 17.', size: 300 } }], d => {
     d.pipelines[0].cohorts.parents = 'parents';

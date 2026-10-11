@@ -108,11 +108,14 @@ function arenaAfterRender(){
     if(A.scroll&&A.scroll.runId===A.runId&&A.scroll.stage===A.stage){map.scrollLeft=A.scroll.left;map.scrollTop=A.scroll.top}
     arenaRelayout();
     if(typeof ResizeObserver==='function'){A.ro=new ResizeObserver(()=>{clearTimeout(A.relayout);A.relayout=setTimeout(arenaRelayout,120)});A.ro.observe(map)}
-    map.addEventListener('pointerover',event=>{const tile=event.target.closest?.('.lv-tile');if(tile&&event.pointerType!=='touch')arenaTip(tile)});
+    map.addEventListener('pointerover',event=>{const tile=event.target.closest?.('.lv-tile');if(tile&&lvm.tooltipNext(A.tipKey,{type:'hover',key:tile.dataset.key,touch:event.pointerType==='touch'})===tile.dataset.key)arenaTip(tile)});
     map.addEventListener('pointerout',event=>{if(event.target.closest?.('.lv-tile'))arenaTipHide()});
-    map.addEventListener('focusin',event=>{const tile=event.target.closest?.('.lv-tile');if(tile){arenaTip(tile);arenaTabStop(tile.dataset.key)}});
+    map.addEventListener('pointerleave',arenaTipHide);
+    map.addEventListener('click',arenaTipHide);
+    map.addEventListener('focusin',event=>{const tile=event.target.closest?.('.lv-tile');if(tile){const keyboard=!!tile.matches?.(':focus-visible');if(lvm.tooltipNext(A.tipKey,{type:'focus',key:tile.dataset.key,keyboard})===tile.dataset.key)arenaTip(tile);arenaTabStop(tile.dataset.key)}});
     map.addEventListener('focusout',arenaTipHide);
     map.addEventListener('scroll',arenaTipHide,{passive:true});
+    if(!A.tipGlobal&&typeof window.addEventListener==='function'){A.tipGlobal=true;window.addEventListener('scroll',()=>arenaTipHide(),{capture:true,passive:true});document.addEventListener('keydown',event=>{if(event.key==='Escape')arenaTipHide()},true)}
     map.addEventListener('keydown',arenaKeys);
     map.addEventListener('animationend',event=>{if(event.animationName==='lv-fresh')event.target.classList.remove('is-pop');else if(event.animationName==='lv-wave')event.target.classList.remove('is-wave')});
   }
@@ -204,19 +207,19 @@ function arenaDetail(ctx){const member=ctx.selected;A.refs.detail.dataset.has=St
 // ---- selection, tooltip, keyboard --------------------------------------------------------------------------
 function arenaTabStop(key){if(A.tabKey===key)return;A.byKey.get(A.tabKey)?.setAttribute('tabindex','-1');A.tabKey=key;A.byKey.get(key)?.setAttribute('tabindex','0')}
 function arenaSelect(key){
-  if(!A.el)return;const before=S.liveMemberKey;S.liveMemberKey=key;
+  if(!A.el)return;arenaTipHide();const before=S.liveMemberKey;S.liveMemberKey=key;
   A.byKey.get(before)?.setAttribute('aria-pressed','false');A.byKey.get(key)?.setAttribute('aria-pressed','true');arenaTabStop(key);
   const run=arenaSelectedRun();if(!run)return;const ctx=arenaInput(run,false);A.ctx={...A.ctx,...ctx,groups:A.ctx.groups,layout:A.ctx.layout};A.detailSig=ctx.selected?lvm.signature(ctx.selected)+key:'';arenaDetail(ctx);arenaSyncPlay();
 }
 function arenaSyncPlay(){const play=A.el?.querySelector?.('[data-act=arena-play]');if(play){play.textContent=R.playing?'Pause':'Play';play.setAttribute('aria-pressed',String(R.playing))}}
 function arenaTip(tile){
   const tip=A.refs.tip,member=A.members.get(tile.dataset.key);if(!tip||!member)return;
-  tip.innerHTML=lvv.tooltipHtml(member,{question:A.question,segmentLabel:A.ctx.segmentLabels[member.segment]||member.segment});tip.hidden=false;
+  tip.innerHTML=lvv.tooltipHtml(member,{question:A.question,segmentLabel:A.ctx.segmentLabels[member.segment]||member.segment});tip.hidden=false;A.tipKey=tile.dataset.key;
   const rect=tile.getBoundingClientRect(),box=tip.getBoundingClientRect();
   let top=rect.top-box.height-8;if(top<8)top=rect.bottom+8;
   tip.style.top=Math.round(top)+'px';tip.style.left=Math.round(Math.max(8,Math.min(lvW()-box.width-8,rect.left+rect.width/2-box.width/2)))+'px';
 }
-function arenaTipHide(){const tip=A.refs?.tip;if(tip)tip.hidden=true}
+function arenaTipHide(){A.tipKey=lvm.tooltipNext(A.tipKey,{type:'leave'});const tip=A.refs?.tip;if(tip)tip.hidden=true}
 function arenaKeys(event){
   const tile=event.target.closest?.('.lv-tile');if(!tile||!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','Home','End'].includes(event.key))return;
   const tiles=[...A.refs.map.querySelectorAll('.lv-tile')],index=tiles.indexOf(tile);let next=null;
