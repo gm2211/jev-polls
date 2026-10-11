@@ -122,8 +122,8 @@ document.addEventListener('drop',event=>{
 export const OPTIONS_BOX_CSS = String.raw`
 .options-box{display:grid;gap:4px;border-radius:6px}
 .options-box.dragging{outline:2px dashed var(--blue);outline-offset:4px;background:var(--selection)}
-.options-box-head{display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:var(--text-sm);font-weight:600}
-.options-box-head .link-button{font-size:var(--text-sm);font-weight:400}
+.options-box-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font-size:var(--text-sm);font-weight:600}
+.options-box-actions{display:flex;gap:6px;flex-wrap:wrap}
 .options-list{list-style:none;margin:0;padding:0;border-top:1px solid var(--line)}
 .options-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr) 28px;align-items:center;gap:0 6px;border-bottom:1px solid var(--line);padding:0}
 .options-row input{width:100%;min-width:0;min-height:28px;height:28px;margin:0;padding:3px 6px;border:1px solid transparent;border-radius:4px;background:transparent;color:var(--ink);font:inherit;font-size:var(--text-sm);box-shadow:none}

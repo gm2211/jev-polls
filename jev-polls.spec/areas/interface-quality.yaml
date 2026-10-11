@@ -198,3 +198,15 @@ behaviors:
     source:
       text: too many buttons it should be intuitive
       reference: jev-polls project chat, Giulio, 2026-10-11
+  - id: actions-are-icon-buttons
+    description: >-
+      Workspace actions render as small buttons with an icon, never as underlined text links. On the
+      Options tab, Import and Draft with AI are two small icon buttons; the review panel's run details,
+      the cohort form's "Choose a saved audience instead" and a run's Open study use the same small
+      button. Breadcrumbs and links inside running text stay links.
+    details: >-
+      Before 2026-10-11 these four actions were underlined text (link-button), including a single
+      "Import or draft with AI" link above the options list.
+    source:
+      text: no html plain links please - small buttons instead, ideally with icons
+      reference: jev-polls project thread, Giulio, 2026-10-11
