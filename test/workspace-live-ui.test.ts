@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { runInNewContext } from 'node:vm';
 import { createArenaModel } from '../src/workspace-arena-model.js';
+import { ARENA_CONTROLS_CLIENT } from '../src/workspace-arena-controls.js';
 import { createLiveVotingView, WORKSPACE_LIVE_UI_CLIENT, WORKSPACE_LIVE_UI_CSS } from '../src/workspace-live-ui.js';
 
 const model = createArenaModel();
@@ -243,7 +244,28 @@ test('motion cues: new tiles brighten for about a second, groups pulse, ranks fl
   assert.match(WORKSPACE_LIVE_UI_CSS, /\.lv-tile\.is-pop\{animation:lv-pop \.4s[^}]*,lv-fresh 1\.2s/);
   assert.match(WORKSPACE_LIVE_UI_CSS, /\.lv-group\.is-wave\{animation:lv-wave/);
   assert.match(WORKSPACE_LIVE_UI_CSS, /\.lv-row\.is-moved/);
-  assert.match(WORKSPACE_LIVE_UI_CSS, /transition:transform \.6s cubic-bezier/);
+  assert.match(WORKSPACE_LIVE_UI_CSS, /transition:transform \.35s cubic-bezier/);
   assert.match(WORKSPACE_LIVE_UI_CSS, /\.live-voting\[data-full=true\]\{position:fixed;inset:0/);
   assert.match(WORKSPACE_LIVE_UI_CSS, /max-width:900px\)\{[^@]*\.live-voting\[data-full=true\] \.lv-side\{display:flex/, 'phones stack the leaderboard under the map');
+});
+
+test('leaderboard rows always sit in their rank slot: one row per slot, in board order, whatever moved', () => {
+  const shown = crowd(300, ['a', 'b'], index => (index * 7 + (index > 150 ? 5 : 0)) % 14);
+  for (const cursor of [20, 80, 150, 220, 300]) {
+    const board = model.leaderboard(model.replayMembers(shown, cursor), fourteen);
+    const slots = view.rowSlots(board.rows, board.leader);
+    assert.deepEqual(slots.map(slot => slot.slot), board.rows.map((_, index) => index), 'slot n holds the nth ranked option');
+    assert.equal(new Set(slots.map(slot => slot.slot)).size, board.rows.length, 'no two rows share a slot');
+    assert.deepEqual(slots.map(slot => slot.id), board.rows.map(row => row.id));
+    assert.equal(slots.filter(slot => slot.leader).length, 1);
+    assert.ok(slots.every(slot => !slot.hidden));
+    const html = view.boardRows(board, fourteen, 'pick');
+    board.rows.forEach((row, rank) => assert.match(html, new RegExp(`data-opt="${row.id}"[^>]*data-rank="${rank}"[^>]*style="--rank:${rank};`)));
+  }
+});
+test('the client places rows together at most every 500ms and drops stale placements', () => {
+  const controls = ARENA_CONTROLS_CLIENT;
+  assert.match(controls, /function arenaPlaceRows\(board\)/);
+  assert.match(controls, /now-A\.placedAt>=500/);
+  assert.doesNotMatch(controls.slice(controls.indexOf('for(const row of rows)'), controls.indexOf('const now=lvNow()')), /--rank|dataset\.rank|lv-rank/, 'a poll updates shares only; ranks move in arenaPlaceRows');
 });
