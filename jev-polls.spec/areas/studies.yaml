@@ -117,6 +117,20 @@ behaviors:
     source:
       text: should be able to click on canvas to create node with dropdown - look at railway.com or hex.com for inspiration
       reference: jev-polls project thread, 2026-10-09
+  - id: canvas-drag-connect
+    description: >-
+      Dragging from a step's output socket draws a live wire that follows the pointer; dropping it on
+      a step that can use that output connects them. Works with mouse, pen and touch.
+    details: >-
+      While dragging, steps that can accept the output are outlined and others fade; the step under
+      the pointer is highlighted and the wire snaps to it. Dropping anywhere else cancels with no
+      change. The canvas scrolls when the pointer nears its edge. A press that barely moves is still
+      a click, so the existing click-then-Connect-here flow keeps working. A drop selects the target
+      step without opening the step panel, so several wires can be drawn in a row; if the panel is
+      already open it switches to the target's Inputs tab.
+    source:
+      text: I should be able to drag connect from "connect output"
+      reference: jev-polls project thread, 2026-10-11
   - id: edge-labels-on-hover
     description: >-
       A wire is named only while the pointer is on it, or while keyboard focus is on its step's

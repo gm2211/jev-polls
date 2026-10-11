@@ -42,7 +42,7 @@ async function flowHarness() {
   };
   const html = renderWorkspace('flow-test', 'token');
   const script = html.match(/<script nonce="flow-test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.flowTest={S,flowAction,flowCreateMenu,flowKindMatches,flowConnect,flowDisconnect,flowInputs,flowNode,flowReadiness,flowConnections,flowCohortMap,flowTodo,flowRoundTabs,flowNode,flowInspector,flowCanvas,flowWorkspace,flowReads,flowRunOrder,flowListMode,flowTipShow,flowNodeInputs};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.flowTest={S,flowAction,flowCreateMenu,flowKindMatches,flowConnect,flowDisconnect,flowInputs,flowNode,flowReadiness,flowConnections,flowCohortMap,flowTodo,flowRoundTabs,flowNode,flowInspector,flowCanvas,flowWorkspace,flowReads,flowRunOrder,flowListMode,flowTipShow,flowNodeInputs,flowWireEnd};})();');
   new Script(exposed).runInNewContext(context);
   await new Promise<void>(resolve => setImmediate(resolve));
   const client = context.flowTest;
@@ -492,4 +492,40 @@ test('adding a step in list mode places no canvas position, so the wide layout s
   assert.equal(pipeline.stages.at(-1).kind, 'poll');
   assert.equal(pipeline.layout, undefined);
   assert.equal(S.flowPanel, true);
+});
+
+test('dropping a dragged output on a step connects it and shows its Inputs when the panel is open; dropping elsewhere changes nothing', async () => {
+  const { S, pipeline, flowWireEnd, flowInputs } = await flowHarness();
+  const fake = (): any => ({ removeAttribute() {}, classList: { remove() {} }, querySelectorAll: () => [] });
+  const drag = (target: any) => ({ p: pipeline, stage: 'source', question: 'answer', viewport: fake(), output: fake(), wire: { remove() {} }, target });
+  const before = JSON.stringify(pipeline.stages);
+  flowWireEnd(drag(null), false);
+  assert.equal(JSON.stringify(pipeline.stages), before);
+  assert.equal(S.dirty, false);
+  flowWireEnd(drag({ dataset: { flowNode: 'target' } }), true);
+  assert.equal(JSON.stringify(pipeline.stages), before, 'a cancelled drag never connects');
+  S.flowSource = { pipelineId: 'study', stage: 'other', question: 'answer' };
+  S.flowPanel = true;
+  flowWireEnd(drag({ dataset: { flowNode: 'target' } }), false);
+  assert.deepEqual(plain(flowInputs(pipeline, pipeline.stages[2]).map(([, input]: any) => [input.stage, input.question])), [['source', 'answer']]);
+  assert.equal(S.stageId, 'target');
+  assert.equal(S.sections['flow-inspector'], 'connections');
+  assert.equal(S.flowSource, null, 'a pending click connection is cleared');
+  assert.equal(S.dirty, true);
+});
+
+test('output sockets advertise dragging and the canvas styles live wires and drop targets', () => {
+  assert.match(WORKSPACE_FLOW_CLIENT, /Drag onto the step that should use it/);
+  assert.match(WORKSPACE_FLOW_CSS, /\.flow-drag-wire\{[^}]*pointer-events:none/);
+  assert.match(WORKSPACE_FLOW_CSS, /\.flow-node\[data-drop-target=true\]/);
+});
+
+test('a drop with the step panel closed keeps the canvas clear for the next wire', async () => {
+  const { S, pipeline, flowWireEnd } = await flowHarness();
+  const fake = (): any => ({ removeAttribute() {}, classList: { remove() {} }, querySelectorAll: () => [] });
+  S.flowPanel = false;
+  flowWireEnd({ p: pipeline, stage: 'source', question: 'answer', viewport: fake(), output: fake(), wire: { remove() {} }, target: { dataset: { flowNode: 'other' } } }, false);
+  assert.equal(S.flowPanel, false);
+  assert.equal(S.stageId, 'other');
+  assert.deepEqual(plain(pipeline.stages[1].dependsOn), ['source']);
 });
