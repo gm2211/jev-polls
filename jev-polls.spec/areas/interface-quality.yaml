@@ -114,14 +114,25 @@ behaviors:
     description: >-
       Projects, Studies and Cohorts lists use the same row: title, an optional one-line subtitle,
       small counts, a chevron, and trailing icon actions (rename, delete); each list has one create
-      button, on the title line, labeled New project, New study or New cohort.
+      control, a dashed New project, New study or New cohort tile after the list that is also the
+      empty state (projects.new-project-tile).
     details: >-
       Before 2026-10-10 the three lists had three designs: project cards with counts and a chevron,
       study rows with a chevron, and cohort cards with a large persona count, no chevron, a dashed
       New cohort card at the end and a header button that said Generate cohort. The shared row is
-      listRow in the workspace client.
+      listRow in the workspace client. On 2026-10-11 the title-line New study and New cohort
+      buttons gave way to the same tile Projects uses.
     source:
       text: Three sibling list pages, three card designs (UI audit, item 8)
+  - id: no-redundant-controls
+    description: >-
+      A page shows no control that duplicates something the app already does on its own: the Runs
+      list has no Refresh button because the workspace re-reads saved state every 5 seconds while
+      visible, and the New cohort page states its one-line purpose under the title instead of in
+      an "About this cohort" disclosure for a cohort that does not exist yet.
+    source:
+      text: save button for projects makes no sense - scan for other weird things like this
+      reference: 2026-10-11 jev-polls project chat, Giulio
   - id: save-is-the-only-commit
     description: >-
       Editing forms have no per-form Apply button; the page header's Save is the one commit control,
