@@ -590,6 +590,7 @@ export const ROUND_PANEL_CSS = `
 .round-panel{position:absolute;top:0;right:0;bottom:0;z-index:6;width:min(640px,62%);display:flex;flex-direction:column;border-radius:var(--radius-panel);box-shadow:-18px 0 40px rgba(20,32,48,.16);animation:round-panel-in 160ms ease-out}
 @keyframes round-panel-in{from{transform:translateX(24px);opacity:0}to{transform:none;opacity:1}}
 @media(prefers-reduced-motion:reduce){.round-panel{animation:none}}
+.round-panel.is-settled{animation:none}
 .round-panel .flow-inspector-head{align-items:center;padding:16px 18px 10px}
 .round-panel-title{display:grid;gap:2px;min-width:0}.round-panel-title h2{margin:0;font:600 var(--text-lg)/1.3 var(--display);letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .round-panel-kind{font-size:var(--text-sm);color:var(--muted)}

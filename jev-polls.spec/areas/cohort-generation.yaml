@@ -114,14 +114,18 @@ behaviors:
       reference: 2026-10-11 jev-polls project thread, Giulio's failed 1,000-person run
   - id: concurrent-progress-truthful
     description: >-
-      Progress names the batches running, counts only accepted batches, shows retries, and divides
-      the remaining-time range by the batches running at once.
+      Progress says in plain words how many groups are being written at once and when a rate limit or
+      a failed check slows it down, without batch numbers or attempt counts, and divides the
+      remaining-time range by the batches running at once.
+    details: >-
+      Changed 2026-10-11: the readout no longer lists batch numbers, per-batch states, character counts
+      or CLI output; one status line covers planning the audience, writing, pauses and final checks.
   - id: streamed-generation-detail
     description: >-
-      While batches draft, progress shows accepted personas and personas still being written as two
-      separate numbers, a real state for each batch, and a rough finish time from the first seconds;
-      personas seen in partial output are never counted as accepted before their batch passes its
-      checks.
+      While batches draft, the main count is personas written so far (checked plus seen in partial
+      output), so it moves as people arrive; personas checked and saved are a separate, smaller number,
+      and a rough finish time appears from the first seconds. Personas seen in partial output are never
+      counted as checked before their batch passes its checks.
     details: >-
       Streamed personas are counted from partial CLI output and capped at the batch size. The Claude CLI
       runs in stream-json mode with partial messages, so its content deltas arrive as JSON lines while

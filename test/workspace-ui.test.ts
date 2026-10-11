@@ -629,7 +629,7 @@ test('draft start remains locked across autosave and job request and ignores an 
   assert.equal(S.revision, 1); assert.equal(S.remoteRevision, null); assert.equal(S.doc.cohorts[0].name, 'Current typed audience');
   finishSave({ revision: 7, document: saved }); await settle();
   assert.equal(S.revision, 7); assert.equal(S.localStarting, true); assert.equal(browser.element('app').inert, true);
-  assert.match(browser.element('app').innerHTML, /Checking AI connection/);
+  assert.match(browser.element('app').innerHTML, /Connecting to Codex/);
   await startCohortJob();
   await browser.listeners.get('change')!({ target: { name: 'localEngine', value: 'claude' } });
   browser.listeners.get('click')!({ target: { closest: () => ({ dataset: { act: 'projects' } }) }, preventDefault() {} });
@@ -1901,10 +1901,10 @@ test('generation progress reports accepted counts without inventing completion o
   const job = { id: 'progress', engine: 'chatgpt', model: 'chosen-model', status: 'running', startedAt: new Date(Date.now() - 65000).toISOString(), cohort: { id: 'new', size: 60 }, progress: { phase: 'generating', batch: 2, totalBatches: 3, completedBatches: 1, completedPersonas: 25, totalPersonas: 60 } };
   S.localJob = job; S.cohortTarget = 'new'; S.sections['cohort-generation'] = 'review';
   let html = draftProgress(job);
-  assert.match(html, /25 <span>\/ 60/); assert.match(html, /value="25" max="60"/);
-  assert.match(html, /Generating batch 2 of 3/); assert.doesNotMatch(html, /batches checked/);
+  assert.match(html, /<strong>25<\/strong>of 60 personas written/); assert.match(html, /aria-valuenow="41.7"/);
+  assert.match(html, /Writing personas\./); assert.doesNotMatch(html.replace(/<[^>]*>/g,' '), /batch/i, 'no batch arithmetic in the readout');
   assert.match(html, /ChatGPT · chosen-model/); assert.match(html, /1m 5s elapsed/);
-  assert.match(html, />accepted</); assert.doesNotMatch(html, /being written/); assert.doesNotMatch(html, /Waiting for ChatGPT|Counts update after validation/); assert.match(html, /Cancel generation/);
+  assert.match(html, /25 checked and saved/); assert.doesNotMatch(html, /being written/); assert.match(html, /Cancel generation/);
   assert.doesNotMatch(cohortGenerator(), /Wait for the current draft/);
   assert.equal(canGenerateCohort(), false);
   const clock = { dataset: { draftStart: job.startedAt }, textContent: '' };
@@ -1912,11 +1912,11 @@ test('generation progress reports accepted counts without inventing completion o
   updateDraftClocks(); assert.match(clock.textContent, /1m 5s elapsed/);
   assert.equal(S.localJob.progress.completedPersonas, 25);
   html = draftProgress({ ...job, progress: { ...job.progress, phase: 'validating' } });
-  assert.match(html, /Checking batch 2 of 3/); assert.doesNotMatch(html, /Checking the complete draft/);
+  assert.match(html, /Writing personas\./, 'checking one group is part of writing'); assert.doesNotMatch(html, /Checking the finished audience/);
   html = draftProgress({ ...job, progress: { ...job.progress, phase: 'validating', completedBatches: 3, completedPersonas: 60 } });
-  assert.match(html, /Checking the complete draft/); assert.doesNotMatch(html, /Draft ready/);
+  assert.match(html, /Checking the finished audience/); assert.doesNotMatch(html, /Draft ready/);
   html = draftProgress({ id: 'general', status: 'running', engine: 'codex' });
-  assert.doesNotMatch(html, /<progress|personas checked|elapsed/);
+  assert.doesNotMatch(html, /progressbar|checked|elapsed/);
 });
 
 test('poll interruption stays visible in progress and can reconnect without another generation', async () => {
@@ -1943,7 +1943,7 @@ test('recovering active cohort generation selects Progress with actual server co
   browser.respond('/api/agent/jobs/active', { id: 'active', engine: 'codex', status: 'running', cohort: { id: 'new', size: 60, prompt: 'Adult readers' }, progress: { phase: 'generating', completedPersonas: 25, totalPersonas: 60, batch: 2, totalBatches: 3, completedBatches: 1 } });
   await browser.client.loadLocalAgents();
   assert.equal(browser.client.S.sections['cohort-generation'], 'review');
-  assert.match(browser.element('app').innerHTML, /data-section-id="review" >[\s\S]*value="25" max="60"/);
+  assert.match(browser.element('app').innerHTML, /data-section-id="review" >[\s\S]*<strong>25<\/strong>of 60 personas written/);
   assert.match(browser.element('app').innerHTML, />Progress<\/button>/);
   assert.doesNotMatch(browser.element('app').innerHTML, /Wait for the current draft/);
   browser.client.S.localJob.status = 'cancelled'; browser.timeouts.at(-1)!(); await settle();
@@ -2019,25 +2019,26 @@ test('progress shows observed activity as one live line without changing draft f
   const { S, draftProgress } = browser.client;
   const job = { id: 'streamed', status: 'running', engine: 'chatgpt', cohort: {size:100}, progress: { phase:'generating', totalPersonas:100, completedPersonas:25, batch:2, totalBatches:4, batchSize:25, activity:'receiving', outputChars:12500, lastActivityAt:new Date().toISOString(), latestAccepted:[{label:'Synthetic reader <script>',age:42}], validation:{scope:'batch',status:'passed',checks:['Required fields and adult ages','Expected batch size'],checkedPersonas:25} } };
   S.localJob=job; S.cohortComposer=true; S.cohortTarget='new'; S.sections['cohort-generation']='review';
-  assert.match(draftProgress(job), /Response arriving/);
-  assert.match(draftProgress(job), /12,500 characters received/);
-  assert.doesNotMatch(draftProgress(job), /draft-inspect|Activity<|What is checked/, 'progress is one readout, with no detail tabs');
+  assert.match(draftProgress(job), /updated just now/);
+  assert.doesNotMatch(draftProgress(job), /characters|Response arriving|CLI|draft-inspect|What is checked/, 'progress is one plain readout, with no transport details');
   const before=JSON.stringify(S.doc);
   assert.equal(JSON.stringify(S.doc),before); assert.equal(browser.bodies.length,0);
-  assert.match(draftProgress({...job,progress:{...job.progress,outputSource:'cli-stdout'}}),/CLI output arriving/);
+  assert.doesNotMatch(draftProgress({...job,progress:{...job.progress,outputSource:'cli-stdout'}}),/CLI/);
+  assert.match(draftProgress({...job,progress:{...job.progress,lastActivityAt:new Date(Date.now()-45000).toISOString()}}),/no new output for 45s, still working/);
 });
 
 test('remaining-time estimates require two measured batches and use persona-weighted durations', async () => {
   const browser=browserHarness(); await settle(); const {draftEstimate}=browser.client;
   const p={totalPersonas:1000,completedPersonas:50,batchDurationsMs:[60000],completedBatchSizes:[25]};
-  assert.match(draftEstimate(p),/After two completed batches/);
-  assert.match(draftEstimate({...p,batchDurationsMs:[60000,60000],completedBatchSizes:[25,25]}),/~30–46 min remaining/);
-  assert.match(draftEstimate({...p,batchDurationsMs:[60000,12000],completedBatchSizes:[25,5]}),/~30–46 min remaining/);
+  assert.equal(draftEstimate(p),'');
+  assert.equal(draftEstimate({...p,totalBatches:40}),'Estimating time left…');
+  assert.match(draftEstimate({...p,batchDurationsMs:[60000,60000],completedBatchSizes:[25,25]}),/About 30–46 min left/);
+  assert.match(draftEstimate({...p,batchDurationsMs:[60000,12000],completedBatchSizes:[25,5]}),/About 30–46 min left/);
   assert.equal(draftEstimate({...p,completedPersonas:1000}), '');
-  assert.match(draftEstimate({...p,totalPersonas:75,batchDurationsMs:[1000,1000],completedBatchSizes:[25,25]}),/~1–2 sec remaining/);
+  assert.match(draftEstimate({...p,totalPersonas:75,batchDurationsMs:[1000,1000],completedBatchSizes:[25,25]}),/About 1–2 sec left/);
   assert.match(draftEstimate({...p,batchStartedAt:new Date(Date.now()-120000).toISOString(),batchDurationsMs:[60000,60000],completedBatchSizes:[25,25]}),/Taking longer/);
   assert.equal(draftEstimate({...p,totalBatches:1}), '');
-  assert.match(draftEstimate({...p,batchDurationsMs:[60000,NaN],completedBatchSizes:[25,25]}),/Estimating/);
+  assert.match(draftEstimate({...p,totalBatches:40,batchDurationsMs:[60000,NaN],completedBatchSizes:[25,25]}),/Estimating/);
 });
 
 
@@ -3129,12 +3130,11 @@ test('concurrent batch progress names the running batches, the retry, and divide
   const job={id:'p',engine:'chatgpt',model:'m',status:'running',startedAt:new Date().toISOString(),cohort:{id:'new',size:1000},progress:{phase:'generating',batch:2,batchSize:25,batchStartedAt:new Date(Date.now()-5000).toISOString(),activeBatches:[2,3,4],maxConcurrentBatches:6,totalBatches:40,completedBatches:1,completedPersonas:25,totalPersonas:1000,retries:1,retry:{batch:3,attempt:2,maxAttempts:3},outputChars:0}};
   S.localJob=job;
   const html=draftProgress(job);
-  assert.match(html,/Generating batches 2, 3 and 4 of 40/); assert.match(html,/3 batches running at once/);
-  assert.match(html,/Batch 3 did not pass its checks and is being tried again \(attempt 2 of 3\)/);
+  assert.match(html,/Rewriting a few personas that did not pass the checks/); assert.doesNotMatch(html.replace(/<[^>]*>/g,' '),/batch|attempt/i);
   const base={totalPersonas:1000,completedPersonas:50,totalBatches:40,completedBatches:2,batchDurationsMs:[60000,60000],completedBatchSizes:[25,25]};
-  assert.match(draftEstimate(base),/~30–46 min remaining/);
-  assert.match(draftEstimate({...base,maxConcurrentBatches:6}),/~5–8 min remaining.*6 at a time/);
-  assert.match(html.replace(/retries/,''),/Generating/);
+  assert.match(draftEstimate(base),/About 30–46 min left/);
+  assert.match(draftEstimate({...base,maxConcurrentBatches:6}),/About 5–8 min left/);
+  assert.match(draftProgress({...job,progress:{...job.progress,retry:undefined}}),/Writing personas, 3 groups at a time/);
 });
 
 test('a rate-limited batch says how long it waits and the panel names the narrowed window', async () => {
@@ -3143,12 +3143,12 @@ test('a rate-limited batch says how long it waits and the panel names the narrow
   const job={id:'p',engine:'claude',status:'running',startedAt:new Date().toISOString(),cohort:{id:'new',size:1000},progress:{phase:'generating',batch:2,batchSize:25,batchStartedAt:new Date().toISOString(),activeBatches:[2,3],maxConcurrentBatches:12,totalBatches:40,completedBatches:1,completedPersonas:10,totalPersonas:1000,retries:1,retry:{batch:2,attempt:2,maxAttempts:3,cause:'rate-limit'},batchLimit:{allowed:4,cause:'rate-limit'},batchDetails:[detail(2,'waiting',{attempt:2,wait:{seconds:20,cause:'rate-limit'}}),detail(3,'connecting')],outputChars:0}};
   S.localJob=job;
   const html=draftProgress(job);
-  assert.match(html,/Batch 2: waiting 20 s after a rate limit \(attempt 2 of 3\)/);
-  assert.match(html,/4 batches at once while the AI is rate-limited/);
-  assert.match(html,/Batch 2 hit a rate limit and is being tried again \(attempt 2 of 3\)/);
-  assert.doesNotMatch(html,/did not pass its checks/);
+  assert.match(html,/Paused briefly after a rate limit\. It picks up again on its own\./);
+  assert.doesNotMatch(html.replace(/<[^>]*>/g,' '),/did not pass its checks|batch/i);
+  const narrowed=draftProgress({...job,progress:{...job.progress,batchDetails:[detail(3,'writing')]}});
+  assert.match(narrowed,/Writing more slowly for now because of a rate limit/);
   const calm=draftProgress({...job,progress:{...job.progress,batchLimit:undefined,retry:undefined,batchDetails:[detail(3,'connecting')]}});
-  assert.doesNotMatch(calm,/at once while/);
+  assert.doesNotMatch(calm,/slowly|Paused/);
 });
 
 test('a new tab reattaches to a running cohort generation and offers it on the Cohorts list', async () => {
@@ -3632,17 +3632,15 @@ test('drafting progress separates accepted from being written and describes each
   const progress = { phase: 'generating', batch: 2, totalBatches: 41, completedBatches: 1, completedPersonas: 160, totalPersonas: 1000, activeBatches: [1, 2, 3, 4, 5], maxConcurrentBatches: 12, inFlightPersonas: 37, batchStartedAt: new Date().toISOString(),
     batchDetails: [detail(1, 'writing', { size: 10, streamingPersonas: 4, outputChars: 900 }), detail(2, 'writing', { streamingPersonas: 7 }), detail(3, 'connecting'), detail(4, 'retrying', { attempt: 2 }), detail(5, 'checking', { streamingPersonas: 25 }), detail(6, 'writing', { contentStreamed: false, outputTokens: 212, outputChars: 600 }), detail(7, 'accepted', { streamingPersonas: 25 })] };
   const html = draftProgress({ id: 'j', engine: 'chatgpt', status: 'running', startedAt: new Date().toISOString(), cohort: { id: 'c', size: 1000 }, progress });
-  assert.match(html, /160 <span>\/ 1,000/); assert.match(html, />accepted</);
-  assert.match(html, /\+37 being written across 5 batches/);
-  assert.doesNotMatch(html, /sets up the audience/, 'batches only write personas; the setup happens before any batch');
+  assert.match(html, /<strong>197<\/strong>of 1,000 personas written/, 'the count moves as personas arrive, not only when a group is checked');
+  assert.match(html, /160 checked and saved/);
+  assert.match(html, /Writing personas, 5 groups at a time/);
   const settingUp = draftProgress({ id: 'j', engine: 'claude', status: 'running', startedAt: new Date().toISOString(), cohort: { id: 'c', size: 1000 }, progress: { phase: 'generating', totalBatches: 48, completedBatches: 0, completedPersonas: 0, totalPersonas: 1000, activeBatches: [], maxConcurrentBatches: 16 } });
-  assert.match(settingUp, /Setting up the audience: segments, weights and assumptions, then 16 batches run at once/);
-  assert.match(html, /Batch 2: writing persona 7 of 25/); assert.match(html, /Batch 3: connecting/);
-  assert.match(html, /Batch 4: retrying after a failed check \(attempt 2 of 3\)/); assert.match(html, /Batch 5: checking batch/);
-  assert.match(html, /Batch 6: writing… \(212 tokens so far\)/); assert.doesNotMatch(html, /Batch 6: writing persona/);
-  assert.match(html, /Batch 7: accepted/); assert.match(html, /count as accepted only after their batch passes its checks/);
-  assert.doesNotMatch(draftProgress({ id: 'j', engine: 'chatgpt', status: 'running', startedAt: new Date().toISOString(), cohort: { id: 'c', size: 1000 }, progress: { ...progress, inFlightPersonas: 0, batchDetails: undefined } }), /being written/);
+  assert.match(settingUp, /Planning who is in the audience\. Personas start arriving after this\./);
+  assert.match(draftProgress({ id: 'j', engine: 'claude', status: 'running', message: 'Setting up the audience: waiting 20 s after a rate limit', cohort: { id: 'c', size: 1000 }, progress: { phase: 'generating', totalBatches: 48, completedBatches: 0, completedPersonas: 0, totalPersonas: 1000, activeBatches: [] } }), /paused briefly/);
+  assert.doesNotMatch(html.replace(/<[^>]*>/g,' '), /batch|segments|weights|assumptions|tokens|characters|partial output/, 'no internal jargon');
+  assert.match(draftProgress({ id: 'j', engine: 'chatgpt', status: 'running', startedAt: new Date().toISOString(), cohort: { id: 'c', size: 1000 }, progress: { ...progress, inFlightPersonas: 0, batchDetails: undefined } }), /<strong>160<\/strong>/);
   const early = draftEstimate({ ...progress, estimate: { seconds: 240, basis: 'streaming', at: new Date().toISOString() } });
-  assert.match(early, /remaining \(rough\)/); assert.match(early, /firmer after two batches/);
-  assert.match(draftEstimate({ ...progress, estimate: undefined }), /Estimating…/);
+  assert.match(early, /^About 2–7 min left$/);
+  assert.match(draftEstimate({ ...progress, estimate: undefined }), /Estimating time left…/);
 });
