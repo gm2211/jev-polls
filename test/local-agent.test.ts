@@ -6,7 +6,7 @@ import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promise
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { ChildProcessWithoutNullStreams, SpawnOptionsWithoutStdio } from 'node:child_process';
-import { LocalAgentError, LocalAgentService, type LocalAgentJob, type LocalAgentSpawner } from '../src/local-agent.js';
+import { LocalAgentError, LocalAgentService, takeAudienceRequests, type LocalAgentJob, type LocalAgentSpawner } from '../src/local-agent.js';
 import type { ChatGptDraftClient } from '../src/chatgpt.js';
 import type { Cohort, DistributionTargetBucket, Persona } from '../src/types.js';
 import { validateWorkspaceDocument } from '../src/workspace-store.js';
@@ -1212,4 +1212,80 @@ test('drafting guidance explains Choice output and keeps repeats at 1', async t 
   assert.match(prompt, /no written explanations/);
   assert.match(prompt, /repeats at 1 unless the user explicitly asks/);
   assert.match(prompt, /copied verbatim/);
+});
+
+function audienceDraft(requests: Array<Record<string, unknown>>, mutate: (draft: any) => void = () => {}) {
+  const document = optionsWorkspace();
+  const draft: any = selectedDraft(document);
+  draft.cohorts = [draft.cohorts[0], ...requests.map(request => ({ id: 'gamers', name: 'Adult gamers who can buy a $20 game', ...request }))];
+  draft.pipelines[0].cohorts = { audience: 'customers', gamers: 'gamers' };
+  draft.pipelines[0].stages = [
+    document.pipelines[0]!.stages[0],
+    { ...structuredClone(document.pipelines[0]!.stages[0]), id: 'second', cohort: 'gamers' },
+  ];
+  mutate(draft);
+  return { document, draft };
+}
+const gamersRequest = { audienceRequest: { description: 'Adults who play games weekly and could buy a $20 game.', size: 1000 } };
+
+test('a large audience becomes a request, not inline personas, and its step keeps an unselected cohort', async t => {
+  const { document, draft } = audienceDraft([gamersRequest]);
+  let sent = '';
+  const service = projectDraftService(t, prompt => { sent = prompt; return draft; });
+  const job = await terminal(service, service.start({ ...projectRequest, document }));
+  assert.equal(job.status, 'completed', job.message);
+  assert.match(sent, /inline only for up to 25 people/); assert.match(sent, /audienceRequest/);
+  const proposal = job.proposal!;
+  assert.deepEqual(proposal.audienceRequests, [{ cohortId: 'gamers', name: 'Adult gamers who can buy a $20 game', description: gamersRequest.audienceRequest.description, size: 1000, steps: [{ pipelineId: 'selected-study', stageId: 'second' }] }]);
+  assert.equal(proposal.document.cohorts.some(cohort => cohort.id === 'gamers'), false, 'no cohort or placeholder personas are saved');
+  assert.equal(proposal.document.pipelines[0]!.cohorts.gamers, '');
+  assert.equal(proposal.document.pipelines[0]!.cohorts.audience, 'customers');
+  assert.equal(proposal.document.pipelines[0]!.stages.length, 2);
+});
+
+test('several audience requests are returned in order, each tied to its own step', async t => {
+  const { document, draft } = audienceDraft([gamersRequest, { id: 'parents', name: 'Parents of teen gamers', audienceRequest: { description: 'Parents of gamers aged 13 to 17.', size: 300 } }], d => {
+    d.pipelines[0].cohorts.parents = 'parents';
+    d.pipelines[0].stages.push({ ...structuredClone(d.pipelines[0].stages[0]), id: 'third', cohort: 'parents' });
+  });
+  const service = projectDraftService(t, () => draft);
+  const job = await terminal(service, service.start({ ...projectRequest, document }));
+  assert.equal(job.status, 'completed', job.message);
+  assert.deepEqual(job.proposal!.audienceRequests!.map(request => [request.cohortId, request.size, request.steps[0]!.stageId]), [['gamers', 1000, 'second'], ['parents', 300, 'third']]);
+});
+
+test('audience requests are validated: size 1 to 20,000, a description, no personas, a new id, a step that uses it', async t => {
+  const document = optionsWorkspace();
+  const reject = async (label: string, requests: Array<Record<string, unknown>>, pattern: RegExp, mutate?: (draft: any) => void) => {
+    const { draft } = audienceDraft(requests, mutate);
+    const service = projectDraftService(t, () => draft);
+    const job = await terminal(service, service.start({ ...projectRequest, document }));
+    assert.equal(job.status, 'failed', label); assert.equal(job.proposal, undefined, label); assert.match(job.message, pattern, label); assert.match(job.message, /Workspace unchanged/, label);
+  };
+  await reject('too large', [{ audienceRequest: { description: 'Adults', size: 20_001 } }], /size from 1 to 20,000/);
+  await reject('zero', [{ audienceRequest: { description: 'Adults', size: 0 } }], /size from 1 to 20,000/);
+  await reject('fraction', [{ audienceRequest: { description: 'Adults', size: 10.5 } }], /size from 1 to 20,000/);
+  await reject('no description', [{ audienceRequest: { description: '   ', size: 50 } }], /description/);
+  await reject('personas in the same cohort', [{ ...gamersRequest, personas: [structuredClone(proposed.cohorts[0]!.personas[0]!)] }], /both personas and an audience request/);
+  await reject('reused saved id', [{ id: 'customers', ...gamersRequest }], /reuses the cohort id customers/);
+  await reject('unused', [gamersRequest], /not used by any step/, d => { d.pipelines[0].cohorts = { audience: 'customers' }; d.pipelines[0].stages = [d.pipelines[0].stages[0]]; });
+});
+
+test('takeAudienceRequests accepts the maximum, an empty personas list, and leaves ordinary cohorts alone', () => {
+  const candidate: any = { cohorts: [{ id: 'ordinary', personas: [{}] }, { id: 'big', name: 'Big', personas: [], audienceRequest: { description: 'Many adults', size: 20_000 } }], pipelines: [{ id: 'p', cohorts: { a: 'big', b: 'ordinary' }, stages: [{ id: 's1', kind: 'poll', cohort: 'a' }, { id: 's2', kind: 'poll', cohort: 'b' }, { id: 'agg', kind: 'aggregate' }] }] };
+  const requests = takeAudienceRequests(candidate, new Set(['saved']));
+  assert.deepEqual(requests, [{ cohortId: 'big', name: 'Big', description: 'Many adults', size: 20_000, steps: [{ pipelineId: 'p', stageId: 's1' }] }]);
+  assert.deepEqual(candidate.cohorts.map((cohort: any) => cohort.id), ['ordinary']);
+  assert.deepEqual(candidate.pipelines[0].cohorts, { a: '', b: 'ordinary' });
+  assert.deepEqual(takeAudienceRequests({ cohorts: [{ id: 'ordinary' }], pipelines: [] }, new Set()), []);
+});
+
+test('a cohort job remembers the step it was started for', async t => {
+  const service = new LocalAgentService({ chatgpt: nativeDraft(cohortBatchResponse) }); t.after(() => service.close());
+  const step = { pipelineId: 'study', stageId: 'panel' };
+  const job = service.start({ ...batchRequest(3), cohort: { id: 'customers', size: 3, step } });
+  assert.deepEqual(job.cohort, { id: 'customers', size: 3, step, prompt: 'Create 3 adults' });
+  assert.equal((await terminal(service, job)).status, 'completed');
+  assert.deepEqual(service.get(job.id)!.cohort!.step, step);
+  assert.throws(() => service.start({ ...batchRequest(3), cohort: { id: 'customers', size: 3, step: { pipelineId: 'Bad Id', stageId: 'panel' } } }), LocalAgentError);
 });

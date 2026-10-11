@@ -58,7 +58,7 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
   };
   const html = renderWorkspace('test', 'token');
   const script = html.match(/<script nonce="test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={locationHash,plural,recoverDraftingJob,recoverableDraftingJob,loadLocalAgents,cohortJobNotice,cohortJobNoticeVisible,commandState,adoptCohortProposal,commandEntries,commandExecute,inlineCohortJobVisible,inlineCohortTarget,setupCohortPicker,runCaveats,beginRun,commandApplyProposal,commandJobVisible,S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,locationHash,restoreLocation,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,studies,review,say,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,studyQuestionList,validateSetupAnswers,questionParts,upsertQuestion,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList,studyNextAction,studyReviewPanel,rememberRunSignature,ensureStudyQuestion};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.clientTest={locationHash,plural,recoverDraftingJob,recoverableDraftingJob,loadLocalAgents,cohortJobNotice,cohortJobNoticeVisible,commandState,adoptCohortProposal,commandEntries,commandExecute,inlineCohortJobVisible,inlineCohortTarget,setupCohortPicker,runCaveats,beginRun,commandApplyProposal,commandJobVisible,S,runs,updateAISettings,updateAuth,runUsageText,draftProgress,draftEstimate,updateDraftClocks,reviewPlan,selectProject,locationHash,restoreLocation,project,projectCohorts,projectPipelines,projectRuns,projects,render,refresh,reloadSaved,applySnapshot,agents,copyAgentText,act,freshPipeline,addNextPhase,addPhaseInput,projectionOptions,dataInputOptions,startLocalJob,applyLocalProposal,proposalReview,aiSettingsContent,graphEdgePath,drawStageEdges,cohortGenerator,startCohortJob,adoptCohortProposal,cohortProposalReview,canGenerateCohort,pollLocalJob,cancelLocalJob,cohorts,cohortCard,deleteCohortFromDraft,loadChatGpt,loadLocalAgents,cohortBlockReason,cohortExplorer,personaDetail,explorerAction,cohortDistributions,targetEditor,startPersonaJob,adoptPersonaProposal,segmentShares,applySegmentShares,pageItems,sectionPanels,revealSectionField,stageForm,advancedStageForm,studies,review,say,applyStage,applyStudySetup,setupAction,setupContextSummary,inputTitle,stepTitle,stageMap,studyQuestionList,validateSetupAnswers,questionParts,upsertQuestion,openAnswerList,closeAnswerList,answerListAction,answerListValues,applyAnswerList,readAnswerListFile,updateAnswerList,studyNextAction,studyReviewPanel,rememberRunSignature,ensureStudyQuestion,audienceNext,audienceAdd,audienceState,audienceResume,audienceNote,audienceProposalList};})();');
   const sandbox = new Script(exposed).runInNewContext(context) as undefined;
   void sandbox;
   if (openExistingProject) (context as any).clientTest.S.projectId = 'existing-research';
@@ -789,7 +789,7 @@ test('cohort prompt generation scopes the request and previews personas without 
   const job = { id: 'cohort-job', engine: 'codex', revision: S.revision, status: 'completed', cohort: { id: candidate.id, size: 2, prompt: S.cohortPrompt }, proposal: { document: { ...structuredClone(S.doc), cohorts: [...S.doc.cohorts, candidate] }, explanation: 'Fictional personas with assumed weights.' } };
   browser.respond('/api/agent/jobs', job);
   await startCohortJob();
-  assert.deepEqual(JSON.parse(JSON.stringify(browser.bodies.at(-1)!.body)), { projectId: 'existing-research', engine: 'codex', prompt: S.cohortPrompt, revision: S.revision, cohort: { id: 'new-audience', size: 2 } });
+  assert.deepEqual(JSON.parse(JSON.stringify(browser.bodies.at(-1)!.body)), { projectId: 'existing-research', engine: 'codex', prompt: S.cohortPrompt, revision: S.revision, cohort: { id: 'new-audience', size: 2, step: { pipelineId: 'study', stageId: 'panel' } } });
   assert.equal(JSON.stringify(S.doc), JSON.stringify(original), 'generation cannot modify the workspace draft');
   const review = cohortProposalReview(S.localJob);
   assert.match(review, /Frequent visitor/); assert.match(review, /Use this audience/);
@@ -3425,4 +3425,99 @@ test('a run takes the whole window: no sidebar or page chrome, Esc and Back retu
   // Opened from Runs: Back goes to the study the run belongs to.
   S.tab='runs';S.liveRunId='run-full';render();html=browser.element('app').innerHTML;
   assert.match(html,/data-full="true"/);assert.match(html,/data-act="run-open-study" data-id="study">Back to study/);
+});
+
+const audienceRequest = { cohortId: 'adult-gamers', name: 'Adult gamers who can buy a $20 game', description: 'Adults who play games weekly and could buy a $20 game.', size: 1000, steps: [{ pipelineId: 'study', stageId: 'panel' }] };
+function audienceProposal(browser: ReturnType<typeof browserHarness>, requests: unknown[] = [audienceRequest]) {
+  const { S } = browser.client;
+  const document = structuredClone(browser.snapshot().document);
+  document.pipelines[0].cohorts.audience = '';
+  const job = { id: 'study-draft', engine: 'codex', projectId: 'existing-research', status: 'completed', revision: S.revision, message: '', proposal: { document, explanation: 'Drafted a naming study.', audienceRequests: requests } };
+  browser.respond('/api/agent/jobs/study-draft/apply', { revision: S.revision + 1, document });
+  S.localJob = job; S.localEngine = 'codex'; S.localEngines = [{ id: 'codex', available: true }];
+  return job;
+}
+const cohortJob = (id: string, status = 'running', extra: object = {}) => ({ id: 'job-' + id, engine: 'codex', projectId: 'existing-research', status, revision: 2, message: '', cohort: { id, size: 1000, prompt: 'x', step: { pipelineId: 'study', stageId: 'panel' } }, ...extra });
+
+test('the proposal review lists the audiences that will be generated', async () => {
+  const browser = browserHarness(); await settle();
+  const job = audienceProposal(browser);
+  const review = browser.client.proposalReview(job);
+  assert.match(review, /Will generate: <strong>Adult gamers who can buy a \$20 game<\/strong> · 1,000 people/);
+  assert.match(review, /Apply proposal/);
+  assert.doesNotMatch(browser.client.proposalReview({ ...job, proposal: { ...job.proposal, audienceRequests: undefined } }), /Will generate/);
+});
+
+test('applying a proposal with an audience request starts its inline generation in the step panel', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, applyLocalProposal, audienceNext } = browser.client;
+  audienceProposal(browser);
+  browser.respond('/api/agent/jobs', cohortJob('adult-gamers'));
+  await applyLocalProposal(); await audienceNext();
+  const start = browser.bodies.find(entry => entry.path === '/api/agent/jobs')!.body as any;
+  assert.deepEqual(start.cohort, { id: 'adult-gamers', size: 1000, step: { pipelineId: 'study', stageId: 'panel' } });
+  assert.equal(start.prompt, audienceRequest.description);
+  assert.deepEqual(JSON.parse(JSON.stringify(S.cohortInlineTarget)), { pipelineId: 'study', stageId: 'panel' });
+  assert.equal(S.tab, 'studies'); assert.equal(S.stageId, 'panel'); assert.equal(S.sections['flow-inspector'], 'cohort'); assert.equal(S.flowPanel, true);
+  assert.equal(S.localJob.cohort.id, 'adult-gamers');
+  assert.deepEqual(JSON.parse(browser.storage.get('jev-local-job-target:http://127.0.0.1:4180:existing-research')!), { jobId: 'job-adult-gamers', pipelineId: 'study', stageId: 'panel' });
+  assert.match(browser.client.audienceNote(), /Drafting from your description:<\/strong> Adult gamers who can buy a \$20 game · 1,000 people/);
+});
+
+test('several audience requests run one at a time, the next starting when the previous is used', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, applyLocalProposal, audienceNext, adoptCohortProposal } = browser.client;
+  const second = { cohortId: 'parents', name: 'Parents of teens', description: 'Parents of teenage gamers.', size: 300, steps: [{ pipelineId: 'study', stageId: 'second' }] };
+  const job = audienceProposal(browser, [audienceRequest, second]);
+  job.proposal.document.pipelines[0].stages.push({ ...structuredClone(job.proposal.document.pipelines[0].stages[0]), id: 'second', cohort: 'other' });
+  job.proposal.document.pipelines[0].cohorts.other = '';
+  browser.respond('/api/agent/jobs/study-draft/apply', { revision: S.revision + 1, document: job.proposal.document });
+  browser.respond('/api/agent/jobs', cohortJob('adult-gamers'));
+  await applyLocalProposal(); await audienceNext();
+  const starts = () => browser.bodies.filter(entry => entry.path === '/api/agent/jobs').map(entry => (entry.body as any).cohort.id);
+  assert.deepEqual(starts(), ['adult-gamers']);
+  assert.equal(await audienceNext(), false, 'one drafting job at a time');
+  assert.match(browser.client.audienceNote(), /Next, one at a time: Parents of teens · 300 people/);
+  const generated = { ...structuredClone(S.doc.cohorts[0]), id: 'adult-gamers', name: 'Adult gamers' };
+  S.localJob = cohortJob('adult-gamers', 'completed', { revision: S.revision, proposal: { document: { cohorts: [generated] }, explanation: 'Synthetic' } });
+  browser.respond('/api/agent/jobs', cohortJob('parents'));
+  let saved!: (value: unknown) => void;
+  browser.respond('/api/workspace', new Promise(resolve => { saved = resolve; }), 'POST');
+  adoptCohortProposal();
+  saved({ revision: S.revision + 1, document: JSON.parse(JSON.stringify(S.doc)) });
+  const p = S.doc.pipelines[0];
+  assert.equal(p.cohorts[p.stages[0].cohort], 'adult-gamers', 'the first audience is assigned to its step');
+  for (let i = 0; i < 6; i++) await settle();
+  assert.deepEqual(starts(), ['adult-gamers', 'parents']);
+  assert.equal(S.stageId, 'second'); assert.equal(S.localJob.cohort.id, 'parents');
+});
+
+test('a reload keeps the queue and the generating step', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, applyLocalProposal, audienceNext } = browser.client;
+  const second = { cohortId: 'parents', name: 'Parents of teens', description: 'Parents of teenage gamers.', size: 300, steps: [{ pipelineId: 'study', stageId: 'panel' }] };
+  audienceProposal(browser, [audienceRequest, second]);
+  const running = cohortJob('adult-gamers');
+  browser.respond('/api/agent/jobs', running);
+  await applyLocalProposal(); await audienceNext();
+  const reloaded = browserHarness(); await settle();
+  for (const [key, value] of browser.storage) reloaded.storage.set(key, value);
+  reloaded.respond('/api/agent/jobs/job-adult-gamers', running);
+  reloaded.client.S.audience = null; // a real reload starts with the saved queue already in storage
+  await reloaded.client.loadLocalAgents();
+  const { S: R } = reloaded.client;
+  assert.equal(R.localJob.id, 'job-adult-gamers'); assert.equal(R.tab, 'studies'); assert.equal(R.stageId, 'panel'); assert.equal(R.sections['flow-inspector'], 'cohort');
+  assert.deepEqual(JSON.parse(JSON.stringify(reloaded.client.audienceState().queue.map((r: any) => r.cohortId))), ['parents']);
+  assert.equal(reloaded.bodies.some(entry => entry.path === '/api/agent/jobs'), false, 'a running job blocks the queue after reload');
+  void S;
+});
+
+test('a job recovered in another tab returns to the step it was started for', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, recoverDraftingJob } = browser.client;
+  browser.respond('/api/agent/jobs?projectId=existing-research', { jobs: [cohortJob('adult-gamers')] });
+  browser.respond('/api/agent/jobs/job-adult-gamers', cohortJob('adult-gamers'));
+  assert.equal(await recoverDraftingJob(), true);
+  assert.equal(S.tab, 'studies'); assert.equal(S.pipelineId, 'study'); assert.equal(S.stageId, 'panel'); assert.equal(S.sections['flow-inspector'], 'cohort');
+  assert.deepEqual(JSON.parse(JSON.stringify(S.cohortInlineTarget)), { pipelineId: 'study', stageId: 'panel' });
 });

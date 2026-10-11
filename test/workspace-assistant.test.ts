@@ -44,7 +44,13 @@ test('local assistant proposals require explicit application at the original sav
   assert.equal((await post('/api/agent/jobs', { ...input, cohort: { id: 'fresh-panel', size: MAX_COHORT_PERSONAS + 1 } })).status, 400);
   assert.equal((await post('/api/agent/jobs', { ...input, persona: { cohortId: 'customers', personaId: '__proto__' } })).status, 400);
   assert.equal((await post('/api/agent/jobs', { ...input, persona: { cohortId: 'customers', personaId: 'alex' }, cohort: { id: 'customers', size: 1 } })).status, 400);
+  assert.equal((await post('/api/agent/jobs', { ...input, cohort: { id: 'fresh-panel', size: 2, step: { pipelineId: 'Bad Id', stageId: 'panel' } } })).status, 400);
+  assert.equal((await post('/api/agent/jobs', { ...input, cohort: { id: 'fresh-panel', size: 2, step: { pipelineId: 'study', stageId: 'panel', extra: 1 } } })).status, 400);
   assert.equal(starts, 0);
+  const stepped = await post('/api/agent/jobs', { ...input, cohort: { id: 'stepped-panel', size: 1000, step: { pipelineId: 'study', stageId: 'panel' } } });
+  assert.equal(stepped.status, 202);
+  assert.deepEqual(jobs.get((await stepped.json()).id)!.cohort, { id: 'stepped-panel', size: 1000, step: { pipelineId: 'study', stageId: 'panel' }, prompt: input.prompt });
+  starts = 0;
   const created = await post('/api/agent/jobs', { ...input, cohort: { id: 'fresh-panel', size: 100 } });
   assert.equal(created.status, 202);
   const job = jobs.get((await created.json()).id)!;

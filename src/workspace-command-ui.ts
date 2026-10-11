@@ -123,6 +123,7 @@ async function commandApplyProposal(){
   if(!S.proposalApplied||S.projectId!==projectId)return;
   const candidates=projectPipelines(),target=candidates.find(p=>!before.has(p.id))||candidates.find(p=>before.get(p.id)!==JSON.stringify(p))||pipeline()||candidates[0];
   commandState.draftProject=null;draftAttachClear();
+  if(audienceQueued().length){await audienceNext();return}
   if(target){S.tab='studies';S.pipelineId=target.id;S.stageId=target.stages[0]?.id||null;S.sections.pipeline='flow';S.sections['flow-inspector']=target.stages[0]?.kind==='poll'?'question':'connections';S.flowCohortPick=false;S.plan=null}
   render();root.querySelector('h1')?.focus();
 }
