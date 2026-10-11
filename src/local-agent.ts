@@ -105,6 +105,26 @@ interface ProviderProgress { phase: 'starting' | 'generating' | 'receiving'; out
 /** A persona object carries a background key; the CLI envelope escapes it, so the quotes may be preceded by backslashes. */
 const PERSONA_KEY = /\\*"background\\*"\s*:/g;
 const PERSONA_KEY_TAIL = 24;
+/** Text and token count carried by one Claude CLI stream-json line; every other event contributes nothing. */
+export function claudeStreamDelta(line: string): { text: string; tokens?: number } {
+  if (!line.startsWith('{')) return { text: '' };
+  let event: { type?: unknown; event?: { type?: unknown; delta?: { type?: unknown; partial_json?: unknown; text?: unknown }; usage?: { output_tokens?: unknown } } };
+  try { event = JSON.parse(line); } catch { return { text: '' }; }
+  if (event.type !== 'stream_event' || !event.event) return { text: '' };
+  const inner = event.event;
+  if (inner.type === 'message_delta') { const tokens = inner.usage?.output_tokens; return { text: '', ...(typeof tokens === 'number' && Number.isSafeInteger(tokens) && tokens >= 0 ? { tokens } : {}) }; }
+  if (inner.type !== 'content_block_delta' || !inner.delta) return { text: '' };
+  const text = inner.delta.type === 'input_json_delta' ? inner.delta.partial_json : inner.delta.type === 'text_delta' ? inner.delta.text : '';
+  return { text: typeof text === 'string' ? text : '' };
+}
+/** The final Claude CLI envelope: the `result` event of a stream-json run, or the single JSON object of a plain json run. */
+export function claudeEnvelope(stdout: string): { is_error?: boolean; structured_output?: unknown; result?: string } {
+  const lines = stdout.split('\n').map(line => line.trim()).filter(line => line.startsWith('{'));
+  for (let index = lines.length - 1; index >= 0; index--) {
+    try { const event = JSON.parse(lines[index]!) as { type?: unknown; is_error?: boolean; structured_output?: unknown; result?: string }; if (event.type === 'result') return event; } catch { /* a partial line is not the result */ }
+  }
+  return JSON.parse(stdout);
+}
 const outputSchema = { type: 'object', properties: { documentJson: { type: 'string' }, explanation: { type: 'string' } }, required: ['documentJson', 'explanation'], additionalProperties: false };
 const safeCohortId = z.string().max(160).regex(/^[a-z][a-z0-9_-]*$/).refine(value => !['__proto__', 'prototype', 'constructor'].includes(value));
 const audienceStepSchema = z.object({ pipelineId: safeCohortId, stageId: safeCohortId }).strict();
@@ -541,18 +561,29 @@ export class LocalAgentService {
     return { outputChars: slots.reduce((sum, slot) => sum + slot.chars, 0), outputTokens: tokens.length ? tokens.reduce((sum, slot) => sum + slot.tokens!, 0) : undefined };
   }
 
-  private command(engine: LocalAgentEngine, args: string[], cwd: string | undefined, input: string, timeoutMs: number, maxBytes: number, entry?: Entry, captureStderr = false, slot = 0): Promise<ProcessResult> {
+  private command(engine: LocalAgentEngine, args: string[], cwd: string | undefined, input: string, timeoutMs: number, maxBytes: number, entry?: Entry, captureStderr = false, slot = 0, stream: 'raw' | 'claude-events' = 'raw'): Promise<ProcessResult> {
     return new Promise(resolve => {
       let child: ChildProcessWithoutNullStreams;
       try { child = this.spawn(engine, args, { cwd, env: childEnvironment(), detached: process.platform !== 'win32', windowsHide: true }); }
       catch { resolve({ code: null, stdout: '', stderr: '', missing: true, limited: false }); return; }
       this.children.add(child);
-      const stdout: Buffer[] = []; const stdoutDecoder = new StringDecoder('utf8'); const stderr: Buffer[] = []; let bytes = 0; let outputChars = 0; let streamedPersonas = 0; let tail = ''; let limited = false; let done = false; let killTimer: NodeJS.Timeout | undefined;
+      const stdout: Buffer[] = []; const stdoutDecoder = new StringDecoder('utf8'); const stderr: Buffer[] = []; let bytes = 0; let outputChars = 0; let streamedPersonas = 0; let tail = ''; let lineBuffer = ''; let limited = false; let done = false; let killTimer: NodeJS.Timeout | undefined;
       const stop = () => { if (done) return; limited = true; terminate(child); killTimer ??= setTimeout(() => { terminate(child, 'SIGKILL'); finish(null, false); }, 1000); killTimer.unref(); };
       const timer = setTimeout(stop, timeoutMs); timer.unref();
       const finish = (code: number | null, missing: boolean) => { if (done) return; done = true; clearTimeout(timer); if (killTimer) clearTimeout(killTimer); this.children.delete(child); entry?.aborts.delete(stop); resolve({ code, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8'), missing, limited }); };
       entry?.aborts.add(stop);
-      child.stdout.on('data', (data: Buffer) => { bytes += data.length; if (bytes > maxBytes) { stop(); return; } stdout.push(Buffer.from(data)); if (entry && !done && !entry.cancelled) { const text = stdoutDecoder.write(data); outputChars += text.length; const window = tail + text; for (const match of window.matchAll(PERSONA_KEY)) if (match.index + match[0].length > tail.length) streamedPersonas++; tail = window.slice(-PERSONA_KEY_TAIL); this.recordActivity(entry, { phase: 'receiving', outputChars, streamedPersonas }, 'cli-stdout', slot); } });
+      child.stdout.on('data', (data: Buffer) => { bytes += data.length; if (bytes > maxBytes) { stop(); return; } stdout.push(Buffer.from(data)); if (entry && !done && !entry.cancelled) {
+        let text = stdoutDecoder.write(data); let tokens: number | undefined;
+        if (stream === 'claude-events') {
+          // One JSON event per line: only content deltas count, so the final assistant and result events that repeat the text never double-count.
+          lineBuffer += text; text = '';
+          const lines = lineBuffer.split('\n'); lineBuffer = lines.pop()!;
+          if (lineBuffer.length > maxBytes) lineBuffer = '';
+          for (const line of lines) { const delta = claudeStreamDelta(line); text += delta.text; if (delta.tokens !== undefined) tokens = delta.tokens; }
+        }
+        outputChars += text.length; const window = tail + text; for (const match of window.matchAll(PERSONA_KEY)) if (match.index + match[0].length > tail.length) streamedPersonas++; tail = window.slice(-PERSONA_KEY_TAIL);
+        this.recordActivity(entry, { phase: 'receiving', outputChars, streamedPersonas, ...(tokens !== undefined ? { outputTokens: tokens } : {}) }, 'cli-stdout', slot);
+      } });
       child.stderr.on('data', (data: Buffer) => { bytes += data.length; if (bytes > maxBytes) { stop(); return; } if (captureStderr) stderr.push(Buffer.from(data)); });
       child.once('error', error => finish(null, (error as NodeJS.ErrnoException).code === 'ENOENT'));
       child.once('close', code => finish(code, false));
@@ -982,12 +1013,17 @@ export class LocalAgentService {
         let args: string[];
         if (input.engine === 'codex') {
           const config = ['approval_policy="never"', 'web_search="disabled"', 'project_doc_max_bytes=0', 'agents.enabled=false', 'apps._default.enabled=false', 'mcp_servers={}', 'features.shell_tool=false', 'features.unified_exec=false', 'features.view_image=false', 'features.apps=false', 'features.plugins=false', 'features.hooks=false', 'features.memories=false', 'features.multi_agent=false', 'features.multi_agent_v2=false', 'features.browser_use=false', 'features.computer_use=false', 'features.image_generation=false', 'features.code_mode=false', 'features.skip_host_skill_discovery=true'];
-          args = ['exec', '--ignore-user-config', '--ephemeral', '--skip-git-repo-check', '--sandbox', 'read-only', '--color', 'never', '--output-schema', schemaPath, '--output-last-message', resultPath, ...config.flatMap(value => ['-c', value]), '-'];
+          args = ['exec', '--json', '--ignore-user-config', '--ephemeral', '--skip-git-repo-check', '--sandbox', 'read-only', '--color', 'never', '--output-schema', schemaPath, '--output-last-message', resultPath, ...config.flatMap(value => ['-c', value]), '-'];
         } else {
-          args = ['--print', '--safe-mode', '--restricted', '--tools', '', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--permission-mode', 'dontAsk', '--no-session-persistence', '--output-format', 'json', '--json-schema', JSON.stringify(outputSchema)];
+          args = ['--print', '--safe-mode', '--restricted', '--tools', '', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--permission-mode', 'dontAsk', '--no-session-persistence', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--json-schema', JSON.stringify(outputSchema)];
         }
         if (entry.cancelled) throw Error();
-        const outcome = await this.command(input.engine, args, directory, prompt, this.timeoutMs, this.maxOutputBytes, entry, false, slot);
+        let outcome = await this.command(input.engine, args, directory, prompt, this.timeoutMs, this.maxOutputBytes, entry, false, slot, input.engine === 'claude' ? 'claude-events' : 'raw');
+        if (input.engine === 'claude' && outcome.code !== 0 && !outcome.limited && !outcome.missing && !entry.cancelled && !outcome.stdout.includes('"type":"result"')) {
+          // A CLI that rejects the streaming flags still drafts, with its result printed only at the end.
+          const plain = args.map((value, index) => args[index - 1] === '--output-format' ? 'json' : value).filter(value => value !== '--verbose' && value !== '--include-partial-messages');
+          outcome = await this.command(input.engine, plain, directory, prompt, this.timeoutMs, this.maxOutputBytes, entry, false, slot);
+        }
         if (entry.cancelled) throw Error();
         if (outcome.limited) throw new DraftFailure('Agent reached its time or output limit. Try a smaller drafting request.');
         if (outcome.code !== 0) throw new DraftFailure('Agent could not finish. Check your CLI login and subscription availability, then try again. Workspace unchanged.');
@@ -995,7 +1031,7 @@ export class LocalAgentService {
           if ((await stat(resultPath)).size > this.maxOutputBytes) throw new DraftFailure('Agent reached its time or output limit. Try a smaller drafting request.');
           payload = JSON.parse(await readFile(resultPath, 'utf8'));
         } else {
-          const envelope = JSON.parse(outcome.stdout) as { is_error?: boolean; structured_output?: unknown; result?: string };
+          const envelope = claudeEnvelope(outcome.stdout);
           if (envelope.is_error) throw new DraftFailure('Agent did not return a valid workspace draft. Try a smaller or more specific request. Workspace unchanged.');
           payload = envelope.structured_output ?? JSON.parse(envelope.result ?? '');
         }

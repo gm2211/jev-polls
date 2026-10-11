@@ -51,7 +51,13 @@ behaviors:
       personas seen in partial output are never counted as accepted before their batch passes its
       checks.
     details: >-
-      Streamed personas are counted from partial CLI output and capped at the batch size. Batch states
+      Streamed personas are counted from partial CLI output and capped at the batch size. The Claude CLI
+      runs in stream-json mode with partial messages, so its content deltas arrive as JSON lines while
+      the batch is written; only deltas are counted (the repeated assistant and result events are not),
+      the final result is read from the result event, and a CLI that rejects the streaming flags is rerun
+      in plain JSON mode with the result printed only at the end. The Codex CLI runs with its JSON event
+      stream, which currently reports a message only once complete, so its batches show no persona count
+      until they finish. Every restriction flag stays on. Batch states
       are connecting, writing (persona N of size), checking, retrying after a failed check (attempt N of
       3) and accepted. ChatGPT streams only counters, so its batches show tokens so far and no persona
       count. The early estimate is labeled rough and gives way to the batch-based estimate after two

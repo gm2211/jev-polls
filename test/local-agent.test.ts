@@ -1326,6 +1326,49 @@ const personaKey = (count: number) => Array.from({ length: count }, (_, index) =
 const batchNumberOf = (child: FakeChild) => requestData(child.input).batch.number as number;
 const stateOf = (service: LocalAgentService, id: string, index: number) => service.get(id)!.progress!.batchDetails?.find(detail => detail.index === index);
 
+const claudeDelta = (partialJson: string) => JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: partialJson } } }) + '\n';
+const claudeResult = (input: string) => JSON.stringify({ type: 'result', is_error: false, structured_output: JSON.parse(cohortBatchResponse(input)) }) + '\n';
+
+test('Claude stream-json deltas raise the persona count mid-batch; the repeated assistant and result events add nothing', async t => {
+  const root = await setup(t); let first!: FakeChild; const release = deferred<void>();
+  const service = new LocalAgentService({ temporaryRoot: root, spawn: fakeSpawner(async ({ args, child }) => {
+    assert.ok(args.includes('stream-json') && args.includes('--verbose') && args.includes('--include-partial-messages'));
+    for (const flag of ['--safe-mode', '--restricted', '--strict-mcp-config', '--no-session-persistence']) assert.ok(args.includes(flag), flag);
+    assert.equal(args[args.indexOf('--tools') + 1], '');
+    if (batchNumberOf(child) === 1) { first = child; await release.promise; }
+    child.stdout.write(claudeResult(child.input)); child.finish();
+  }) }); t.after(() => service.close());
+  const job = service.start({ engine: 'claude', prompt: 'Create 30 adults', revision: 0, document: empty, cohort: { id: 'customers', size: 30 } });
+  await waitFor(() => stateOf(service, job.id, 1)?.state === 'connecting');
+  first.stdout.write(claudeDelta('{"documentJson": "{\\"personas\\":[{\\"label\\":\\"P0\\",\\"background') + 'not json at all\n');
+  await waitFor(() => stateOf(service, job.id, 1)?.state === 'writing');
+  assert.equal(stateOf(service, job.id, 1)!.streamingPersonas, 0, 'a key still being written is not yet counted');
+  first.stdout.write(claudeDelta('\\":\\"x\\"},{\\"label\\":\\"P1\\",\\"background\\":\\"y\\"},'));
+  await waitFor(() => stateOf(service, job.id, 1)?.streamingPersonas === 2);
+  first.stdout.write(JSON.stringify({ type: 'assistant', message: { content: [{ type: 'tool_use', input: { documentJson: personaKey(5) } }] } }) + '\n');
+  first.stdout.write(claudeDelta(personaKey(1).slice(0, 20)));
+  await new Promise(resolve => setTimeout(resolve, 50));
+  assert.equal(stateOf(service, job.id, 1)!.streamingPersonas, 2, 'only content deltas are counted');
+  assert.equal(service.get(job.id)!.progress!.completedPersonas, 0);
+  release.resolve();
+  const done = await terminal(service, job);
+  assert.equal(done.status, 'completed'); assert.equal(done.progress!.completedPersonas, 30);
+});
+
+test('Claude falls back to the single JSON result when the CLI rejects the streaming flags', async t => {
+  const root = await setup(t); const seen: string[] = [];
+  const service = new LocalAgentService({ temporaryRoot: root, spawn: fakeSpawner(async ({ args, child }) => {
+    seen.push(args[args.indexOf('--output-format') + 1]!);
+    if (args.includes('--include-partial-messages')) { child.finish(1); return; }
+    assert.ok(!args.includes('--verbose'));
+    const result = JSON.parse(cohortBatchResponse(child.input)) as { documentJson: string };
+    child.stdout.write(JSON.stringify({ type: 'result', is_error: false, structured_output: { documentJson: result.documentJson, explanation: 'ok' } })); child.finish();
+  }) }); t.after(() => service.close());
+  const done = await terminal(service, service.start({ engine: 'claude', prompt: 'Create 3 adults', revision: 0, document: empty, cohort: { id: 'customers', size: 3 } }));
+  assert.equal(done.status, 'completed'); assert.equal(done.progress!.completedPersonas, 3);
+  assert.equal(seen[0], 'stream-json'); assert.ok(seen.includes('json'));
+});
+
 test('streamed personas rise mid-batch, stay within the batch size, and are never counted as accepted until the batch passes', async t => {
   const root = await setup(t); let first!: FakeChild; const release = deferred<void>();
   const service = new LocalAgentService({ temporaryRoot: root, spawn: fakeSpawner(async ({ args, child }) => {
