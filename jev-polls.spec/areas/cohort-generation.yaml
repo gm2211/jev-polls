@@ -126,6 +126,8 @@ behaviors:
       output), so it moves as people arrive; personas checked and saved are a separate, smaller number,
       and a rough finish time appears from the first seconds. Personas seen in partial output are never
       counted as checked before their batch passes its checks.
+      Until the first persona arrives, the readout says whether the groups are waiting for the AI,
+      thinking before they write, or writing (for example "Groups: 12 thinking, 4 waiting to start").
     details: >-
       Streamed personas are counted from partial CLI output and capped at the batch size. The Claude CLI
       runs in stream-json mode with partial messages, so its content deltas arrive as JSON lines while

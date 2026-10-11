@@ -59,11 +59,25 @@ function draftStatus(job){
     if(/waiting/i.test(job.message||''))return 'Planning who is in the audience: paused briefly, it picks up again on its own.';
     return p.activity==='starting'&&!p.outputChars?'Waiting for '+provider+' to start planning the audience.':'Planning who is in the audience. Personas start arriving after this.';
   }
+  const written=(p.completedPersonas||0)+(p.inFlightPersonas||0),states=draftGroupStates(p);
+  if(!written&&states.writing+states.thinking+states.connecting>0)return states.writing?'Writing the first personas.':states.thinking?provider+' is thinking through the first personas before writing them.':'Waiting for '+provider+' to start writing.';
   return active>1?'Writing personas, '+active+' groups at a time.':'Writing personas.';
+}
+/* How many groups are waiting for a reply, thinking, or writing right now. */
+function draftGroupStates(p){
+  const counts={connecting:0,thinking:0,writing:0};
+  for(const d of Array.isArray(p.batchDetails)?p.batchDetails:[])if(d.state==='connecting'||d.state==='retrying')counts.connecting++;else if(d.state==='thinking')counts.thinking++;else if(d.state==='writing')counts.writing++;
+  return counts;
 }
 function draftDetail(job){
   const p=job.progress||{},checked=p.completedPersonas;
-  return Number.isFinite(checked)&&job.cohort?(checked?checked.toLocaleString('en-US')+' checked and saved':'None checked yet'):'';
+  if(!Number.isFinite(checked)||!job.cohort)return '';
+  if(checked)return checked.toLocaleString('en-US')+' checked and saved';
+  const states=draftGroupStates(p),parts=[];
+  if(states.writing)parts.push(states.writing+' writing');
+  if(states.thinking)parts.push(states.thinking+' thinking');
+  if(states.connecting)parts.push(states.connecting+' waiting to start');
+  return parts.length?'Groups: '+parts.join(', '):'None checked yet';
 }
 function draftSlots(job){
   const p=job.progress||{},total=p.totalPersonas,checked=p.completedPersonas;

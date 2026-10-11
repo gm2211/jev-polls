@@ -1437,6 +1437,11 @@ test('Claude stream-json deltas raise the persona count mid-batch; the repeated 
   }) }); t.after(() => service.close());
   const job = service.start({ engine: 'claude', prompt: 'Create 30 adults', revision: 0, document: empty, cohort: { id: 'customers', size: 30 } });
   await waitFor(() => first !== undefined && stateOf(service, job.id, 1)?.state === 'connecting');
+  first.stdout.write(JSON.stringify({ type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'thinking', thinking: '' } } }) + '\n');
+  first.stdout.write(JSON.stringify({ type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'thinking_delta', thinking: 'The "background": key is planned' } } }) + '\n');
+  await waitFor(() => stateOf(service, job.id, 1)?.state === 'thinking');
+  assert.equal(stateOf(service, job.id, 1)!.outputChars, 0, 'reasoning is never counted as output');
+  assert.equal(stateOf(service, job.id, 1)!.streamingPersonas, 0, 'reasoning never counts personas');
   first.stdout.write(claudeDelta('{"documentJson": "{\\"personas\\":[{\\"label\\":\\"P0\\",\\"background') + 'not json at all\n');
   await waitFor(() => stateOf(service, job.id, 1)?.state === 'writing');
   assert.equal(stateOf(service, job.id, 1)!.streamingPersonas, 0, 'a key still being written is not yet counted');

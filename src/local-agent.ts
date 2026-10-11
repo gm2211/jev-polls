@@ -44,7 +44,7 @@ export interface LocalAgentProgress {
   validation?: { scope: 'batch' | 'final' | 'persona' | 'workspace'; status: 'checking' | 'passed'; checks: string[]; checkedPersonas: number };
 }
 /** A step an audience will be assigned to once it is generated and accepted. */
-export type BatchState = 'connecting' | 'writing' | 'checking' | 'retrying' | 'waiting' | 'accepted';
+export type BatchState = 'connecting' | 'thinking' | 'writing' | 'checking' | 'retrying' | 'waiting' | 'accepted';
 /** Why the AI could not be reached: a transport, rate-limit or overload class error that waiting can clear. */
 export type BackoffCause = 'rate-limit' | 'overload' | 'connection';
 export interface BatchDetail {
@@ -185,19 +185,21 @@ const MAX_BATCH_TIMINGS = 20;
 const personaJsonSchema = z.toJSONSchema(cohortSchema.shape.personas.element);
 /** Provider slot of the cohort setup call; batch slots are their indexes. */
 const SETUP_SLOT = -1;
-interface ProviderProgress { phase: 'starting' | 'generating' | 'receiving'; outputChars: number; outputTokens?: number; streamedPersonas?: number }
+interface ProviderProgress { phase: 'starting' | 'generating' | 'receiving'; outputChars: number; outputTokens?: number; streamedPersonas?: number; /** The model is reasoning before it writes; its reasoning is never counted as output. */ thinking?: boolean }
 /** A persona object carries a background key; the CLI envelope escapes it, so the quotes may be preceded by backslashes. */
 const PERSONA_KEY = /\\*"background\\*"\s*:/g;
 const PERSONA_KEY_TAIL = 24;
-/** Text and token count carried by one Claude CLI stream-json line; every other event contributes nothing. */
-export function claudeStreamDelta(line: string): { text: string; tokens?: number } {
+/** Text and token count carried by one Claude CLI stream-json line, and whether it is the model's reasoning; every other event contributes nothing. */
+export function claudeStreamDelta(line: string): { text: string; tokens?: number; thinking?: boolean } {
   if (!line.startsWith('{')) return { text: '' };
-  let event: { type?: unknown; event?: { type?: unknown; delta?: { type?: unknown; partial_json?: unknown; text?: unknown }; usage?: { output_tokens?: unknown } } };
+  let event: { type?: unknown; event?: { type?: unknown; content_block?: { type?: unknown }; delta?: { type?: unknown; partial_json?: unknown; text?: unknown }; usage?: { output_tokens?: unknown } } };
   try { event = JSON.parse(line); } catch { return { text: '' }; }
   if (event.type !== 'stream_event' || !event.event) return { text: '' };
   const inner = event.event;
   if (inner.type === 'message_delta') { const tokens = inner.usage?.output_tokens; return { text: '', ...(typeof tokens === 'number' && Number.isSafeInteger(tokens) && tokens >= 0 ? { tokens } : {}) }; }
+  if (inner.type === 'content_block_start' && (inner.content_block?.type === 'thinking' || inner.content_block?.type === 'redacted_thinking')) return { text: '', thinking: true };
   if (inner.type !== 'content_block_delta' || !inner.delta) return { text: '' };
+  if (inner.delta.type === 'thinking_delta' || inner.delta.type === 'signature_delta') return { text: '', thinking: true };
   const text = inner.delta.type === 'input_json_delta' ? inner.delta.partial_json : inner.delta.type === 'text_delta' ? inner.delta.text : '';
   return { text: typeof text === 'string' ? text : '' };
 }
@@ -399,7 +401,7 @@ function dumpCliCall(jobId: string | undefined, engine: string, slot: number, pr
 }
 interface ProcessResult { code: number | null; stdout: string; stderr: string; missing: boolean; limited: boolean; timedOut?: boolean }
 interface ProviderSlot { chars: number; tokens?: number }
-interface StreamedBatch { personas: number; chars: number; tokens?: number }
+interface StreamedBatch { personas: number; chars: number; tokens?: number; thinking?: boolean }
 interface Entry { public: LocalAgentJob; work?: Promise<void>; aborts: Set<() => void>; slots: Map<number, ProviderSlot>; streamed: Map<number, StreamedBatch>; cancelled: boolean; settled: boolean; command?: boolean; describeBatches?: () => { batchDetails: BatchDetail[]; inFlightPersonas: number; estimate?: LocalAgentProgress['estimate'] }; disposition?: 'applied' | 'discarded' }
 class DraftFailure extends Error {}
 /** The AI call itself failed or returned something unreadable; `reason` names what, `excerpt` is the start of the offending output. */
@@ -762,7 +764,7 @@ export class LocalAgentService {
     entry.slots.set(slot, { chars: Math.max(current.chars, activity.outputChars), ...(tokens !== undefined && Number.isSafeInteger(tokens) && tokens >= 0 ? { tokens } : current.tokens !== undefined ? { tokens: current.tokens } : {}) });
     const seen = entry.streamed.get(slot) ?? { personas: 0, chars: 0 };
     const personas = activity.streamedPersonas;
-    entry.streamed.set(slot, { personas: Math.max(seen.personas, personas !== undefined && Number.isSafeInteger(personas) && personas >= 0 ? personas : 0), chars: Math.max(seen.chars, activity.outputChars), ...(entry.slots.get(slot)?.tokens !== undefined ? { tokens: entry.slots.get(slot)!.tokens } : {}) });
+    entry.streamed.set(slot, { personas: Math.max(seen.personas, personas !== undefined && Number.isSafeInteger(personas) && personas >= 0 ? personas : 0), chars: Math.max(seen.chars, activity.outputChars), ...(activity.thinking || seen.thinking ? { thinking: true } : {}), ...(entry.slots.get(slot)?.tokens !== undefined ? { tokens: entry.slots.get(slot)!.tokens } : {}) });
     this.updateProgress(entry, 'generating', entry.public.message, { activity: activity.phase, lastActivityAt: new Date().toISOString(), outputSource, ...this.providerTotals(entry), ...this.streamingSummary(entry) });
   }
 
@@ -797,16 +799,16 @@ export class LocalAgentService {
       };
       entry?.aborts.add(stop); signal?.addEventListener('abort', stop, { once: true });
       child.stdout.on('data', (data: Buffer) => { bytes += data.length; if (bytes > maxBytes) { stop(); return; } stdout.push(Buffer.from(data)); if (entry && !done && !entry.cancelled) {
-        let text = stdoutDecoder.write(data); let tokens: number | undefined;
+        let text = stdoutDecoder.write(data); let tokens: number | undefined; let thinking = false;
         if (stream === 'claude-events') {
           // One JSON event per line: only content deltas count, so the final assistant and result events that repeat the text never double-count.
           lineBuffer += text; text = '';
           const lines = lineBuffer.split('\n'); lineBuffer = lines.pop()!;
           if (lineBuffer.length > maxBytes) lineBuffer = '';
-          for (const line of lines) { const delta = claudeStreamDelta(line); text += delta.text; if (delta.tokens !== undefined) tokens = delta.tokens; }
+          for (const line of lines) { const delta = claudeStreamDelta(line); text += delta.text; if (delta.tokens !== undefined) tokens = delta.tokens; if (delta.thinking) thinking = true; }
         }
         outputChars += text.length; const window = tail + text; for (const match of window.matchAll(PERSONA_KEY)) if (match.index + match[0].length > tail.length) streamedPersonas++; tail = window.slice(-PERSONA_KEY_TAIL);
-        this.recordActivity(entry, { phase: 'receiving', outputChars, streamedPersonas, ...(tokens !== undefined ? { outputTokens: tokens } : {}) }, 'cli-stdout', slot);
+        this.recordActivity(entry, { phase: 'receiving', outputChars, streamedPersonas, ...(tokens !== undefined ? { outputTokens: tokens } : {}), ...(thinking ? { thinking } : {}) }, 'cli-stdout', slot);
       } });
       child.stderr.on('data', (data: Buffer) => { bytes += data.length; if (bytes > maxBytes) { stop(); return; } if (captureStderr || process.env.JEV_AGENT_DEBUG_DIR) stderr.push(Buffer.from(data)); });
       child.once('error', error => finish(null, (error as NodeJS.ErrnoException).code === 'ENOENT'));
@@ -1080,7 +1082,7 @@ export class LocalAgentService {
         const seen = second && (second.personas > first.personas || second.personas === first.personas && second.chars > first.chars) ? second : first;
         const contentStreamed = entry.public.progress?.outputSource !== 'response';
         const wrote = seen.chars > 0 || seen.tokens !== undefined && seen.tokens > 0;
-        const batchState: BatchState = state.waiting ? 'waiting' : state.checking ? 'checking' : wrote ? 'writing' : state.attempt > 1 ? 'retrying' : 'connecting';
+        const batchState: BatchState = state.waiting ? 'waiting' : state.checking ? 'checking' : wrote ? 'writing' : seen.thinking ? 'thinking' : state.attempt > 1 ? 'retrying' : 'connecting';
         return { index: index + 1, size, state: batchState, attempt: state.attempt, maxAttempts: 1 + BATCH_RETRIES, streamingPersonas: contentStreamed ? Math.min(size, seen.personas) : 0, outputChars: seen.chars, ...(seen.tokens !== undefined ? { outputTokens: seen.tokens } : {}), contentStreamed, startedAt: state.attemptStartedAt, ...(state.waiting ? { wait: state.waiting } : {}), ...(state.hedged ? { hedged: true } : {}) };
       });
       const inFlightPersonas = batchDetails.reduce((sum, detail) => sum + detail.streamingPersonas, 0);
