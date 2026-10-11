@@ -1163,6 +1163,63 @@ test('cancelling stops every in-flight concurrent batch and starts no more', asy
   assert.equal(state.running, 0); assert.equal(service.get(job.id)?.proposal, undefined); assert.equal(service.get(job.id)?.status, 'cancelled');
 });
 
+async function checkpointFiles(directory: string): Promise<string[]> { try { return (await readdir(directory)).filter(name => name.endsWith('.json')); } catch { return []; } }
+async function waitForFiles(directory: string, check: (files: string[]) => boolean) { let files: string[] = []; for (let i = 0; i < 400; i++) { files = await checkpointFiles(directory); if (check(files)) return files; await new Promise(resolve => setTimeout(resolve, 5)); } assert.fail(`checkpoint files never matched: ${files.join(', ')}`); }
+
+test('a failed cohort run keeps its checked personas on disk, survives a restart and continues without redoing them', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'jev-checkpoints-')); t.after(() => rm(directory, { recursive: true, force: true }));
+  const first = countingDraft({ fail: batch => batch === 2 });
+  const service = new LocalAgentService({ chatgpt: first.client, checkpointDirectory: directory });
+  const failed = await terminal(service, service.start(batchRequest(25 * 3)));
+  assert.equal(failed.status, 'failed'); assert.deepEqual(failed.resumable, { keptPersonas: 65 }, 'every batch but the failed one (75 personas are 8 batches of 9 or 10)');
+  await service.close();
+  assert.deepEqual(await checkpointFiles(directory), [`${failed.id}.json`]);
+
+  // A new service on the same folder is the app after a restart.
+  const second = countingDraft();
+  const restarted = new LocalAgentService({ chatgpt: second.client, checkpointDirectory: directory }); t.after(() => restarted.close());
+  const stopped = restarted.get(failed.id)!;
+  assert.equal(stopped.status, 'failed'); assert.deepEqual(stopped.resumable, { keptPersonas: 65 });
+  assert.match(stopped.message, /stopped when the app restarted\. 65 of 75 personas were checked and kept/);
+  assert.equal(stopped.progress?.completedPersonas, 65);
+  assert.deepEqual(restarted.list().map(job => job.id), [failed.id], 'a reloaded tab finds the stopped run');
+  assert.throws(() => restarted.start({ ...batchRequest(25 * 4), resumeFrom: failed.id }), LocalAgentError, 'a different size cannot continue it');
+  assert.throws(() => restarted.start({ ...batchRequest(25 * 3), prompt: 'Something else', resumeFrom: failed.id }), LocalAgentError, 'a different brief cannot continue it');
+
+  const continued = restarted.start({ ...batchRequest(25 * 3), resumeFrom: failed.id });
+  assert.equal(continued.progress?.completedPersonas, 65, 'the kept personas count from the start');
+  const done = await terminal(restarted, continued);
+  assert.equal(done.status, 'completed');
+  assert.equal(second.state.setups, 0, 'the saved audience plan is reused'); assert.deepEqual(second.state.calls, [2], 'only the missing batch is written');
+  const personas = done.proposal!.document.cohorts[0]!.personas;
+  assert.deepEqual(personas.map(persona => persona.id), Array.from({ length: 75 }, (_, index) => `persona-${String(index + 1).padStart(5, '0')}`));
+  assert.deepEqual(personas.map(persona => persona.label).slice(0, 3), ['Persona 1', 'Persona 2', 'Persona 3']);
+  assert.equal(personas[10]!.label, 'Persona 11'); assert.equal(personas[20]!.label, 'Persona 21');
+  assert.equal(restarted.get(failed.id), undefined, 'the stopped run is replaced by the one continuing it');
+  await waitForFiles(directory, files => files.length === 1 && files[0] === `${done.id}.json`);
+  restarted.settle(done.id, 'applied');
+  await waitForFiles(directory, files => files.length === 0);
+});
+
+test('stopping the app mid-run keeps the checked personas; cancelling forgets them', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'jev-checkpoints-')); t.after(() => rm(directory, { recursive: true, force: true }));
+  let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; }); t.after(() => release());
+  const { client } = countingDraft({ hold: batch => batch === 1 ? undefined : gate });
+  const service = new LocalAgentService({ chatgpt: client, checkpointDirectory: directory });
+  const running = service.start(batchRequest(1000));
+  await waitFor(() => service.get(running.id)!.progress?.completedBatches === 1);
+  const kept = service.get(running.id)!.progress!.completedPersonas!;
+  await service.close();
+  const restarted = new LocalAgentService({ chatgpt: client, checkpointDirectory: directory }); t.after(() => restarted.close());
+  const stopped = restarted.get(running.id)!;
+  assert.equal(stopped.status, 'failed'); assert.deepEqual(stopped.resumable, { keptPersonas: kept }); assert.equal(kept, batchSizes(1000)[0]);
+
+  const cancelled = restarted.start({ ...batchRequest(1000), resumeFrom: running.id });
+  await waitFor(() => restarted.get(cancelled.id)!.progress?.phase === 'generating');
+  restarted.cancel(cancelled.id);
+  await waitForFiles(directory, files => files.length === 0);
+});
+
 test('listing returns running jobs and the newest unsettled finished job for one project only', async t => {
   const gate = deferred<{ connected: boolean; planEnabled: boolean }>();
   let ready = false;
