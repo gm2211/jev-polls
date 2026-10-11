@@ -100,7 +100,7 @@ function arenaAfterRender(){
   const ctx=arenaInput(run,false);A.ctx=ctx;A.question=ctx.question;
   A.sigs=new Map(ctx.members.map(member=>[lvm.memberKey(member),lvm.signature(member)]));
   A.members=new Map(ctx.members.map(member=>[lvm.memberKey(member),member]));
-  A.newsSig=ctx.news.slice(0,4).map(line=>line.n+line.text).join('|');A.tabKey=ctx.tabKey;A.shares=new Map(ctx.board.rows.map(row=>[row.id,row.share]));
+  clearTimeout(A.placeTimer);A.placeTimer=0;A.pendingBoard=null;A.placedAt=undefined;A.newsSig=ctx.news.slice(0,4).map(line=>line.n+line.text).join('|');A.tabKey=ctx.tabKey;A.shares=new Map(ctx.board.rows.map(row=>[row.id,row.share]));
   A.rows=new Map([...el.querySelectorAll('.lv-row')].map(row=>[row.dataset.opt,row]));
   A.refs={news:el.querySelector('[data-lv=news]'),bar:el.querySelector('[data-lv=bar]'),progress:el.querySelector('.lv-progress'),done:el.querySelector('[data-lv=done]'),running:el.querySelector('[data-lv=running]'),failed:el.querySelector('[data-lv=failed]'),rate:el.querySelector('[data-lv=rate]'),left:el.querySelector('[data-lv=left]'),message:el.querySelector('[data-lv=message]'),boardSub:el.querySelector('[data-lv=board-sub]'),detail:el.querySelector('[data-lv=detail]'),legend:el.querySelector('[data-lv=legend]'),map:el.querySelector('.lv-map'),groups:el.querySelector('.lv-groups'),tip:el.querySelector('.lv-tip')};
   const map=A.refs.map;
@@ -171,22 +171,33 @@ function arenaPatchChrome(ctx,run){
   if(r.message&&live)r.message.textContent=run.message||'';
   if(r.legend&&ctx.colorBy==='status'){for(const key of ['queued','running','done','failed']){const node=r.legend.querySelector('[data-lv=count-'+key+']');if(node)node.textContent=s[key].toLocaleString('en-US')}}
   const board=ctx.board,rows=board.rows,max=Math.max(0.0001,...rows.map(row=>row.share));
-  rows.forEach((row,rank)=>{
-    const li=A.rows.get(row.id);if(!li)return;
-    li.style.setProperty('--rank',String(Math.min(rank,lvv.BOARD_ROWS)));li.style.setProperty('--w',String(Math.round(row.share/max*1000)/1000));
-    li.dataset.leader=String(board.leader===row.id);li.dataset.hidden=String(rank>=lvv.BOARD_ROWS);
-    const was=Number(li.dataset.rank),badge=li.querySelector('.lv-rank');if(badge)badge.textContent=String(rank+1);
-    if(Number.isFinite(was)&&was!==rank&&board.evaluated>=15&&!reducedMotion()){li.classList.remove('is-moved');void li.offsetWidth;li.classList.add('is-moved')}
-    li.dataset.rank=String(rank);
+  for(const row of rows){
+    const li=A.rows.get(row.id);if(!li)continue;
+    li.style.setProperty('--w',String(Math.round(row.share/max*1000)/1000));
     const text=(Math.round(row.share*1000)/10).toFixed(1)+'%',pct=li.querySelector('.lv-pct');
     if(pct&&pct.textContent!==text)pct.textContent=text;
     A.shares.set(row.id,row.share);
-  });
+  }
+  // Bars and percentages follow every poll; rows change slot at most every 500ms so each move settles before the next starts.
+  const now=lvNow();
+  if((run.status!=='running'&&!R.playing)||A.placedAt===undefined||now-A.placedAt>=500)arenaPlaceRows(board);
+  else{A.pendingBoard=board;if(!A.placeTimer)A.placeTimer=setTimeout(()=>{A.placeTimer=0;if(A.pendingBoard&&A.el?.isConnected)arenaPlaceRows(A.pendingBoard)},Math.max(0,500-(now-A.placedAt)))}
   if(r.news){const sig=ctx.news.slice(0,4).map(line=>line.n+line.text).join('|');if(A.newsSig!==sig){A.newsSig=sig;r.news.innerHTML=lvv.newsItems(ctx.news.slice(0,4))}}
   if(r.boardSub)r.boardSub.textContent=ctx.question?.type==='score'&&board.mean!==null?'Mean score '+Math.round(board.mean*100)/100:board.evaluated?(board.weighted?'Weighted share':'Equal-weight share')+' of '+board.evaluated.toLocaleString('en-US')+' evaluated':'Fills in as members vote';
   const scrub=A.el.querySelector('[data-lv=scrub-text]');
   if(scrub&&ctx.replay){scrub.textContent=Math.floor(ctx.replay.cursor).toLocaleString('en-US')+' of '+ctx.replay.total.toLocaleString('en-US')+(ctx.replay.total===1?' member':' members')+' revealed';const range=A.el.querySelector('[data-arena-scrub]');if(range&&document.activeElement!==range)range.value=String(ctx.replay.cursor);const play=A.el.querySelector('[data-act=arena-play]');if(play){play.textContent=ctx.replay.playing?'Pause':'Play';play.setAttribute('aria-pressed',String(ctx.replay.playing))}}
   const selected=ctx.selected;if(selected&&r.detail&&A.detailSig!==lvm.signature(selected)+S.liveMemberKey){A.detailSig=lvm.signature(selected)+S.liveMemberKey;arenaDetail(ctx)}
+}
+/** Move every leaderboard row to the slot of its rank, together, so no two rows share a slot. */
+function arenaPlaceRows(board){
+  A.placedAt=lvNow();A.pendingBoard=null;
+  for(const slot of lvv.rowSlots(board.rows,board.leader)){
+    const li=A.rows.get(slot.id);if(!li)continue;
+    li.style.setProperty('--rank',String(slot.slot));li.dataset.leader=String(slot.leader);li.dataset.hidden=String(slot.hidden);
+    const was=Number(li.dataset.rank),badge=li.querySelector('.lv-rank');if(badge)badge.textContent=String(slot.rank+1);
+    if(Number.isFinite(was)&&was!==slot.rank&&board.evaluated>=15&&!reducedMotion()){li.classList.remove('is-moved');void li.offsetWidth;li.classList.add('is-moved')}
+    li.dataset.rank=String(slot.rank);
+  }
 }
 function arenaDetail(ctx){const member=ctx.selected;A.refs.detail.dataset.has=String(!!member);A.refs.detail.innerHTML=lvv.detailHtml(member,{question:ctx.question,questions:ctx.questions,segmentLabel:member?ctx.segmentLabels[member.segment]||member.segment:'',hidden:ctx.selectedHidden})}
 
