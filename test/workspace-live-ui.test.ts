@@ -277,3 +277,16 @@ test('the client places rows together at most every 500ms and drops stale placem
   assert.match(controls, /now-A\.placedAt>=500/);
   assert.doesNotMatch(controls.slice(controls.indexOf('for(const row of rows)'), controls.indexOf('const now=lvNow()')), /--rank|dataset\.rank|lv-rank/, 'a poll updates shares only; ranks move in arenaPlaceRows');
 });
+
+test('the finished view shows the study cost: an amount and one detail line, with reused answers free', () => {
+  assert.deepEqual(model.costSummary({ inputTokens: 2_000_000, outputTokens: 500_000, requests: 1_008, cacheHits: 36 }, 'typesafe', 0.039), { amount: 'About $0.10', detail: '1,008 requests · 2.5M tokens · 36 answers reused free' });
+  assert.deepEqual(model.costSummary({ inputTokens: 900, outputTokens: 100, requests: 1, cacheHits: 0 }, 'typesafe', 0.039), { amount: 'Under $0.001', detail: '1 request · 1K tokens' });
+  assert.equal(model.costSummary({ inputTokens: 0, outputTokens: 0, requests: 0, cacheHits: 12 }, 'typesafe', 0.039)?.amount, '$0.00');
+  assert.equal(model.costSummary({ inputTokens: 0, outputTokens: 0, requests: 12, cacheHits: 0 }, 'typesafe', 0.039)?.detail, 'Demo answers · 12 requests');
+  assert.equal(model.costSummary({ inputTokens: 0, outputTokens: 0, requests: 3, cacheHits: 0, tokenUsage: 'unreported' }, 'gliner', 0.039)?.amount, 'Nothing billed');
+  assert.equal(model.costSummary(undefined, 'typesafe', 0.039), null);
+  const html = view.resultsHtml({ summary: 'A leads overall at 40%.', cost: { amount: 'About $0.10', detail: '1,008 requests · 2.5M tokens' }, segments: [] }, undefined);
+  assert.match(view.statsHtml({ done: 48, total: 48, failed: 0, running: 0, rateText: '', leftText: '' }, false, false, { amount: 'About $0.10', detail: '' }), /<span>Study cost<\/span><strong data-lv="cost">About \$0\.10<\/strong>/);
+  assert.doesNotMatch(view.statsHtml({ done: 4, total: 48, failed: 0, running: 1, rateText: '', leftText: '' }, true, false, { amount: 'About $0.10', detail: '' }), /Study cost/, 'no cost while the run is live');
+  assert.match(html, /<div class="lv-cost"[^>]*><span>Study cost<\/span><strong>About \$0\.10<\/strong><small>1,008 requests · 2\.5M tokens<\/small><\/div><\/section>$/);
+});

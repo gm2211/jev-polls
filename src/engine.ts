@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type {
   Answer, ChoiceQuestion, ChooseStage, Cohort, Condition, Evaluation, EvaluationRequest, Json, Persona, Pipeline, PollInputBinding, PollStage,
-  Provider, Question, QuestionSummary, RunOptions, RunRecord, Stage, StageLayer, StageResult, Vote,
+  Provider, Question, QuestionSummary, RunOptions, RunRecord, Stage, StageLayer, StageResult, StageUsage, Vote,
 } from './types.js';
 import { summarizeVotes } from './analysis.js';
 import { ProviderError, probabilitySumTolerance, scoreMeanTolerance, type ProviderResponseIssue } from './provider.js';
@@ -262,6 +262,7 @@ export async function runPipeline(pipeline: Pipeline, cohorts: Record<string, Co
   const pipelineHash = hashValue(pipeline);
   const stages: Record<string, StageResult> = {};
   const usage: RunRecord['usage'] = { inputTokens: 0, outputTokens: 0, requests: 0, cacheHits: 0, ...(options.provider.name === 'gliner' ? { tokenUsage: 'unreported' as const } : {}) };
+  const stageUsage = new Map<string, StageUsage>();
   const warnings: string[] = [];
   if (options.provider.name === 'gliner') warnings.push('GLiNER local classifier: distributions are relative normalized independent sigmoid label scores, not calibrated probabilities or human observations. Native scores and logits are retained in each answer; confidence and token billing are unreported. Repeats are deterministic with this model.');
   let pending = new Set(order.map((stage) => stage.id));
@@ -274,16 +275,21 @@ export async function runPipeline(pipeline: Pipeline, cohorts: Record<string, Co
     let evaluation = options.cacheDir && !options.refresh ? await loadCached(options.cacheDir, requestKey, request, request.questions) : undefined;
     const cacheHit = Boolean(evaluation);
     options.onRequest?.({ stage: stageId, cacheHit });
-    if (evaluation) usage.cacheHits += 1;
+    const spent = stageUsage.get(stageId) ?? { inputTokens: 0, outputTokens: 0, requests: 0, cacheHits: 0 };
+    stageUsage.set(stageId, spent);
+    if (evaluation) { usage.cacheHits += 1; spent.cacheHits += 1; }
     else {
       evaluation = await limiter.run(async () => {
         if (usage.requests >= maximum) throw new RequestLimitError();
         usage.requests += 1;
+        spent.requests += 1;
         const result = await options.provider.evaluate(request);
         try { validateEvaluation(result, request.questions); }
         catch { throw new InvalidEvaluationError(); }
         usage.inputTokens += result.usage.inputTokens;
         usage.outputTokens += result.usage.outputTokens;
+        spent.inputTokens += result.usage.inputTokens;
+        spent.outputTokens += result.usage.outputTokens;
         if (result.usage.measuredInputTokens !== undefined) usage.measuredInputTokens = (usage.measuredInputTokens ?? 0) + result.usage.measuredInputTokens;
         if (options.cacheDir) await saveCached(options.cacheDir, requestKey, request, result);
         return result;
@@ -588,7 +594,7 @@ export async function runPipeline(pipeline: Pipeline, cohorts: Record<string, Co
     seed: options.seed,
     status: failed ? 'failed' : 'completed',
     cohorts,
-    stages,
+    stages: Object.fromEntries(Object.entries(stages).map(([id, stage]) => [id, stageUsage.has(id) ? { ...stage, usage: stageUsage.get(id)! } : stage])),
     warnings,
     usage,
   };

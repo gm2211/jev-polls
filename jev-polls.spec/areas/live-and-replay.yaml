@@ -186,3 +186,11 @@ behaviors:
     description: >-
       Tiles and counts describe evaluations of synthetic profiles, not audience share, and colours
       show model output, not observed human behavior.
+  - id: results-cost
+    description: >-
+      When a run has finished, the results view shows the study cost: a Study cost figure in the
+      progress strip and, under the results, the amount with requests, tokens and answers reused
+      free. Nothing is shown while the run is live.
+    source:
+      text: we should include cost of study in recap view and in report
+      reference: jev-polls project thread "Study cost in recap and report", Giulio, 2026-10-12

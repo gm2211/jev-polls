@@ -263,6 +263,8 @@ test('cache reuses exact requests and changes when state changes', async () => {
     assert.equal(first.usage.cacheHits, 0);
     assert.equal(second.usage.cacheHits, 4);
     assert.equal(provider.calls, 4);
+    assert.deepEqual(first.stages.poll?.usage, { inputTokens: 40, outputTokens: 8, requests: 4, cacheHits: 0 }, 'each step records what it spent');
+    assert.deepEqual(second.stages.poll?.usage, { inputTokens: 0, outputTokens: 0, requests: 0, cacheHits: 4 }, 'reused answers spend nothing');
     const changed = { ...original, context: { changed: true } };
     const third = await runPipeline(changed, { audience: cohort }, options(provider, { cacheDir }));
     assert.equal(third.usage.cacheHits, 0);

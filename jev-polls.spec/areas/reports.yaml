@@ -72,3 +72,16 @@ behaviors:
     source:
       text: fix everything (audit item 12, report styling)
       reference: jev-polls project thread "UI audit in headless browser", Giulio, 2026-10-10
+  - id: run-cost
+    description: >-
+      The report shows what the run cost: a Cost section before How this was made with the total
+      (estimated dollars, requests sent, tokens, answers reused from earlier runs) and a per-step
+      table, and the header line states the total.
+    details: >-
+      Dollars are the tokens the run actually spent at the observed TypeSafe rate used by the
+      pre-run estimate. Answers reused from saved runs are free, skipped steps cost nothing, demo
+      and GLiNER runs say nothing was billed, and runs saved before steps recorded their own usage
+      show only the total.
+    source:
+      text: we should include cost of study in recap view and in report
+      reference: jev-polls project thread "Study cost in recap and report", Giulio, 2026-10-12
