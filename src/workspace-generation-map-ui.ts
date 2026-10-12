@@ -15,7 +15,7 @@ export const GENERATION_MAP_CSS = `
 .live-seat[data-state=checking]{border-style:solid;border-color:var(--seg);background:color-mix(in srgb,var(--seg) 22%,transparent)}
 .live-seat[data-state=retry]{border-color:var(--amber);background:var(--amber-soft)}
 .live-seat[data-state=done]{border-style:solid;border-color:var(--seg);background:color-mix(in srgb,var(--seg) 30%,var(--surface));animation:live-seat-land .45s cubic-bezier(.2,1.6,.4,1)}
-.live-seat[aria-pressed=true]{outline:2px solid var(--ink);outline-offset:1px}
+.live-seat:hover{box-shadow:inset 0 0 0 1px var(--seg)}.live-seat[aria-pressed=true]{outline:2px solid var(--ink);outline-offset:1px}
 .live-seat:focus-visible{outline:3px solid var(--focus,var(--blue));outline-offset:2px}
 .live-map-detail{font-size:var(--text-sm);min-height:64px;overflow-wrap:anywhere}
 .live-map-detail h4{margin:0 0 2px;font:600 var(--text-md) var(--body);display:flex;align-items:center;gap:8px;flex-wrap:wrap}

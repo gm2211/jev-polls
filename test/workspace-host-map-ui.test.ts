@@ -11,20 +11,25 @@ function harness() {
   return context.api;
 }
 const cohort = {id:'audience', name:'Audience', segments:[{id:'a',label:'Segment A',weightBasis:'assumed'}], sources:[], personas:Array.from({length:53},(_,i)=>({id:'p'+i,label:'Person '+i,segment:'a',background:'Synthetic <profile>',weight:2,syntheticFields:['background']}))};
-test('host map bounds members, groups segments, and paginates without changing selection', () => {
+test('host map is the generation seat map: every member, a coloured row per segment, paged only past 1,000', () => {
   const api=harness();
   const first=api.hostMap(cohort,{key:'flow'});
-  assert.equal((first.match(/class="host-member"/g)||[]).length,48);
-  assert.match(first,/Segment A/);
-  assert.match(first,/1–48 of 53 synthetic members/);
-  api.hostMapAction('host-member',{dataset:{map:'flow',id:'p2'}});
-  api.hostMapAction('host-page',{dataset:{map:'flow',page:'1'}});
-  assert.equal(api.hostMapMember(cohort,'flow').id,'p2');
-  const second=api.hostMap(cohort,{key:'flow'});
-  assert.equal((second.match(/class="host-member"/g)||[]).length,5);
-  assert.match(second,/49–53 of 53/);
-  api.hostMapAction('host-page',{dataset:{map:'flow',page:'900'}});
-  assert.match(api.hostMap(cohort,{key:'flow'}),/49–53 of 53/);
+  assert.equal((first.match(/class="live-seat"/g)||[]).length,53);
+  assert.match(first,/class="live-map host-map/);
+  assert.match(first,/style="--seg:var\(--seg-0\)"/);
+  assert.match(first,/Segment A<span>53<\/span>/);
+  assert.match(first,/53 synthetic members/);
+  assert.doesNotMatch(first,/Next members/);
+  const big={...cohort,personas:Array.from({length:1003},(_,i)=>({...cohort.personas[0],id:'b'+i}))};
+  api.hostMapAction('host-member',{dataset:{map:'big',id:'b2'}});
+  assert.match(api.hostMap(big,{key:'big'}),/1–1000 of 1,003/);
+  api.hostMapAction('host-page',{dataset:{map:'big',page:'1'}});
+  assert.equal(api.hostMapMember(big,'big').id,'b2');
+  const second=api.hostMap(big,{key:'big'});
+  assert.equal((second.match(/class="live-seat"/g)||[]).length,3);
+  assert.match(second,/1001–1003 of 1,003/);
+  api.hostMapAction('host-page',{dataset:{map:'big',page:'900'}});
+  assert.match(api.hostMap(big,{key:'big'}),/1001–1003 of 1,003/);
 });
 test('host map uses keyboard buttons, escaped labels, provenance and independent map state', () => {
   const api=harness();
@@ -46,5 +51,5 @@ test('pipeline member selection replaces map with focused detail and returns wit
   assert.match(focused,/Selected synthetic member/);assert.match(focused,/Previous member/);assert.match(focused,/Next member/);
   assert.doesNotMatch(focused,/host-map-members/);
   api.hostMapAction('host-member-close',{dataset:{map:key}});
-  assert.match(api.flowCohortMap(pipeline,stage),/25–48 of 53/);
+  assert.match(api.flowCohortMap(pipeline,stage),/53 synthetic members/);
 });
