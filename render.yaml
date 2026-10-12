@@ -1,0 +1,25 @@
+# Render Blueprint: one free web service running the workspace in hosted demo mode.
+# Free instances sleep after 15 idle minutes and lose local files on every sleep,
+# restart or deploy, so treat this as a shareable demo, not where your studies live.
+services:
+  - type: web
+    name: jev-polls
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build:byos
+    startCommand: node --import tsx src/cli.ts workspace --directory .jev-polls/workspace
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      # Mock answers only: Run study never calls TypeSafe or bills anyone.
+      - key: JEV_POLLS_DEMO
+        value: "1"
+      # Shared password for the whole site (at least 12 characters). Render asks for it on first deploy.
+      - key: JEV_POLLS_PASSWORD
+        sync: false
+      # Optional drafting key so Generate cohort and Ask AI work. Add others the same way:
+      # XAI_API_KEY, OPENROUTER_API_KEY, GROQ_API_KEY, HF_TOKEN.
+      - key: ANTHROPIC_API_KEY
+        sync: false
