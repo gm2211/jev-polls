@@ -843,7 +843,8 @@ test('a used audience keeps its generated draft on the server until the save lan
   assert.equal(S.dirty, false);
 });
 
-test('a generated audience survives a server restart and a browser refresh right after it is used', async t => {
+/** A real workspace server whose drafting service holds one finished 1,000-person audience for the study's first step. */
+async function audienceServerFixture(t: any) {
   const directory = await mkdtemp(join(tmpdir(), 'jev-audience-restart-'));
   t.after(() => rm(directory, { recursive: true, force: true }));
   const persona = { id: 'alex', label: 'Alex', age: 30, segment: 'players', background: 'Enjoys strategy games', attributes: {}, sourceIds: [], syntheticFields: ['background'], weight: 1 };
@@ -865,6 +866,11 @@ test('a generated audience survives a server restart and a browser refresh right
   });
   const options = (port?: number) => ({ directory, port, getAuthStatus: async () => ({ configured: false, source: 'none' as const }), localAgents: agents() });
   const until = async (ready: () => boolean) => { for (let i = 0; i < 500 && !ready(); i++) await new Promise(resolve => setTimeout(resolve, 10)); assert.ok(ready()); };
+  return { directory, job, drafts, options, until, seed };
+}
+
+test('a generated audience survives a server restart and a browser refresh right after it is used', async t => {
+  const { job, drafts, options, until } = await audienceServerFixture(t);
 
   const first = await startWorkspaceServer(options());
   let firstOpen = true; t.after(() => firstOpen ? first.close() : undefined);
@@ -886,6 +892,31 @@ test('a generated audience survives a server restart and a browser refresh right
   const doc = after.client.S.doc;
   assert.equal(doc.cohorts.find((c: any) => c.id === 'gamers')?.personas.length, 1000);
   assert.equal(doc.pipelines[0].cohorts[doc.pipelines[0].stages[0].cohort], 'gamers', 'the step still points at the audience');
+});
+
+test('a finished audience stays on offer and usable after other edits are saved, and keeps unsaved ones', async t => {
+  const { directory, job, drafts, options, until } = await audienceServerFixture(t);
+  const server = await startWorkspaceServer(options());
+  t.after(() => server.close());
+  const before = browserHarness(true, new Map(), server.url);
+  await until(() => before.client.S.revision === 1);
+  // Another edit is saved while the audience waits to be used.
+  before.client.S.doc.pipelines[0].name = 'Renamed study'; before.client.S.dirty = true;
+  before.client.act(null, { dataset: { act: 'save' } });
+  await until(() => before.client.S.revision === 2 && !before.client.S.dirty);
+
+  const after = browserHarness(true, new Map(), server.url);
+  await until(() => after.client.S.revision === 2);
+  await after.client.recoverDraftingJob();
+  await until(() => after.client.S.localJob?.id === job.id);
+  after.client.S.doc.pipelines[0].description = 'Unsaved edit'; after.client.S.dirty = true;
+  after.client.adoptCohortProposal();
+  await until(() => !after.client.S.dirty && drafts.settled.length === 1);
+  const saved = (await new WorkspaceStore(directory).read()).document as any;
+  assert.equal(saved.cohorts.find((c: any) => c.id === 'gamers')?.personas.length, 1000);
+  assert.equal(saved.pipelines[0].name, 'Renamed study');
+  assert.equal(saved.pipelines[0].description, 'Unsaved edit');
+  assert.equal(saved.pipelines[0].cohorts[saved.pipelines[0].stages[0].cohort], 'gamers');
 });
 
 test('cohort generation preserves unsaved edits and rejects stale proposal adoption', async () => {

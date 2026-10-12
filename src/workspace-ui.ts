@@ -365,7 +365,8 @@ async function retryCohortJob(){
 }
 function adoptCohortProposal(){
   const job=S.localJob;if(job?.projectId&&job.projectId!==S.projectId)throw Error('Open the project that generated this draft.');if(job?.status!=='completed'||!job.cohort||!job.proposal)return;
-  if(S.dirty||S.revision!==job.revision||S.remoteRevision!==null)throw Error('Workspace changed. Save your edits and generate a new cohort.');
+  // Only this cohort is taken from the proposal, so edits saved or made since generation started are kept and saved with it.
+  if(S.remoteRevision!==null)throw Error('Workspace changed elsewhere. Reload the saved workspace, then use this audience; it is kept until then.');
   const proposed=job.proposal.document.cohorts.find(c=>c.id===job.cohort.id);if(!proposed)throw Error('Generated cohort is missing. Try again.');const c=clone(proposed);
   const index=S.doc.cohorts.findIndex(x=>x.id===c.id);if(index<0)S.doc.cohorts.push(c);else S.doc.cohorts[index]=c;ownCohort(c);
   clearAudienceDraft(S.cohortInlineTarget||null);const destination=S.cohortInlineTarget,p=destination&&projectPipelines().find(p=>p.id===destination.pipelineId),stage=p?.stages.find(s=>s.id===destination.stageId&&s.kind==='poll');
@@ -377,7 +378,7 @@ async function saveAdoptedCohort(jobId,message){
   S.settleOnSave.push(jobId);
   if(S.loading||S.autosaving)return;
   S.autosaving=true;updateSaveState();
-  try{await writeDraft();say(message)}
+  try{flushForms(undefined,true);await writeDraft();say(message)}
   catch(error){fail(Error('The audience is in this page but was not saved: '+(error instanceof Error?error.message:String(error))+' Its generated draft is kept, so reopening the project offers it again.'))}
   finally{S.autosaving=false;updateSaveState()}
 }

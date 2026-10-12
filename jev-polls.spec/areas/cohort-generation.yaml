@@ -250,6 +250,10 @@ behaviors:
       only in the page's unsaved edits and discarded the run's draft at the same moment, so a restart
       plus a reload dropped it. If the save fails the page says so and keeps the edit, the draft stays
       on disk and is offered again when the project is reopened, and the next successful save lets it go.
+      A finished audience that has not been used yet stays on offer after other edits are saved, and
+      using it keeps those edits and any unsaved ones, since only its own cohort is taken from the run;
+      only a workspace changed in another tab or window asks for a reload first. Added 2026-10-12 after a
+      second loss on refresh.
     source:
       text: why did my cohort disappera
       reference: 2026-10-12 jev-polls project thread, Giulio, with a screenshot of the empty Who answers panel
