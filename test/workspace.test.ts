@@ -498,3 +498,43 @@ test('rejects concurrent credential connections while the first verification is 
   assert.equal(accepted.status, 200); assert.equal(calls, 1);
   assert.doesNotMatch(await accepted.text(), /fake-test-key/);
 });
+
+test('a study keeps its seed across reviews, so a second run reuses every saved answer unless asked to re-run all steps', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'jev-workspace-reuse-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const mock = createProvider('mock'); let calls = 0;
+  const server = await startWorkspaceServer({ directory, getAuthStatus: async () => ({ configured: true, source: 'keychain' }),
+    providerFactory: () => ({ name: 'typesafe', evaluate: async request => { calls++; return mock.evaluate(request); } }) });
+  t.after(() => server.close());
+  const csrf = (await (await fetch(server.url)).text()).match(/<meta name="jev-csrf" content="([a-f0-9]+)"/)![1]!;
+  const post = (path: string, value: unknown) => fetch(new URL(path, server.url), { method: 'POST', headers: { origin: new URL(server.url).origin, 'content-type': 'application/json', 'x-jev-csrf': csrf }, body: JSON.stringify(value) });
+  assert.equal((await post('/api/workspace', { document, revision: 0 })).status, 200);
+  const run = async (extra: Record<string, unknown> = {}) => {
+    const plan = await (await post('/api/plan', { pipelineId: 'study' })).json();
+    let job = await (await post('/api/run', { pipelineId: 'study', revision: plan.revision, planToken: plan.planToken, concurrency: 1, maxRequests: plan.maxRequests, ...extra })).json() as WorkspaceRun;
+    for (let attempt = 0; attempt < 200 && job.status === 'running'; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 10));
+      job = await (await fetch(new URL(`/api/run/${job.id}`, server.url))).json() as WorkspaceRun;
+    }
+    assert.equal(job.status, 'completed');
+    return { plan, job };
+  };
+  const first = await run();
+  assert.equal(first.plan.seed, 'study', 'a study with no runs seeds from its own ID');
+  assert.deepEqual(first.plan.stages.map((stage: { reuse: string }) => stage.reuse), ['run', 'run']);
+  assert.equal(first.plan.newRequests, 1); assert.equal(calls, 1);
+  const second = await run();
+  assert.equal(second.plan.seed, 'study');
+  assert.deepEqual(second.plan.stages.map((stage: { reuse: string; reused: number }) => [stage.reuse, stage.reused]), [['reused', 1], ['reused', 0]]);
+  assert.equal(second.plan.newRequests, 0);
+  assert.deepEqual(first.plan.newCost, first.plan.cost, 'nothing saved: the new cost is the full estimate');
+  assert.ok(second.plan.cost.usd > 0); assert.equal(second.plan.newCost.usd, 0, 'saved answers cost nothing');
+  assert.equal(calls, 1, 'an unchanged study sends no new requests'); assert.equal(second.job.usage?.cacheHits, 1);
+  const forced = await run({ refresh: true });
+  assert.equal(calls, 2, 'Re-run all steps asks again'); assert.equal(forced.job.usage?.cacheHits, 0);
+  const chosen = await (await post('/api/plan', { pipelineId: 'study', seed: 'fresh' })).json();
+  assert.equal(chosen.seed, 'fresh'); assert.equal(chosen.newRequests, 1, 'a new seed asks everyone again');
+  // A custom seed becomes the study's seed for the next review.
+  await run({ seed: 'fresh' });
+  assert.equal((await (await post('/api/plan', { pipelineId: 'study' })).json()).seed, 'fresh');
+});

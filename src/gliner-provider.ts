@@ -9,6 +9,8 @@ import type { Answer, Evaluation, EvaluationRequest, LabelScoreEvidence, Provide
 
 export const GLINER_MODEL = 'fastino/GLiNER2.5-Decide';
 export const GLINER_REVISION = '5a7adf72a23b4d311abae6ce050d7f0012bb3416';
+/** Part of every GLiNER cache key, so saved answers from another model or score scheme are never reused. */
+export const GLINER_CACHE_IDENTITY = `gliner-jsonl-v1:relative-sigmoid-v1:${GLINER_MODEL}@${GLINER_REVISION}`;
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 export interface GlinerConfig { pythonPath?: string; workerPath?: string; runtimeDir?: string; timeoutMs?: number }
 export interface GlinerStatus { ready: boolean; model: string; revision: string; pythonPath: string; workerPath: string; message?: string }
@@ -147,7 +149,7 @@ export function createGlinerProvider(config: GlinerConfig = {}): Provider {
   };
   return {
     name: 'gliner',
-    cacheIdentity: `gliner-jsonl-v1:relative-sigmoid-v1:${GLINER_MODEL}@${GLINER_REVISION}`,
+    cacheIdentity: GLINER_CACHE_IDENTITY,
     evaluate(request) {
       const operation = queue.then(async () => {
         if (request.model !== GLINER_MODEL) throw new ProviderError('GLINER_UNSUPPORTED_MODEL', `GLiNER supports only ${GLINER_MODEL}.`);

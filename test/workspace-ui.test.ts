@@ -200,9 +200,40 @@ test('run starts only with ready provider and valid current form settings', asyn
   await beginRun();
   const submissions = browser.bodies.filter(entry => entry.path === '/api/run');
   assert.equal(submissions.length, 1);
-  assert.deepEqual(submissions[0]!.body, { projectId: S.projectId, pipelineId: 'study', provider: 'typesafe', revision: 1, planToken: 'reviewed-plan', seed: 'chosen-seed', concurrency: 3, maxRequests: 17 });
+  assert.deepEqual(submissions[0]!.body, { projectId: S.projectId, pipelineId: 'study', provider: 'typesafe', revision: 1, planToken: 'reviewed-plan', seed: 'chosen-seed', refresh: false, concurrency: 3, maxRequests: 17 });
   // The map opens where the study is; there is no jump to the Runs page.
   assert.equal(S.tab, 'studies'); assert.equal(S.plan, null); assert.equal(S.liveRunId, 'new-run');
+});
+
+test('Check and run marks reused steps and Re-run all steps asks every question again', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, review, studyReviewPanel, act, beginRun } = browser.client;
+  S.pipelineId = 'study'; S.tab = 'studies';
+  const plan = runReviewPlan();
+  plan.stages = plan.stages.map((stage: Record<string, unknown>, i: number) => ({ ...stage, reused: i === 0 ? 1 : 0, reuse: i === 0 ? 'reused' : 'run' }));
+  Object.assign(plan, { seed: 'study', newRequests: 6 });
+  S.plan = plan; S.reviewPanel = true; S.rerunAll = false;
+  for (const html of [review(), studyReviewPanel(S.doc.pipelines[0])]) {
+    assert.match(html, /reuse-reused">Reused</); assert.match(html, /No new requests/);
+    assert.match(html, /Up to 6<\/strong><span>new model requests, 1 reused from earlier runs/);
+    assert.match(html, /data-act="rerun-all"><input type="checkbox" >/);
+  }
+  act(null, { dataset: { act: 'rerun-all' } });
+  assert.equal(S.rerunAll, true);
+  const forced = studyReviewPanel(S.doc.pipelines[0]);
+  assert.match(forced, /Runs again/); assert.match(forced, /Up to 7<\/strong><span>model requests/); assert.match(forced, /checked/);
+  assert.doesNotMatch(forced, /No new requests/);
+  S.snap.auth.configured = true;
+  browser.element('app').querySelector = () => null;
+  browser.respond('/api/run', { id: 'forced-run' }, 'POST');
+  await beginRun();
+  const body = browser.bodies.find(entry => entry.path === '/api/run')!.body as Record<string, unknown>;
+  assert.equal(body.refresh, true); assert.equal(body.seed, S.seed);
+  assert.equal(S.rerunAll, false, 'the choice applies to one run');
+  // Nothing saved yet: no reuse labels and no toggle, exactly as before.
+  S.plan = { ...runReviewPlan(), seed: 'study', newRequests: 7 };
+  S.plan.stages = S.plan.stages.map((stage: Record<string, unknown>) => ({ ...stage, reused: 0, reuse: 'run' }));
+  assert.doesNotMatch(review(), /rerun-all|reuse-tag/);
 });
 
 test('run review escapes imported pipeline names', async () => {

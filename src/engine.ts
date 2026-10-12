@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type {
   Answer, ChoiceQuestion, Cohort, Condition, Evaluation, EvaluationRequest, Json, Persona, Pipeline, PollInputBinding, PollStage,
-  Question, QuestionSummary, RunOptions, RunRecord, Stage, StageLayer, StageResult, Vote,
+  Provider, Question, QuestionSummary, RunOptions, RunRecord, Stage, StageLayer, StageResult, Vote,
 } from './types.js';
 import { summarizeVotes } from './analysis.js';
 import { ProviderError, probabilitySumTolerance, scoreMeanTolerance, type ProviderResponseIssue } from './provider.js';
@@ -330,6 +330,7 @@ export async function runPipeline(pipeline: Pipeline, cohorts: Record<string, Co
         if (oversized) throw new RequestTooLargeError(oversized);
         let evaluation = options.cacheDir && !options.refresh ? await loadCached(options.cacheDir, requestKey, request, request.questions) : undefined;
         const cacheHit = Boolean(evaluation);
+        options.onRequest?.({ stage: stage.id, cacheHit });
         if (evaluation) usage.cacheHits += 1;
         else {
           evaluation = await limiter.run(async () => {
@@ -736,3 +737,28 @@ const responseIssueMessages = new Map<ProviderResponseIssue, string>([
   ['usage_shape', 'token usage metadata is missing or invalid'],
   ['model_shape', 'the resolved model metadata is missing or invalid'],
 ]);
+
+export interface StageReuse { id: string; reused: number; state: 'reused' | 'partial' | 'run' | 'skipped' }
+class NotSavedError extends Error {}
+
+/**
+ * Predicts which steps a run would answer from saved results, without calling the provider: it walks the study
+ * with the real request builder and a provider that only reads the cache. A step whose every request is saved
+ * produces the same results as before, so the steps after it can be checked too; a step with any new request
+ * changes what later steps read, so they run in full.
+ */
+export async function predictReuse(pipeline: Pipeline, cohorts: Record<string, Cohort>, options: { provider: Pick<Provider, 'name' | 'cacheIdentity'>; model: string; seed: string; cacheDir: string }): Promise<StageReuse[]> {
+  const hits = new Map<string, number>();
+  const provider: Provider = { ...options.provider, evaluate: async () => { throw new NotSavedError(); } };
+  const record = await runPipeline(pipeline, cohorts, {
+    provider, model: options.model, seed: options.seed, cacheDir: options.cacheDir, concurrency: 16,
+    onRequest: ({ stage, cacheHit }) => { if (cacheHit) hits.set(stage, (hits.get(stage) ?? 0) + 1); },
+  });
+  return pipeline.stages.map((stage) => {
+    const result = record.stages[stage.id];
+    const reused = hits.get(stage.id) ?? 0;
+    if (result?.status === 'completed') return { id: stage.id, reused, state: 'reused' };
+    if (result?.status === 'skipped' && result.reason === 'stage condition was false') return { id: stage.id, reused, state: 'skipped' };
+    return { id: stage.id, reused, state: reused ? 'partial' : 'run' };
+  });
+}

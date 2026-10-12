@@ -25,7 +25,8 @@ behaviors:
   - id: exact-response-cache
     description: >-
       Validated responses are cached by provider, endpoint, and exact request and revalidated on
-      read; --refresh bypasses the cache.
+      read; --refresh (CLI), refresh (MCP run_study) and Re-run all steps (workspace) bypass the
+      cache and replace saved answers.
   - id: failed-respondent-fails-step
     description: >-
       One failed respondent fails its step; descendants are skipped, the run is marked failed, and

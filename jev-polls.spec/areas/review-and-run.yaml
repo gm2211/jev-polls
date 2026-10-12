@@ -48,6 +48,36 @@ behaviors:
       text: 1b 2a
       reference: >-
         2026-10-10 jev-polls project thread, Giulio, choosing option A for run cancellation: cancel and keep partial results
+  - id: study-seed-kept
+    description: >-
+      A study keeps one seed across runs: review uses the seed of the study's latest run (its own ID
+      before any run), so an unchanged step samples the same personas, sends identical requests and
+      reuses every saved answer. A seed typed in run settings is reviewed again and becomes the
+      study's seed once it runs.
+    details: >-
+      Before this, each review drew a new time-based seed, so no run ever reused an earlier one.
+    source:
+      text: >-
+        a study's pipeline should support caching and not rerun stages that have already run if inputs haven't changed - force re-running (all) stages should be possible if I request it
+      reference: 2026-10-12 jev-polls project thread, Giulio
+  - id: reuse-preview
+    description: >-
+      Check and run marks each step Reused (every request saved: no new requests), Partly reused
+      (new and saved counts) or neither, and the summary counts only new requests, with how many are
+      reused from earlier runs. A step after one with any new request runs in full, because what it
+      reads changes. The preview reads saved answers only and never calls the provider.
+    source:
+      text: >-
+        a study's pipeline should support caching and not rerun stages that have already run if inputs haven't changed - force re-running (all) stages should be possible if I request it
+      reference: 2026-10-12 jev-polls project thread, Giulio
+  - id: rerun-all-steps
+    description: >-
+      When anything would be reused, Check and run offers Re-run all steps; choosing it marks reused
+      steps Runs again, counts every request as new, and that one run asks every question again.
+    source:
+      text: >-
+        a study's pipeline should support caching and not rerun stages that have already run if inputs haven't changed - force re-running (all) stages should be possible if I request it
+      reference: 2026-10-12 jev-polls project thread, Giulio
   - id: one-run-at-a-time
     description: Only one workspace run is active at a time, and starting another reports that a run is in progress.
   - id: jev-request-budget
