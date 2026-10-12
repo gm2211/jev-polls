@@ -166,3 +166,17 @@ test('steps saved with the old Final choice name read as Final answer', () => {
   assert.match(html, /\['Final choice','Final result'\]\.includes\(stage\.label\)\?'Final answer'/);
   assert.match(html, /KIND\[stage\.kind\]\?\?'Step'/);
 });
+
+test('the report shows what the run cost, in total and per step, with reused answers free', () => {
+  const run = fixture();
+  run.provider = 'typesafe';
+  run.usage = { inputTokens: 2_000_000, outputTokens: 500_000, requests: 40, cacheHits: 8 };
+  run.stages.concept!.usage = { inputTokens: 2_000_000, outputTokens: 500_000, requests: 40, cacheHits: 8 };
+  const html = renderReport(run);
+  assert.match(html, /<h2 id="costHeading">Cost</);
+  assert.ok(html.indexOf('costHeading') < html.indexOf('methodHeading'), 'cost sits before How this was made');
+  const boot = JSON.parse(html.match(/<script id="reportData" type="application\/json">([\s\S]*?)<\/script>/)![1]!);
+  assert.equal(boot.cost.billing, 'typesafe');
+  assert.equal(boot.cost.total.usd.toFixed(4), (2.5 * 0.039).toFixed(4));
+  assert.deepEqual(boot.cost.steps.map((step: { id: string; requests: number; reused: number; status: string }) => [step.id, step.requests, step.reused, step.status]), [['concept', 40, 8, 'completed'], ['decision', 0, 0, 'skipped']]);
+});

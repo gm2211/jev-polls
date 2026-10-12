@@ -23,6 +23,7 @@ export const runSchema = z.object({
     summaries: z.record(z.string(), summary.extend({ bySegment: z.record(z.string(), summary), byRepeat: z.record(z.string(), summary) }).strict()),
     batching: z.object({ input: z.string(), sourceStage: z.string(), sourceLabel: z.string(), totalResponses: z.number().int().nonnegative(), batchSize: z.number().int().positive(), batches: z.number().int().positive(), groupSize: z.number().int().positive(), reduceRounds: z.number().int().nonnegative(), note: z.string() }).strict().optional(),
     layers: z.array(z.object({ kind: z.enum(['map', 'reduce']), round: z.number().int().nonnegative(), requests: z.number().int().nonnegative(), votes: z.array(voteSchema) }).strict()).optional(),
+    usage: z.object({ inputTokens: z.number().nonnegative(), outputTokens: z.number().nonnegative(), requests: z.number().int().nonnegative(), cacheHits: z.number().int().nonnegative() }).strict().optional(),
   }).strict()),
 }).strict();
 

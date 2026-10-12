@@ -3,8 +3,10 @@
  * its own tile elements and patches only the tiles whose status or answer changed, plus counters and leaderboard
  * bars in place. Replay reveals saved evaluations only; it never starts or changes inference.
  */
+import { JEV_USD_PER_MILLION_TOKENS } from './request-budget.js';
+
 export const ARENA_CONTROLS_CLIENT = String.raw`
-const LV=window.liveVoting,lvm=LV.model,lvv=LV.view;
+const LV=window.liveVoting,lvm=LV.model,lvv=LV.view,JEV_USD_PER_MILLION_TOKENS=${JEV_USD_PER_MILLION_TOKENS};
 const A={el:null,runId:'',stage:'',byKey:new Map(),sigs:new Map(),members:new Map(),samples:[],samplesFor:'',rows:new Map(),shares:new Map(),refs:{},question:null,ro:null,relayout:0,tabKey:'',scroll:null,tipKey:'',ctx:null};
 const R={runId:'',stage:'',cursor:undefined,playing:false,speed:1,timer:0,last:0};
 LV.perf=[];
@@ -68,7 +70,7 @@ function arenaInput(run,withLayout=true){
   const live=run.status==='running',board=lvm.leaderboard(members,question);
   const inline=!!liveStudyRun(),back=inline?{backAct:'live-back',backLabel:'Back to study'}:study?{backAct:'run-open-study',backLabel:'Back to study',backId:study.id}:{backAct:'live-close',backLabel:'Back to runs'};
   const news=question?.type==='choice'?arenaNews(run,lvm.commentary(members,question,segmentLabels),live):[];
-  const tops=!live&&!replayOn&&question?.type==='choice'?lvm.segmentTops(members,question,segmentLabels):[],results=tops.length||board.evaluated?{summary:lvm.resultSummary(board,tops),segments:tops}:null;
+  const tops=!live&&!replayOn&&question?.type==='choice'?lvm.segmentTops(members,question,segmentLabels):[],results=tops.length||board.evaluated?{summary:lvm.resultSummary(board,tops),cost:run.status==='running'?null:lvm.costSummary(run.usage,run.provider,JEV_USD_PER_MILLION_TOKENS),segments:tops}:null;
   return {full:lvFull(),studyTitle:study?studyQuestion(study):runTitle(run),...back,news,results,runId:run.id,status:run.status,message:run.message,reportUrl:run.reportUrl,title:stageMeta?.label||pstage?.label||stageId||'Voting',stageId,stages:(run.stages||[]).map(s=>({id:s.id,label:s.label||s.id,status:s.status||'',kind:s.kind||'',dependsOn:s.dependsOn||[]})),members,groups,layout,segmentLabels,questions,question,colorBy:ui.colorBy,groupBy,groupOptions,zoom:ui.zoom,selectedKey:S.liveMemberKey,selected,selectedPersona:selected?lookup(selected):undefined,selectedHidden:!!(replayOn&&selected&&all.some(m=>lvm.memberKey(m)===S.liveMemberKey&&(m.status==='completed'||m.status==='failed'))&&!revealedKeys(all,cursor).has(S.liveMemberKey)),tabKey:keyed.has(S.liveMemberKey)?S.liveMemberKey:groups[0]?.keys[0]||'',board,stats:{...stats,...arenaRateText(run,stageId,stats,live)},replay:replayOn?{cursor,total,playing:R.playing,speed:R.speed,ordered:all.some(m=>m.order!==undefined)}:null,emptyReason:[stageMeta?.kind?stageMeta.kind+' step · ':'',stageMeta?.status||'No member evaluations',stageMeta?.reason?' · '+stageMeta.reason:''].join('')+' · No member evaluations in this step.'};
 }
 function revealedKeys(all,cursor){return new Set(lvm.replayOrder(all).slice(0,Math.floor(cursor)).map(lvm.memberKey))}

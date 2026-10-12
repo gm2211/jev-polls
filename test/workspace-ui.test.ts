@@ -259,8 +259,8 @@ test('evaluation readiness refresh updates run controls without replacing the fo
   S.plan.provider = 'typesafe'; S.snap.auth.configured = false; browser.client.updateAISettings();
   assert.equal(start.disabled, true);
   S.snap.auth.configured = true; browser.client.updateAISettings(); assert.equal(start.disabled, false);
-  assert.equal(runUsageText({ requests: 2, inputTokens: 0, outputTokens: 0, tokenUsage: 'unreported', measuredInputTokens: 123 }), '2 model requests · 123 measured input tokens · API token usage not reported');
-  assert.equal(runUsageText({ requests: 2, inputTokens: 10, outputTokens: 4 }), '2 model requests · 10 input / 4 output tokens');
+  assert.equal(runUsageText({ requests: 2, inputTokens: 0, outputTokens: 0, tokenUsage: 'unreported', measuredInputTokens: 123 }), 'Nothing billed · 2 model requests · 123 measured input tokens · API token usage not reported');
+  assert.equal(runUsageText({ requests: 2, inputTokens: 10, outputTokens: 4 }), 'Under $0.001 · 2 model requests · 10 input / 4 output tokens');
   S.snap.runs = [{ projectId: S.projectId, id: 'local-run', pipelineName: 'Local', status: 'completed', createdAt: '2026-10-06T12:00:00Z', message: 'Done', usage: { requests: 2, inputTokens: 0, outputTokens: 0, tokenUsage: 'unreported', measuredInputTokens: 123 } }];
   assert.match(browser.client.runs(), /123 measured input tokens/);
   assert.doesNotMatch(browser.client.runs(), /0 input \/ 0 output tokens/);

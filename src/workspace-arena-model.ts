@@ -506,6 +506,20 @@ export function createArenaModel() {
     return `${base}, but ${apart.length} of ${rated.length} segments prefer a different option.`;
   }
 
+  /** What a finished run cost, for the results view: a headline amount and one detail line. Saved answers reused from cache are free. */
+  function costSummary(usage: { inputTokens: number; outputTokens: number; requests: number; cacheHits: number; tokenUsage?: string } | undefined, provider: string | undefined, usdPerMillionTokens: number): { amount: string; detail: string } | null {
+    if (!usage) return null;
+    const count = (n: number, word: string): string => `${n.toLocaleString('en-US')} ${word}${n === 1 ? '' : 's'}`;
+    const reused = usage.cacheHits ? ` · ${count(usage.cacheHits, 'answer')} reused free` : '';
+    const tokens = usage.inputTokens + usage.outputTokens;
+    if (provider === 'gliner' || usage.tokenUsage === 'unreported') return { amount: 'Nothing billed', detail: `Ran locally · ${count(usage.requests, 'request')}${reused}` };
+    if (!tokens && usage.requests) return { amount: 'Nothing billed', detail: `Demo answers · ${count(usage.requests, 'request')}${reused}` };
+    if (!tokens) return { amount: '$0.00', detail: usage.cacheHits ? `Every answer reused from earlier runs · ${count(usage.cacheHits, 'answer')}` : 'No model requests' };
+    const usd = tokens / 1_000_000 * usdPerMillionTokens;
+    const size = tokens >= 1e6 ? `${(tokens / 1e6).toFixed(1)}M` : tokens >= 1e3 ? `${Math.round(tokens / 1e3)}K` : String(tokens);
+    return { amount: usd < 0.001 ? 'Under $0.001' : `About $${usd.toFixed(usd < 0.01 ? 3 : 2)}`, detail: `${count(usage.requests, 'request')} · ${size} tokens${reused}` };
+  }
+
   /**
    * Which tile's hover tooltip is showing after an event. A tooltip belongs to a pointer resting on a tile or to keyboard focus, never to a
    * click: clicking moves the detail to the side panel and focus stays on the tile, so a pointer-driven focus must not bring the tooltip back.
@@ -517,7 +531,7 @@ export function createArenaModel() {
     return null;
   }
 
-  return { PALETTE, GROUP_LIMIT, tileCap, tooltipNext, fitCap, tileFor, initials, memberKey, describeQuestions, answerFor, topPick, confidenceOf, tileVisual, optionColor, groupMembers, groupFields, leaderboard, fitLayout, fixedLayout, rate, smoothRate, commentary, segmentTops, resultSummary, secondsLeft, duration, signature, patchPlan, mergeMembers, replayOrder, replayMembers, replayRate, replayAdvance };
+  return { PALETTE, GROUP_LIMIT, tileCap, tooltipNext, fitCap, tileFor, initials, memberKey, describeQuestions, answerFor, topPick, confidenceOf, tileVisual, optionColor, groupMembers, groupFields, leaderboard, fitLayout, fixedLayout, rate, smoothRate, commentary, segmentTops, resultSummary, costSummary, secondsLeft, duration, signature, patchPlan, mergeMembers, replayOrder, replayMembers, replayRate, replayAdvance };
 }
 
 export const arenaModel = createArenaModel();

@@ -1,5 +1,6 @@
 import { createCohortInsights } from './cohort-insights.js';
 import type { Cohort, RunRecord } from './types.js';
+import { runCost } from './run-cost.js';
 import { TEXT_SELECTION_CSS } from './text-selection.js';
 import { FAVICON_LINKS } from './workspace-icon.js';
 import { PALETTE_DARK, PALETTE_LIGHT } from './workspace-live-ui.js';
@@ -56,7 +57,7 @@ export function renderReport(run: RunRecord, options: { workspace?: boolean; pro
       ? 'Recorded GLiNER model results for synthetic profiles. These are classifier scores, not observed human responses.'
       : 'Recorded TypeSafe model results for synthetic profiles. These are model judgments, not observed human responses.';
   const models = [...new Set(Object.values(run.stages).flatMap(stage => stage.votes.map(vote => vote.model)))];
-  const boot = { run, audiences: stageAudiences(run), cohortLink: options.workspace && options.projectId ? '/#' + new URLSearchParams({ project: options.projectId, tab: 'cohorts' }).toString() : null };
+  const boot = { run, cost: runCost(run), audiences: stageAudiences(run), cohortLink: options.workspace && options.projectId ? '/#' + new URLSearchParams({ project: options.projectId, tab: 'cohorts' }).toString() : null };
 
   return `<!doctype html>
 <html lang="en">
@@ -113,6 +114,8 @@ export function renderReport(run: RunRecord, options: { workspace?: boolean; pro
     .audience{display:grid;gap:2px;margin-top:6px;padding-left:12px;border-left:2px solid var(--line);font-size:var(--text-sm);color:var(--muted)}.audience>span{color:var(--ink)}
     .audience-facts{display:grid;gap:2px;margin:0}.audience-facts>div{display:grid;grid-template-columns:76px minmax(0,1fr);gap:8px}.audience-facts dt{color:var(--faint)}.audience-facts dd{margin:0;overflow-wrap:anywhere}
     .details{display:grid;gap:10px}details>summary{cursor:pointer;color:var(--muted);font-size:var(--text-sm)}details[open]>summary{margin-bottom:8px}
+    #cost{display:grid;gap:12px;min-width:0}.cost-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));border:1px solid var(--line);border-radius:10px;overflow:hidden;background:var(--surface,var(--paper))}.cost-tiles div{padding:12px 14px;display:grid;gap:2px;align-content:start;box-shadow:1px 0 0 var(--line),0 1px 0 var(--line)}.cost-tiles strong{font-size:var(--text-lg);font-variant-numeric:tabular-nums}.cost-tiles span{font-size:var(--text-sm);color:var(--muted)}
+    .cost-table{width:100%;border-collapse:collapse;font-size:var(--text-sm);font-variant-numeric:tabular-nums}.cost-table th,.cost-table td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}.cost-table th{font-weight:500;color:var(--muted);font-size:var(--text-xs);text-transform:uppercase;letter-spacing:.06em}.cost-table th:first-child,.cost-table td:first-child{text-align:left;white-space:normal}.cost-table tfoot td{font-weight:600;border-bottom:0}.cost-table .free{color:var(--muted)}@media(max-width:640px){.cost-table th,.cost-table td{padding:7px 4px}.cost-table .tokens{display:none}}
     .run-facts{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px 18px;font-size:var(--text-sm);margin:0}.run-facts dt{color:var(--muted);font-size:var(--text-xs);text-transform:uppercase;letter-spacing:.06em}.run-facts dd{margin:0;overflow-wrap:anywhere}
     .source-item{display:grid;gap:2px;font-size:var(--text-sm);padding:6px 0;border-bottom:1px solid var(--line)}.source-item span{color:var(--muted)}
     pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:var(--text-sm);background:var(--raised);padding:10px;border-radius:6px}
@@ -133,6 +136,7 @@ export function renderReport(run: RunRecord, options: { workspace?: boolean; pro
       <section class="sec" id="answer" aria-label="Answer"></section>
       <section class="sec" aria-labelledby="resultsHeading"><div class="sec-head"><h2 id="resultsHeading">Results</h2><span class="hint" id="resultsHint"></span></div><div id="results"></div></section>
       <section class="sec" aria-labelledby="peopleHeading"><div class="sec-head"><h2 id="peopleHeading">Who answered</h2><span id="peoplePicker"></span></div><div id="people"></div></section>
+      <section class="sec" aria-labelledby="costHeading"><div class="sec-head"><h2 id="costHeading">Cost</h2><span class="hint" id="costHint"></span></div><div id="cost"></div></section>
       <section class="sec" aria-labelledby="methodHeading"><div class="sec-head"><h2 id="methodHeading">How this was made</h2><span class="hint" id="methodHint"></span></div><div id="method" class="details"><p class="hint" id="provenance">${escapeHtml(evidence)} Returned models: ${escapeHtml(models.join(', ') || 'No model responses recorded')}</p></div></section>
     </div>
     <footer class="footer"><span>Simulated judgments are conditional on the stated inputs and model outputs.</span><span id="footerMeta"></span></footer>
@@ -141,7 +145,7 @@ export function renderReport(run: RunRecord, options: { workspace?: boolean; pro
   <script>
   (()=>{
     'use strict';
-    const {run,audiences,cohortLink}=JSON.parse(document.getElementById('reportData').textContent);
+    const {run,cost,audiences,cohortLink}=JSON.parse(document.getElementById('reportData').textContent);
     const $=selector=>document.querySelector(selector);
     const el=(tag,className,text)=>{const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=String(text);return node;};
     const button=(label,className='button')=>{const node=el('button',className,label);node.type='button';return node;};
@@ -386,6 +390,27 @@ export function renderReport(run: RunRecord, options: { workspace?: boolean; pro
       add('Saw',inputs.length?'Answers from '+inputs.map(input=>(stageDef(input.stage)?nameOf(stageDef(input.stage)):input.stage)+' ('+(SELECT[input.select??'summary']??input.select)+')').join(' and ')+'.':'No earlier answers.');
       box.append(rows);return box;
     }
+    function money(usd){return usd===0?'$0.00':usd<0.001?'under $0.001':'$'+usd.toFixed(usd<0.01?3:2);}
+    function tokenText(n){return n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e3?Math.round(n/1e3)+'K':String(n);}
+    function costHeadline(){return cost.billing==='demo'?'Demo run, nothing billed':cost.billing==='local'?'Ran locally, nothing billed':'Cost about '+money(cost.total.usd);}
+    function renderCost(){
+      const host=$('#cost'),t=cost.total,billed=cost.billing==='typesafe';
+      $('#costHint').textContent=billed?'Estimated at $'+cost.usdPerMillionTokens+' per million tokens, the observed TypeSafe rate':cost.billing==='demo'?'Mock answers, no model was called':'GLiNER runs on this machine';
+      const tiles=el('div','cost-tiles');const tile=(big,small)=>{const d=el('div');d.append(el('strong','',big),el('span','',small));tiles.append(d);};
+      tile(billed?money(t.usd):'$0.00',billed?'estimated cost':'nothing billed');
+      tile(t.requests.toLocaleString(),'model requests sent');
+      if(billed)tile(tokenText(t.inputTokens+t.outputTokens),'tokens · '+tokenText(t.inputTokens)+' in, '+tokenText(t.outputTokens)+' out');
+      tile(t.reused.toLocaleString(),'reused from earlier runs, free');
+      host.append(tiles);
+      if(!cost.steps){host.append(el('p','hint','This run was saved before steps recorded their own cost, so only the total is shown.'));return;}
+      const wrap=el('div','table-wrap'),table=el('table','cost-table');const head=el('thead'),hr=el('tr');['Step','Requests','Reused','Tokens',billed?'Est. cost':'Cost'].forEach(h=>hr.append(el('th',h==='Tokens'?'tokens':'',h)));head.append(hr);table.append(head);
+      const body=el('tbody');cost.steps.forEach((step,index)=>{const tr=el('tr');const name=el('td');name.append(el('span','',(index+1)+'. '+step.label));tr.append(name);
+        if(step.status==='skipped'){tr.append(el('td','free','Skipped'),el('td','free','—'),el('td','free tokens','—'),el('td','free','$0.00'));}
+        else{const fromCache=!step.requests&&step.reused;tr.append(el('td','',step.requests.toLocaleString()),el('td',step.reused?'':'free',step.reused.toLocaleString()),el('td','tokens',billed?tokenText(step.inputTokens+step.outputTokens):'—'),el('td',fromCache||!step.usd?'free':'',fromCache?'Free, reused':money(step.usd)));}
+        body.append(tr);});table.append(body);
+      const foot=el('tfoot'),fr=el('tr');fr.append(el('td','','Total'),el('td','',t.requests.toLocaleString()),el('td','',t.reused.toLocaleString()),el('td','tokens',billed?tokenText(t.inputTokens+t.outputTokens):'—'),el('td','',money(t.usd)));foot.append(fr);table.append(foot);
+      wrap.append(table);host.append(wrap);
+    }
     function renderMethod(){
       const host=$('#method');const steps=el('ol','steps');let skipped=0,failed=0;
       run.pipeline.stages.forEach((stage,index)=>{
@@ -439,14 +464,14 @@ export function renderReport(run: RunRecord, options: { workspace?: boolean; pro
       $('#reportTitle').textContent=run.pipeline.name;$('#pipelineDescription').textContent=run.pipeline.description||'';
       const polls=run.pipeline.stages.filter(stage=>stage.kind==='poll');const people=Math.max(0,...polls.map(peopleOf));
       const segments=new Set(polls.flatMap(stage=>(stageResult(stage.id)?.votes??[]).map(v=>v.segment)));
-      const meta=$('#runMeta');[people?plural(people,'person').replace('persons','people'):null,segments.size?plural(segments.size,'segment'):null,completed+' of '+run.pipeline.stages.length+' steps finished',new Date(run.createdAt).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'})].filter(Boolean).forEach(text=>meta.append(el('span','',text)));
+      const meta=$('#runMeta');[people?plural(people,'person').replace('persons','people'):null,segments.size?plural(segments.size,'segment'):null,completed+' of '+run.pipeline.stages.length+' steps finished',costHeadline(),new Date(run.createdAt).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'})].filter(Boolean).forEach(text=>meta.append(el('span','',text)));
       meta.append(el('span','sim',run.provider==='mock'?'Demo data, not real people':gliner?'Classifier scores, not real people':'Simulated audience, not real people'));
       if(run.status!=='completed'||failed){const warn=el('div','warning');warn.append(el('strong','',failed?plural(failed,'step')+' failed. ':'This run did not finish. '),el('span','','See How this was made for the reason.'));$('#runWarning').append(warn);}
       if(run.warnings?.length){const note=el('div','warning');note.append(el('strong','','Run notes'));const list=el('ul');run.warnings.forEach(w=>list.append(el('li','',w)));note.append(list);$('#runWarning').append(note);}
       $('#footerMeta').textContent=run.model+' · seed '+run.seed;
     }
     $('#downloadJson').addEventListener('click',()=>{const blob=new Blob([JSON.stringify(run,null,2)],{type:'application/json'});const href=URL.createObjectURL(blob);const link=el('a');link.href=href;link.download='jev-polls-run.json';link.click();setTimeout(()=>URL.revokeObjectURL(href),1000);});
-    initHeader();renderAnswer();renderResults();renderPeople();renderMethod();
+    initHeader();renderAnswer();renderResults();renderPeople();renderCost();renderMethod();
   })();
   </script>
 </body>
