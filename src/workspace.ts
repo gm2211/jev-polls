@@ -63,7 +63,7 @@ export interface WorkspaceServerOptions {
   providerFactory?: (name: 'typesafe' | 'gliner') => Provider;
   getGlinerStatus?: () => Promise<{ ready: boolean; model: string; message?: string }>;
   emit?: (event: Record<string, unknown>) => void;
-  localAgents?: Pick<LocalAgentService, 'availability' | 'start' | 'get' | 'cancel' | 'close'> & Partial<Pick<LocalAgentService, 'list' | 'settle' | 'disposition'>>;
+  localAgents?: Pick<LocalAgentService, 'availability' | 'start' | 'get' | 'cancel' | 'close'> & Partial<Pick<LocalAgentService, 'list' | 'settle' | 'disposition' | 'members'>>;
 }
 
 /** Account connection and review are separate from explicit study execution. */
@@ -376,11 +376,17 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
       const jobs = (localAgents.list?.(projectId) ?? []).filter(job => job.status !== 'completed' || job.revision === saved.revision);
       send(response, 200, { jobs }); return;
     }
-    const agentRoute = /^\/api\/agent\/jobs\/([0-9a-f-]{36})(?:\/(cancel|apply|discard))?$/.exec(pathname);
+    const agentRoute = /^\/api\/agent\/jobs\/([0-9a-f-]{36})(?:\/(cancel|apply|discard|members))?$/.exec(pathname);
     if (agentRoute) {
       const job = localAgents.get(agentRoute[1]!);
       if (!job) throw new HttpError(404, 'AGENT_JOB_NOT_FOUND', 'Assistant task was not found. Start a new task.');
       if (method === 'GET' && !agentRoute[2]) { send(response, 200, job); return; }
+      if (method === 'GET' && agentRoute[2] === 'members') {
+        const batch = z.coerce.number().int().nonnegative().safe().parse(new URL(request.url ?? '/', origin).searchParams.get('batch'));
+        const personas = localAgents.members?.(job.id, batch);
+        if (!personas) throw new HttpError(404, 'AGENT_BATCH_NOT_READY', 'Those personas have not been checked yet.');
+        send(response, 200, { personas }); return;
+      }
       if (method === 'POST' && agentRoute[2] === 'cancel') {
         z.object({}).strict().parse(await body(request));
         send(response, 200, localAgents.cancel(job.id)); return;

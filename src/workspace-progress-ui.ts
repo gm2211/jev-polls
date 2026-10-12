@@ -117,8 +117,8 @@ function draftProgress(job){
   const provider=job.engine==='chatgpt'?'ChatGPT':job.engine==='claude'?'Claude Code':'Codex';
   const title=job.cohort?'Generating '+plural(job.cohort.size,'persona'):job.persona?'Generating replacement persona':'Preparing your proposal';
   const counts=slots.count?'<div class="draft-metrics"><p class="draft-count" data-slot="count">'+slots.count+'</p><p class="draft-estimate" data-slot="estimate" data-draft-estimate="'+attr(slots.estimateData)+'">'+slots.estimate+'</p></div><div class="draft-bar" role="progressbar" aria-label="Personas written" aria-valuemin="0" aria-valuemax="100" aria-valuenow="'+slots.written+'" data-slot="bar"><span class="draft-bar-written" style="width:'+slots.written+'%"></span><span class="draft-bar-checked" style="width:'+slots.checked+'%"></span></div>':'';
-  const shape=(slots.count?'counts':'plain')+(S.localPollError?' error':'');
-  return '<section class="panel draft-progress" aria-label="Generation progress" data-job="'+attr(job.id||'')+'" data-shape="'+shape+'"><div class="draft-progress-heading"><div><h2>'+esc(title)+'</h2><p class="draft-provider">'+esc(provider+(job.model?' · '+job.model:''))+'</p></div><div class="draft-progress-actions">'+(job.startedAt?'<span class="draft-elapsed" data-draft-start="'+attr(job.startedAt)+'">'+esc(draftElapsed(job.startedAt))+'</span>':'')+draftCancelButton(job)+'</div></div>'+counts+'<p class="draft-progress-status" role="status" data-slot="status">'+slots.status+'</p><p class="draft-progress-detail" data-slot="detail">'+slots.detail+'</p>'+(S.localPollError?'<p class="warning draft-progress-error" role="alert">Can’t reach the app right now. Checking again every few seconds.</p>':'')+'</section>';
+  const shape=(slots.count?'counts':'plain')+(S.localPollError?' error':'')+(job.cohort?' map:'+liveMapSignature(job):'');
+  return '<section class="panel draft-progress" aria-label="Generation progress" data-job="'+attr(job.id||'')+'" data-shape="'+shape+'"><div class="draft-progress-heading"><div><h2>'+esc(title)+'</h2><p class="draft-provider">'+esc(provider+(job.model?' · '+job.model:''))+'</p></div><div class="draft-progress-actions">'+(job.startedAt?'<span class="draft-elapsed" data-draft-start="'+attr(job.startedAt)+'">'+esc(draftElapsed(job.startedAt))+'</span>':'')+draftCancelButton(job)+'</div></div>'+counts+'<p class="draft-progress-status" role="status" data-slot="status">'+slots.status+'</p><p class="draft-progress-detail" data-slot="detail">'+slots.detail+'</p>'+liveMap(job)+(S.localPollError?'<p class="warning draft-progress-error" role="alert">Can’t reach the app right now. Checking again every few seconds.</p>':'')+'</section>';
 }
 /* Updates every visible readout for this job in place. Returns false when a full render is needed. */
 function patchDraftProgress(job){
@@ -134,6 +134,7 @@ function patchDraftProgress(job){
     if(slot.dataset.draftEstimate!==undefined)current.dataset.draftEstimate=slot.dataset.draftEstimate;
     if(current.innerHTML!==slot.innerHTML)current.innerHTML=slot.innerHTML;
   });
+  if(job.cohort&&!patchLiveMap(job))return false;
   return true;
 }
 function updateDraftClocks(){
