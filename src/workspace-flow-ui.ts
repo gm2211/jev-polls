@@ -161,8 +161,8 @@ function flowConnections(p,s){
 function flowCohortMap(p,s){
   const c=poolForPhase(p,s);if(inlineCohortTarget(p,s))return setupCohortPicker(p,s);
   if(!c||S.flowCohortPick)return (c?'<button class="button small" data-act="flow-cohort-change">Back to cohort</button>':'')+setupCohortPicker(p,s);
-  const key='flow:'+p.id+':'+s.id+':'+c.id,person=hostMapMember(c,key),index=person?c.personas.findIndex(item=>item.id===person.id):-1;
-  if(person)return '<section class="flow-member-focus"><div class="flow-member-navigation"><button class="button small" data-act="host-member-close" data-map="'+attr(key)+'">'+icon('left')+' Cohort</button><div class="row"><button class="button small icon-button" data-act="host-member" data-map="'+attr(key)+'" data-id="'+attr(c.personas[index-1]?.id||'')+'" '+(index===0?'disabled':'')+' aria-label="Previous member">'+icon('left')+'</button><span>'+(index+1)+' / '+c.personas.length+'</span><button class="button small icon-button" data-act="host-member" data-map="'+attr(key)+'" data-id="'+attr(c.personas[index+1]?.id||'')+'" '+(index===c.personas.length-1?'disabled':'')+' aria-label="Next member">'+icon('right')+'</button></div></div>'+hostMapDetails(c,person)+'</section>';
+  const key='flow:'+p.id+':'+s.id+':'+c.id,person=hostMapMember(c,key);
+  if(person)return hostMapFocus(c,key,person,'Cohort');
   return '<div class="flow-cohort-summary"><strong>'+esc(c.name)+'</strong><div class="row"><button class="button small" data-act="phase-pool" data-id="'+attr(c.id)+'">Open full cohort</button><button class="button small" data-act="flow-cohort-change">Change cohort</button></div></div><section class="flow-cohort-map"><h3>Who answers</h3>'+hostMap(c,{key})+'<p class="subtle">Hover for a quick look. Select a member to inspect their synthetic profile.</p></section>';
 }
 /** Steps that still block a run review, in canvas order, with the panel tab that fixes each. */
@@ -504,6 +504,13 @@ root.addEventListener('keydown',e=>{
   if(!panel.contains(e.target)&&!e.target?.classList?.contains('flow-viewport'))return;
   e.preventDefault();flowAction('flow-panel-close',{dataset:{}});
 });
+}
+/* On wide screens the step panel rises to just below the top bar, so it uses the window's height rather than the board's. */
+function liftRoundPanel(){
+  const panel=root.querySelector('.flow-workspace>.round-panel');if(!panel)return;
+  panel.style.removeProperty('top');if(innerWidth<=760)return;
+  const limit=(document.querySelector('.topbar')?.getBoundingClientRect().bottom||0)+12,lift=Math.floor(panel.getBoundingClientRect().top-limit);
+  if(lift>0)panel.style.top=-lift+'px';
 }
 
 `;

@@ -2,15 +2,47 @@
 export const WORKSPACE_HOST_MAP_CLIENT = String.raw`
 function hostMapState(key){S.hostMaps??={};return S.hostMaps[key]??={page:0,selectedId:null}}
 function hostMapMember(c,key){return c?.personas?.find(person=>person.id===hostMapState(key).selectedId)||null}
-/* Seats per page in either seat map: a screenful of small seats on a laptop, fewer on a phone. */
-function seatPageSize(){return viewportPageSize(240,96)}
+/* Seats per page in a seat map: as many full lines as fit its pane once measured, a screenful of small seats before that. */
+function seatPageSize(fit){return S.seatFits?.[fit]?.size||viewportPageSize(240,96)}
+/* Lines a seat map gets next: fewer when its pane overflows (excess>0), more when it is paged and a whole line of room is spare. */
+function seatFitLines(lines,excess,linePitch,paged,shrunk){
+  if(excess>0)return Math.max(2,lines-Math.ceil(excess/linePitch));
+  return !shrunk&&paged&&-excess>=linePitch?lines+Math.floor(-excess/linePitch):lines;
+}
+function seatPane(node){for(let el=node.parentElement;el&&el!==document.body;el=el.parentElement){const y=getComputedStyle(el).overflowY;if(y==='auto'||y==='scroll')return el}return null}
+/* How far the pane's content overflows it, or (negative) how much room is left below the content. Without a scrolling pane, the map alone must fit the window. */
+function seatPaneExcess(pane,map){
+  if(!pane)return map.getBoundingClientRect().height-(innerHeight-140);
+  if(pane.scrollHeight>pane.clientHeight+1)return pane.scrollHeight-pane.clientHeight;
+  const box=pane.getBoundingClientRect(),style=getComputedStyle(pane),bottom=Math.max(0,...[...pane.children].map(child=>child.getBoundingClientRect().bottom+parseFloat(getComputedStyle(child).marginBottom||'0')));
+  return bottom-box.top+parseFloat(style.paddingBottom||'0')-pane.clientHeight;
+}
+let seatFitDepth=0;
+/* After each render, sizes every seat map's pages to what its pane shows without scrolling, so paging and scrolling never combine. */
+function fitSeatMaps(){
+  if(typeof document==='undefined'||seatFitDepth>3)return;
+  for(const map of root.querySelectorAll('.live-map[data-fit]')){
+    const seats=map.querySelector('.live-map-seats'),seat=map.querySelector('.live-seat');if(!seats||!seat)continue;
+    const key=map.dataset.fit,pane=seatPane(map),gap=parseFloat(getComputedStyle(seats).columnGap)||4,perLine=Math.max(1,Math.floor((seats.clientWidth+gap)/(seat.offsetWidth+gap))),linePitch=seat.offsetHeight+gap;
+    const box=(pane?pane.clientWidth+'x'+pane.clientHeight:innerWidth+'x'+innerHeight)+':'+perLine,size=seatPageSize(key);S.seatFits??={};
+    const fit=S.seatFits[key]?.box===box?S.seatFits[key]:{box,shrunk:false},excess=seatPaneExcess(pane,map);
+    const lines=seatFitLines(Math.ceil(size/perLine),excess,linePitch,!!map.querySelector('.pagination'),fit.shrunk);
+    S.seatFits[key]={box,shrunk:fit.shrunk||excess>0,size:perLine*lines};
+    if(perLine*lines!==size){seatFitDepth++;try{render()}finally{seatFitDepth--}return}
+  }
+}
+/* One member in place of the map, with a way back and to the neighbouring members. */
+function hostMapFocus(c,key,person,back){
+  const index=c.personas.findIndex(item=>item.id===person.id);
+  return '<section class="flow-member-focus"><div class="flow-member-navigation"><button class="button small" data-act="host-member-close" data-map="'+attr(key)+'">'+icon('left')+' '+esc(back)+'</button><div class="row"><button class="button small icon-button" data-act="host-member" data-map="'+attr(key)+'" data-id="'+attr(c.personas[index-1]?.id||'')+'" '+(index===0?'disabled':'')+' aria-label="Previous member">'+icon('left')+'</button><span>'+(index+1)+' / '+c.personas.length+'</span><button class="button small icon-button" data-act="host-member" data-map="'+attr(key)+'" data-id="'+attr(c.personas[index+1]?.id||'')+'" '+(index===c.personas.length-1?'disabled':'')+' aria-label="Next member">'+icon('right')+'</button></div></div>'+hostMapDetails(c,person)+'</section>';
+}
 /* The same seat map as live generation: one seat per member, in a row per segment, each segment in its own colour, paged. */
 function hostMap(c,options={}){
   if(!c?.personas?.length)return '<p class="subtle">No synthetic members yet. Choose or create a cohort.</p>';
   const key=options.key||c.id,state=hostMapState(key),order=(c.segments||[]).map(item=>item.id);
   const groups=[...new Set([...order,...c.personas.map(person=>person.segment||'unassigned')])].map(segment=>({segment,label:c.segments?.find(item=>item.id===segment)?.label||segment,index:order.indexOf(segment),members:c.personas.filter(person=>(person.segment||'unassigned')===segment)})).filter(group=>group.members.length);
-  const page=pageItems(groups.flatMap(group=>group.members),'seats:'+key,options.limit||seatPageSize()),shown=new Set(page.items);
-  return '<section class="live-map host-map'+(c.personas.length>60?' live-map-small':'')+'" aria-label="'+attr((c.name||'Cohort')+' synthetic member map')+'"><div class="live-map-groups">'+groups.filter(group=>group.members.some(person=>shown.has(person))).map(group=>{
+  const fit='host:'+key,page=pageItems(groups.flatMap(group=>group.members),'seats:'+key,options.limit||seatPageSize(fit)),shown=new Set(page.items);
+  return '<section class="live-map host-map'+(c.personas.length>60?' live-map-small':'')+'"'+(options.limit?'':' data-fit="'+attr(fit)+'"')+' aria-label="'+attr((c.name||'Cohort')+' synthetic member map')+'"><div class="live-map-groups">'+groups.filter(group=>group.members.some(person=>shown.has(person))).map(group=>{
     const style=group.index>=0?'--seg:var(--seg-'+(group.index%8)+')':'';
     return '<section class="live-map-group" style="'+style+'"><h4><i aria-hidden="true"></i>'+esc(group.label)+'<span>'+group.members.length.toLocaleString('en-US')+'</span></h4><div class="live-map-seats">'+group.members.filter(person=>shown.has(person)).map(person=>{
       const status=options.statusFor?.(person)||'synthetic',selected=(options.selectedId??state.selectedId)===person.id,description=[person.label||person.id,group.label,status,person.age?'Age '+person.age:''].filter(Boolean).join(' · ');
@@ -21,7 +53,7 @@ function hostMap(c,options={}){
 function hostMapDetails(c,person,extra=''){
   if(!person)return '<div class="host-member-detail host-member-empty"><strong>Inspect a member</strong><p>Hover for a quick look. Click or press Enter to inspect a synthetic profile.</p></div>';
   const segment=c.segments?.find(item=>item.id===person.segment),sources=(person.sourceIds||[]).map(id=>c.sources?.find(source=>source.id===id)?.title||id);
-  return '<article class="host-member-detail" aria-label="Selected synthetic member"><h3>'+esc(person.label||person.id)+'</h3><p class="subtle">Synthetic profile · '+esc(segment?.label||person.segment||'Unassigned')+(person.age?' · Age '+esc(person.age):'')+'</p>'+extra+'<p>'+esc(person.background||'No background provided.')+'</p><dl><dt>Profile weight</dt><dd>'+esc(person.weight??1)+'</dd><dt>Segment weighting</dt><dd>'+esc(segment?.weightBasis||'Unspecified')+'</dd><dt>Sourced references</dt><dd>'+esc(sources.join(', ')||'None recorded')+'</dd><dt>Synthetic fields</dt><dd>'+esc((person.syntheticFields||[]).join(', ')||'Not specified')+'</dd></dl></article>';
+  return '<article class="host-member-detail" aria-label="Selected synthetic member"><h3>'+esc(person.label||person.id)+'</h3><p class="subtle">Synthetic profile · '+esc(segment?.label||person.segment||'Unassigned')+(person.age?' · Age '+esc(person.age):'')+'</p>'+extra+'<p>'+esc(person.background||'No background provided.')+'</p><dl>'+Object.entries(person.attributes||{}).map(([key,value])=>'<dt>'+esc(key)+'</dt><dd>'+esc(typeof value==='string'?value:JSON.stringify(value))+'</dd>').join('')+'<dt>Profile weight</dt><dd>'+esc(person.weight??1)+'</dd><dt>Segment weighting</dt><dd>'+esc(segment?.weightBasis||'Unspecified')+'</dd><dt>Sourced references</dt><dd>'+esc(sources.join(', ')||'None recorded')+'</dd><dt>Synthetic fields</dt><dd>'+esc((person.syntheticFields||[]).join(', ')||'Not specified')+'</dd></dl></article>';
 }
 function hostMapAction(action,el){
   if(!['host-member','host-member-close','host-page'].includes(action))return false;

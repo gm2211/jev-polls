@@ -6,7 +6,7 @@ import { GENERATION_MAP_CLIENT } from '../src/workspace-generation-map-ui.js';
 function harness() {
   const escape = (value: unknown) => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;');
   const calls: string[] = [];
-  const context: any = { S: {}, esc: escape, seatPageSize: () => 240, pageItems: (items: unknown[], _key: string, limit: number) => ({ items: items.slice(0, limit), controls: items.length > limit ? '<nav class="pagination"></nav>' : '' }), attr: escape, render() {}, root: { querySelector: () => null }, calls,
+  const context: any = { S: {}, esc: escape, icon: (name: string) => '<i>' + name + '</i>', seatPageSize: () => 240, pageItems: (items: unknown[], _key: string, limit: number) => ({ items: items.slice(0, limit), controls: items.length > limit ? '<nav class="pagination"></nav>' : '' }), attr: escape, render() {}, root: { querySelector: () => null }, calls,
     api: async (path: string) => { calls.push(path); return { personas: Array.from({ length: 4 }, (_, k) => ({ id: 'p' + k, label: 'Ada <Lovelace> ' + k, age: 30 + k, segment: k % 2 ? 'transit' : 'car', background: 'Drives to work.', attributes: { budget: 'low' } })) }; } };
   new Script(GENERATION_MAP_CLIENT + ';globalThis.t={liveMap,liveMapView,liveMapSignature,liveMapFetch,liveMapAction,liveMapDetail}').runInNewContext(context);
   return context;
@@ -15,18 +15,19 @@ const segments = [{ id: 'car', label: 'Car commuters' }, { id: 'transit', label:
 function job(progress: object) { return { id: 'job-1', status: 'running', cohort: { id: 'c', size: 12 }, progress: { totalPersonas: 12, ...progress } }; }
 const shaped = (extra: object = {}) => job({ audienceMap: { segments, plan: '010101010101', batchSizes: [4, 4, 4], acceptedBatches: [0] }, batchDetails: [{ index: 2, size: 4, state: 'writing', attempt: 1, streamingPersonas: 2 }, { index: 3, size: 4, state: 'retrying', attempt: 2, streamingPersonas: 0 }], ...extra });
 
-test('seats show every persona before it is written, grouped by planned segment, with live states', () => {
+test('seats show every persona before it is written, grouped by planned segment and filled from the left, with live states', () => {
   const { t } = harness();
   const view = t.liveMapView(shaped());
-  const states = ['done', 'done', 'writing', 'queued', 'retry', 'retry'];
+  const states = ['done', 'done', 'writing', 'retry', 'retry', 'queued'];
   assert.deepEqual([...view.seats.map((seat: any) => seat.state)], [...states, ...states]);
   assert.deepEqual([...view.seats.map((seat: any) => seat.segment)], [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1]);
-  assert.deepEqual([...view.seats.map((seat: any) => seat.position)], [0, 2, 4, 6, 8, 10, 1, 3, 5, 7, 9, 11]);
+  assert.deepEqual([...view.seats.map((seat: any) => seat.position)], [0, 2, 4, 8, 10, 6, 1, 3, 5, 9, 11, 7]);
   const html = t.liveMap(shaped());
   assert.equal((html.match(/class="live-seat"/g) || []).length, 12);
   assert.match(html, /Car commuters<span data-live-count="0">2 of 6<\/span>/);
   assert.match(html, /Train riders<span data-live-count="1">2 of 6<\/span>/);
-  assert.match(html, /Select a seat to inspect/);
+  assert.match(html, /Select a seat to see who sits there/);
+  assert.match(html, /data-fit="live"/);
   assert.equal(t.liveMapSignature(shaped()), 'plan:12:0=6,1=6');
 });
 
@@ -49,7 +50,11 @@ test('checked batches are fetched once and selected seats show the escaped profi
   t.liveMapAction('live-seat', { dataset: { key: '0:1' } });
   const detail = t.liveMapDetail(t.liveMapView(S.localJob));
   assert.match(detail, /Ada &lt;Lovelace> 1/); assert.match(detail, /Age 31/); assert.match(detail, /budget/); assert.match(detail, /Train riders/);
-  assert.match(t.liveMap(S.localJob), /aria-pressed="true" aria-label="Ada &lt;Lovelace> 1, Train riders, checked and saved"><span aria-hidden="true">A&lt;<\/span>/);
+  const focus = t.liveMap(S.localJob);
+  assert.match(focus, /class="live-map live-map-focus"/, 'a selected seat replaces the map with who sits there');
+  assert.match(focus, /data-act="live-seat-close"/);
+  assert.doesNotMatch(focus, /class="live-seat"/);
+  assert.match(t.liveMapSignature(S.localJob), /:focus$/, 'opening a seat asks for a full render');
   t.liveMapAction('live-seat', { dataset: { key: '1:1' } });
   assert.match(t.liveMapDetail(t.liveMapView(S.localJob)), /Being written now in group 2 \(2 of 4 so far\)/);
   t.liveMapAction('live-seat', { dataset: { key: '2:1' } });

@@ -1,7 +1,8 @@
 /** A seat map that fills in while an audience is generated: one seat per persona, grouped by segment when the plan is known. */
 export const GENERATION_MAP_CSS = `
-.live-map{--seg-0:#1757a5;--seg-1:#0d7568;--seg-2:#a24d12;--seg-3:#7444b0;--seg-4:#a3285f;--seg-5:#5d6b0b;--seg-6:#0b6a8f;--seg-7:#8a5a00;margin-top:20px;padding-top:16px;border-top:1px solid var(--line);display:grid;gap:12px;min-width:0}
-:root[data-theme=dark] .live-map{--seg-0:#8fbcff;--seg-1:#6fd3c3;--seg-2:#f2a56b;--seg-3:#c5a4f5;--seg-4:#f59ac0;--seg-5:#c3d36a;--seg-6:#7fd0f0;--seg-7:#e6c071}
+.live-map,.seat-colors{--seg-0:#1757a5;--seg-1:#0d7568;--seg-2:#a24d12;--seg-3:#7444b0;--seg-4:#a3285f;--seg-5:#5d6b0b;--seg-6:#0b6a8f;--seg-7:#8a5a00}
+.live-map{margin-top:20px;padding-top:16px;border-top:1px solid var(--line);display:grid;gap:12px;min-width:0}
+:root[data-theme=dark] :is(.live-map,.seat-colors){--seg-0:#8fbcff;--seg-1:#6fd3c3;--seg-2:#f2a56b;--seg-3:#c5a4f5;--seg-4:#f59ac0;--seg-5:#c3d36a;--seg-6:#7fd0f0;--seg-7:#e6c071}
 .live-map>h3{margin:0;font:600 var(--text-md) var(--body)}
 .live-map-groups{display:grid;gap:10px}
 .live-map-group h4{margin:0 0 5px;display:flex;align-items:center;gap:8px;font:600 var(--text-xs) var(--body);color:var(--muted);overflow-wrap:anywhere}
@@ -14,10 +15,11 @@ export const GENERATION_MAP_CSS = `
 .live-seat[data-state=writing]{border-style:solid;border-color:color-mix(in srgb,var(--seg) 60%,transparent);background:color-mix(in srgb,var(--seg) 14%,transparent);animation:live-seat-breathe 1.4s ease-in-out infinite}
 .live-seat[data-state=checking]{border-style:solid;border-color:var(--seg);background:color-mix(in srgb,var(--seg) 22%,transparent)}
 .live-seat[data-state=retry]{border-color:var(--amber);background:var(--amber-soft)}
-.live-seat[data-state=done]{border-style:solid;border-color:var(--seg);background:color-mix(in srgb,var(--seg) 30%,var(--surface));animation:live-seat-land .45s cubic-bezier(.2,1.6,.4,1)}
-.live-seat:hover{box-shadow:inset 0 0 0 1px var(--seg)}.live-seat[aria-pressed=true]{outline:2px solid var(--ink);outline-offset:1px}
+.live-seat[data-state=done]{border-style:solid;border-color:var(--seg);background:color-mix(in srgb,var(--seg) 55%,var(--surface));animation:live-seat-land .45s cubic-bezier(.2,1.6,.4,1)}
+.live-seat:hover{box-shadow:inset 0 0 0 1px var(--seg)}
 .live-seat:focus-visible{outline:3px solid var(--focus,var(--blue));outline-offset:2px}
-.live-map-detail{font-size:var(--text-sm);min-height:64px;overflow-wrap:anywhere}
+.live-map-hint{margin:-8px 0 0;font-size:var(--text-xs)}.seat-colors .segment-legend{margin-bottom:12px}.live-map-focus-body{display:grid;gap:10px}
+.live-map-detail{font-size:var(--text-sm);overflow-wrap:anywhere}
 .live-map-detail h4{margin:0 0 2px;font:600 var(--text-md) var(--body);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .live-map-detail p{margin:0 0 6px;max-width:72ch;line-height:1.5}
 .live-map-detail .subtle{margin:0 0 6px}
@@ -35,7 +37,8 @@ function liveMapState(job){if(!S.liveAudience||S.liveAudience.jobId!==job.id)S.l
 /*
  * Every seat's state, segment and persona, derived from the job's progress, in rows by segment. Null when the job is not an
  * audience. Seats of groups still being written follow the plan; a checked group's personas sit in the rows of the segments
- * they were actually written for, since the AI may write a slightly different mix than planned.
+ * they were actually written for, since the AI may write a slightly different mix than planned. Within a row, seats are
+ * ordered by progress, so a row fills from the left.
  */
 function liveMapView(job){
   const p=job.progress||{},m=p.audienceMap,total=job.cohort?.size||p.totalPersonas||0;
@@ -58,9 +61,13 @@ function liveMapView(job){
     for(const seat of seats)(rows[seat.segment]||other).seats.push(seat);
     rows=rows.concat(other).filter(row=>row.seats.length);
   }else rows=[{index:-1,label:'',seats}];
+  // Each row fills from the left: saved personas first, then the ones in progress, then the ones not started.
+  const rank={done:0,checking:1,writing:2,retry:3,queued:4,empty:5};
+  for(const row of rows)row.seats.sort((a,b)=>rank[a.state]-rank[b.state]||a.position-b.position);
   return {job,total,segments,plan,rows,seats:rows.flatMap(row=>row.seats),st};
 }
-function liveMapSignature(job){const v=liveMapView(job);return v?(v.plan?'plan':'flat')+':'+v.total+':'+v.rows.map(row=>row.index+'='+row.seats.length).join(','):''}
+function liveMapSignature(job){const v=liveMapView(job);return v?(v.plan?'plan':'flat')+':'+v.total+':'+v.rows.map(row=>row.index+'='+row.seats.length).join(',')+(liveMapSelected(v)?':focus':''):''}
+function liveMapSelected(v){return v.seats.find(seat=>seat.key===v.st.selected)||null}
 function liveSeatLabel(v,seat){
   const segment=v.segments[seat.segment]?.label,who=seat.member?.label||'Seat '+(seat.position+1);
   const status={empty:'not started',queued:'its group is getting ready',writing:'being written',checking:'being checked',retry:'being rewritten',done:seat.member?'checked and saved':'checked, loading profile'}[seat.state];
@@ -68,11 +75,10 @@ function liveSeatLabel(v,seat){
 }
 function liveSeatInitials(seat){return seat.member?String(seat.member.label).split(/\s+/).slice(0,2).map(word=>word[0]||'').join('').toUpperCase():''}
 function liveSeatStyle(seat){return seat.segment>=0?'--seg:var(--seg-'+(seat.segment%8)+')':''}
-function liveSeat(v,seat){return '<button type="button" class="live-seat" data-act="live-seat" data-key="'+attr(seat.key)+'" data-state="'+seat.state+'" style="'+liveSeatStyle(seat)+'" aria-pressed="'+(v.st.selected===seat.key)+'" aria-label="'+attr(liveSeatLabel(v,seat))+'"><span aria-hidden="true">'+esc(liveSeatInitials(seat))+'</span></button>'}
+function liveSeat(v,seat){const label=liveSeatLabel(v,seat);return '<button type="button" class="live-seat" data-act="live-seat" data-key="'+attr(seat.key)+'" data-state="'+seat.state+'" style="'+liveSeatStyle(seat)+'" aria-label="'+attr(label)+'" title="'+attr(label)+'"><span aria-hidden="true">'+esc(liveSeatInitials(seat))+'</span></button>'}
 function liveMapCount(v,index){const mine=v.rows.find(row=>row.index===index)?.seats||[];return mine.filter(seat=>seat.state==='done').length+' of '+mine.length}
 function liveMapDetail(v){
-  const seat=v.seats.find(seat=>seat.key===v.st.selected);
-  if(!seat)return '<p class="subtle">Select a seat to inspect who sits there. Seats fill in as personas are checked and saved.</p>';
+  const seat=liveMapSelected(v);if(!seat)return '';
   const segment=v.segments[seat.segment],chip=segment?'<span class="live-map-chip" style="'+liveSeatStyle(seat)+'">'+esc(segment.label)+'</span>':'',group=seat.batch>=0?'group '+(seat.batch+1):'';
   if(seat.member){
     const person=seat.member,attributes=Object.entries(person.attributes||{}).slice(0,4);
@@ -99,39 +105,56 @@ function liveMapFetch(v){
     }).catch(()=>{});
   }
 }
+/* The selected seat in place of the map: who sits there, or how far its group has got, with a way back and to its neighbours. */
+function liveMapFocus(v){
+  const seat=liveMapSelected(v);if(!seat)return '';
+  const index=v.seats.indexOf(seat),near=k=>v.seats[k]?' data-key="'+attr(v.seats[k].key)+'"':' disabled';
+  return '<div class="flow-member-navigation"><button type="button" class="button small" data-act="live-seat-close">'+icon('left')+' All seats</button><div class="row"><button type="button" class="button small icon-button" data-act="live-seat"'+near(index-1)+' aria-label="Previous seat">'+icon('left')+'</button><span>'+(index+1)+' / '+v.seats.length+'</span><button type="button" class="button small icon-button" data-act="live-seat"'+near(index+1)+' aria-label="Next seat">'+icon('right')+'</button></div></div><div class="live-map-detail" aria-live="polite">'+liveMapDetail(v)+'</div>';
+}
 function liveMap(job){
   const v=liveMapView(job);if(!v)return '';
   Promise.resolve().then(()=>liveMapFetch(v));
+  if(liveMapSelected(v))return '<section class="live-map live-map-focus" aria-label="Who is in the audience" data-live-map="'+attr(liveMapSignature(job))+'"><h3>Who answers</h3><div class="live-map-focus-body">'+liveMapFocus(v)+'</div></section>';
   const small=v.total>60?' live-map-small':'',page=liveMapPage(v),shown=new Set(page.items);
   const groups=v.rows.filter(row=>row.seats.some(seat=>shown.has(seat))).map(row=>({...row,seats:row.seats.filter(seat=>shown.has(seat))}));
-  return '<section class="live-map'+small+'" aria-label="Who is in the audience" data-live-map="'+attr(liveMapSignature(job))+'"><h3>Who answers</h3><div class="live-map-groups">'+groups.map(group=>'<section class="live-map-group" style="'+(group.index>=0?'--seg:var(--seg-'+(group.index%8)+')':'')+'">'+(group.label?'<h4><i aria-hidden="true"></i>'+esc(group.label)+'<span data-live-count="'+group.index+'">'+liveMapCount(v,group.index)+'</span></h4>':'')+'<div class="live-map-seats">'+group.seats.map(seat=>liveSeat(v,seat)).join('')+'</div></section>').join('')+'</div>'+page.controls+'<div class="live-map-detail" aria-live="polite">'+liveMapDetail(v)+'</div></section>';
+  return '<section class="live-map'+small+'" aria-label="Who is in the audience" data-fit="live" data-live-map="'+attr(liveMapSignature(job))+'"><h3>Who answers</h3><p class="subtle live-map-hint">Select a seat to see who sits there.</p><div class="live-map-groups">'+groups.map(group=>'<section class="live-map-group" style="'+(group.index>=0?'--seg:var(--seg-'+(group.index%8)+')':'')+'">'+(group.label?'<h4><i aria-hidden="true"></i>'+esc(group.label)+'<span data-live-count="'+group.index+'">'+liveMapCount(v,group.index)+'</span></h4>':'')+'<div class="live-map-seats">'+group.seats.map(seat=>liveSeat(v,seat)).join('')+'</div></section>').join('')+'</div>'+page.controls+'</section>';
 }
 /* The seats on the current page, in row order. */
-function liveMapPage(v){return pageItems(v.seats,'live-seats:'+v.job.id,seatPageSize())}
+function liveMapPage(v){return pageItems(v.seats,'live-seats:'+v.job.id,seatPageSize('live'))}
 /* Updates seats, counts and the inspected seat in place. Returns false when the map needs a full render. */
 function patchLiveMap(job){
   const node=root.querySelector('.live-map'),v=liveMapView(job);
   if(!node||!v||node.dataset.liveMap!==liveMapSignature(job))return false;
   liveMapFetch(v);
+  const focus=node.querySelector('.live-map-focus-body');
+  if(focus){
+    const seat=liveMapSelected(v),detail=focus.querySelector('.live-map-detail');if(!seat||!detail)return false;
+    const html=liveMapDetail(v);if(detail.liveHtml!==html){if(detail.liveHtml!==undefined||detail.innerHTML!==html)detail.innerHTML=html;detail.liveHtml=html}
+    const index=v.seats.indexOf(seat),count=focus.querySelector('.flow-member-navigation .row span'),text=(index+1)+' / '+v.seats.length;if(count&&count.textContent!==text)count.textContent=text;
+    focus.querySelectorAll('.flow-member-navigation [data-act=live-seat]').forEach((button,side)=>{const near=v.seats[index+(side?1:-1)];button.disabled=!near;if(near)button.dataset.key=near.key;else delete button.dataset.key});
+    return true;
+  }
+  // Seats are re-ordered as they progress, so each button takes whichever seat now sits in its place.
   const buttons=node.querySelectorAll('.live-seat'),seats=liveMapPage(v).items;if(buttons.length!==seats.length)return false;
-  if([...buttons].some((button,j)=>button.dataset.key!==seats[j].key))return false;
   buttons.forEach((button,j)=>{
     const seat=seats[j];
+    if(button.dataset.key!==seat.key)button.dataset.key=seat.key;
     if(button.dataset.state!==seat.state)button.dataset.state=seat.state;
     const style=liveSeatStyle(seat);if((button.getAttribute('style')||'')!==style)button.setAttribute('style',style);
-    const label=liveSeatLabel(v,seat);if(button.getAttribute('aria-label')!==label)button.setAttribute('aria-label',label);
+    const label=liveSeatLabel(v,seat);if(button.getAttribute('aria-label')!==label){button.setAttribute('aria-label',label);button.title=label}
     const text=liveSeatInitials(seat);if(button.firstElementChild&&button.firstElementChild.textContent!==text)button.firstElementChild.textContent=text;
-    const pressed=String(v.st.selected===seat.key);if(button.getAttribute('aria-pressed')!==pressed)button.setAttribute('aria-pressed',pressed);
   });
   node.querySelectorAll('[data-live-count]').forEach(count=>{const text=liveMapCount(v,Number(count.dataset.liveCount));if(count.textContent!==text)count.textContent=text});
-  const detail=node.querySelector('.live-map-detail'),html=liveMapDetail(v);if(detail&&detail.liveHtml!==html){detail.innerHTML=html;detail.liveHtml=html}
+  if(typeof fitSeatMaps==='function')setTimeout(fitSeatMaps);
   return true;
 }
 function liveMapAction(action,el){
-  if(action!=='live-seat')return false;
+  if(action!=='live-seat'&&action!=='live-seat-close')return false;
   const job=S.localJob;if(!job)return true;
-  const st=liveMapState(job),key=el.dataset.key;st.selected=st.selected===key?null:key;
-  if(!patchLiveMap(job))render();
+  const st=liveMapState(job),closed=st.selected;st.selected=action==='live-seat'?el.dataset.key||null:null;
+  render();
+  if(st.selected)root.querySelector('.live-map-focus [data-act=live-seat-close]')?.focus();
+  else root.querySelector('.live-seat[data-key="'+closed+'"]')?.focus()||root.querySelector('.live-seat')?.focus();
   return true;
 }
 `;

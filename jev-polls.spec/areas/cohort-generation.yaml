@@ -350,7 +350,16 @@ behaviors:
       the map. Once the audience exists, a study step's Who answers shows the same seat map (every
       member, a coloured row per segment); changed 2026-10-12 after Giulio asked why the saved audience
       showed a different, 24-at-a-time map. Both maps page instead of scrolling, with the shared list
-      pager (240 seats a page, 96 on a phone); row counts stay whole-segment counts.
+      pager; row counts stay whole-segment counts. Changed 2026-10-12 after Giulio said "pagination and
+      scrolling is a not so great combo" and "clicking on persona does nothing": each map's page holds
+      as many whole lines of seats as its pane shows without scrolling (measured after each render and
+      on resize, never fewer than two lines), seats in a row fill from the left (saved first, then
+      in progress, then not started), and selecting a seat shows who sits there in place of the map,
+      with a way back and to the neighbouring seats. The generated cohort review in a step's Who answers
+      shows the same seat map instead of three persona cards a page ("another mix - can we avoid
+      scrolling?"), with its explanation and assumptions in an About this draft disclosure. On wide
+      screens the step panel rises to just below the top bar ("maybe we can make the side pane
+      taller").
     source:
       text: >-
         it would also be cool to get a "host map" mini-view that gets populated with personas as they
