@@ -6,7 +6,7 @@ import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promise
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { ChildProcessWithoutNullStreams, SpawnOptionsWithoutStdio } from 'node:child_process';
-import { BatchRejected, LocalAgentError, backoffCause, batchSizes, LocalAgentService, checkCohortBatch, checkCohortSetup, checkPersonaBatch, concurrentBatches, personasFromTable, segmentSequence, claudeEnvelope, takeAudienceRequests, type LocalAgentJob, type LocalAgentSpawner } from '../src/local-agent.js';
+import { BatchRejected, LocalAgentError, readSetupPlan, backoffCause, batchSizes, LocalAgentService, checkCohortBatch, checkCohortSetup, checkPersonaBatch, concurrentBatches, personasFromTable, segmentSequence, claudeEnvelope, takeAudienceRequests, type LocalAgentJob, type LocalAgentSpawner } from '../src/local-agent.js';
 import type { ChatGptDraftClient } from '../src/chatgpt.js';
 import type { Cohort, DistributionTargetBucket, Persona } from '../src/types.js';
 import { validateWorkspaceDocument } from '../src/workspace-store.js';
@@ -1512,6 +1512,34 @@ test('Claude stream-json deltas raise the persona count mid-batch; the repeated 
   release.resolve();
   const done = await terminal(service, job);
   assert.equal(done.status, 'completed'); assert.equal(done.progress!.completedPersonas, 30);
+});
+
+test('the audience plan streams from the setup call: its name, each group as it is written, then its assumptions', async t => {
+  const root = await setup(t); let setupChild!: FakeChild; const release = deferred<void>();
+  const service = new LocalAgentService({ temporaryRoot: root, spawn: fakeSpawner(async ({ child }) => {
+    if (batchNumberOf(child) === 0) { setupChild = child; await release.promise; }
+    child.stdout.write(claudeResult(child.input)); child.finish();
+  }) }); t.after(() => service.close());
+  const job = service.start({ engine: 'claude', prompt: 'Create 30 adults', revision: 0, document: empty, cohort: { id: 'customers', size: 30 } });
+  await waitFor(() => setupChild !== undefined);
+  const plan = () => service.get(job.id)!.progress!.plan;
+  setupChild.stdout.write(claudeDelta('{"documentJson": "{\\"id\\":\\"customers\\",\\"name\\":\\"Night gamers\\",\\"sources\\":[{\\"id\\":\\"s1\\",\\"title\\":\\"Survey 2025\\"}],\\"segments\\":[{\\"id\\":\\"a\\",\\"label\\":\\"Students\\",\\"description\\":\\"x\\",\\"weight\\":30,'));
+  await waitFor(() => plan()?.groups.length === 1);
+  assert.deepEqual(plan(), { name: 'Night gamers', groups: [{ label: 'Students', weight: 30 }], sources: 1, stage: 'groups' });
+  setupChild.stdout.write(claudeDelta('\\"weightBasis\\":\\"assumed\\"},{\\"id\\":\\"b\\",\\"label\\":\\"Shift work'));
+  await new Promise(resolve => setTimeout(resolve, 20));
+  assert.equal(plan()!.groups.length, 1, 'a label still being written is not shown');
+  setupChild.stdout.write(claudeDelta('ers\\",\\"weight\\":70}],\\"assumptions\\":[\\"x'));
+  await waitFor(() => plan()?.stage === 'assumptions');
+  assert.deepEqual(plan()!.groups, [{ label: 'Students', weight: 30 }, { label: 'Shift workers', weight: 70 }]);
+  release.resolve();
+  const done = await terminal(service, job);
+  assert.equal(done.status, 'completed'); assert.equal(done.progress!.plan!.groups.length, 2, 'the plan stays with the job');
+});
+
+test('readSetupPlan reads escaped and plain replies and ignores persona labels and unfinished values', () => {
+  assert.equal(readSetupPlan('{"documentJson": "{\\"id\\":\\"c'), undefined);
+  assert.deepEqual(readSetupPlan('{"name":"Gamers","segments":[{"label":"Late \\u2019night\\u2019","weight":1.5}],"personas":[{"label":"Persona one","weight":1}]}'), { name: 'Gamers', groups: [{ label: 'Late ’night’', weight: 1.5 }], sources: 0, stage: 'assumptions' });
 });
 
 test('Claude falls back to the single JSON result when the CLI rejects the streaming flags', async t => {
