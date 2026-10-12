@@ -63,8 +63,8 @@ function draftControlsBody(provider){
   return '<p class="subtle ai-status">'+esc(provider?.message||'Uses your existing CLI sign-in.')+'</p>';
 }
 try{if(localStorage.getItem('jev-evaluation-provider')==='gliner')S.evaluationProvider='gliner'}catch{}
-function evaluationProviderName(provider){return provider==='gliner'?'GLiNER2.5-Decide · local':'TypeSafe · Jev'}
-function evaluationReady(provider=S.evaluationProvider){return provider==='gliner'?!!S.snap?.gliner?.ready:!!S.snap?.auth?.configured}
+function evaluationProviderName(provider){return S.snap?.demo?'Mock answers · demo mode':provider==='gliner'?'GLiNER2.5-Decide · local':'TypeSafe · Jev'}
+function evaluationReady(provider=S.evaluationProvider){return S.snap?.demo?true:provider==='gliner'?!!S.snap?.gliner?.ready:!!S.snap?.auth?.configured}
 function updateEvaluationControls(){const start=root.querySelector('[data-act=start-run]');if(!start||!S.plan)return;const ready=evaluationReady(S.plan.provider);start.disabled=!ready;const setup=root.querySelector('[data-act=evaluation-settings]');if(setup)setup.hidden=ready}
 function evaluationSettings(){
   const local=S.evaluationProvider==='gliner',ready=evaluationReady();
