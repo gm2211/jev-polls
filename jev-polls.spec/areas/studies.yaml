@@ -196,3 +196,24 @@ behaviors:
       text: Pipeline references missing cohort id; the user had to click x on "audience → Choose a cohort" in Study settings.
       reference: jev-polls project thread, 2026-10-10
 
+  - id: options-from-previous-step
+    description: >-
+      A Compare options step can take its options from an earlier step's option comparison instead
+      of a typed, imported or drafted list: "From a previous step" is the fourth way to add options.
+      The user picks the source step and keeps either the top N options (2–255, default 4 when the
+      source has more than 4) or all of them. When the study runs, the source's options are ranked
+      by share of its answers (ties keep the source's order) and the top N become this step's
+      options, with the source's names and descriptions. The step depends on the source, so the
+      canvas draws the connection and the Inputs tab lists it as "Supplies this step's options",
+      but the source's answers are not passed along as context. The list on the Options tab is
+      read-only and follows the source's edits; switching back to another way restores the typed
+      list and drops the dependency unless something else needs it.
+    details: >-
+      Stored as optionsFrom { stage, question, top? } on the choice question; criteria keeps a copy
+      of the source's options for the editor. Requests carry only the kept options and no
+      optionsFrom, so evaluation caching keys on the options actually asked. A source without a
+      completed result fails the step rather than guessing. Saved runs validate against the options
+      the step actually asked.
+    source:
+      text: the options section should give me the "option" (no pun intended) of using the outputs of a previous stage as outputs
+      reference: jev-polls project thread, Giulio, 2026-10-12

@@ -39,7 +39,7 @@ async function harness(engines: any[] = []) {
   };
   const html = renderWorkspace('options-box', 'token');
   const script = html.match(/<script nonce="options-box">([\s\S]*?)<\/script>/)![1]!;
-  const names = ['S', 'pipeline', 'render', 'stageForm', 'flowInspector', 'flowAction', 'setupAction', 'applyStudySetup', 'setupAudienceForm', 'setupCohortPicker', 'optionsBoxCommit', 'optionsBoxAdd', 'optionsBoxFlush', 'optionsBoxRecords', 'optionsBoxFile', 'optionsBoxKeydown', 'optionsBoxPaste', 'cohortBlockReason', 'draftProviderChoice', 'loadLocalAgents', 'commandEntries', 'commandExecute', 'reviewPage', 'studyNextClick', 'setupWizardKey'];
+  const names = ['S', 'pipeline', 'render', 'stageForm', 'flowInspector', 'flowAction', 'setupAction', 'applyStudySetup', 'setupAudienceForm', 'setupCohortPicker', 'optionsBoxCommit', 'optionsBoxAdd', 'optionsBoxFlush', 'optionsBoxRecords', 'optionsBoxFile', 'optionsBoxKeydown', 'optionsBoxPaste', 'cohortBlockReason', 'draftProviderChoice', 'loadLocalAgents', 'commandEntries', 'commandExecute', 'reviewPage', 'studyNextClick', 'setupWizardKey', 'setupAction'];
   new Script(script.replace(/\}\)\(\);$/, `globalThis.optionsTest={${names.join(',')}};})();`)).runInNewContext(context);
   await new Promise<void>(resolve => setImmediate(resolve));
   const client = context.optionsTest;
@@ -82,7 +82,8 @@ test('the Options stop is one light list of rows once options exist, and the way
   h.S.sections['setup-input-study-ask-answer'] = 'choose';
   const choose = h.flowInspector(h.study, h.poll);
   assert.match(choose, /How do you want to add options\?/);
-  assert.equal((choose.match(/class="setup-type-card" data-act="setup-input"/g) || []).length, 3);
+  assert.equal((choose.match(/class="setup-type-card" data-act="setup-input"/g) || []).length, 4);
+  assert.match(choose, /data-source="previous" aria-pressed="false"><strong>From a previous step/);
   assert.match(choose, /data-source="manual" aria-pressed="true"><strong>Type a list/);
   h.S.sections['setup-input-study-ask-answer'] = 'file';
   const file = h.flowInspector(h.study, h.poll);
@@ -373,4 +374,58 @@ test('the palette offers no Check and run without a study that has steps', async
   const h = await harness();
   h.S.pipelineId = null;
   assert.equal(h.commandEntries().some((row: any) => row.id === 'review-run'), false);
+});
+
+test('an empty list shows only the add row, not placeholder rows that contradict "No options yet"', async () => {
+  const h = await harness();
+  h.q.criteria = { option_1: '', option_2: '' };
+  const html = h.flowInspector(h.study, h.poll);
+  assert.equal((html.match(/class="options-row" data-option-key=/g) || []).length, 0);
+  assert.match(html, /<input data-option-add value="" placeholder="Add an option, or paste a list"/);
+  assert.match(html, />No options yet</);
+});
+
+test('options can come from an earlier step: its top options, live, with the dependency on the canvas and in Inputs', async () => {
+  const h = await harness();
+  const names = Object.fromEntries(['Orbital', 'Starforge', 'Void', 'Nebula', 'Ironclad', 'Quantum'].map((name, i) => [`n${i}`, name]));
+  const rank: any = { id: 'rank', label: 'Rank names', kind: 'poll', cohort: 'audience', dependsOn: [], questions: { pick: { type: 'choice', label: 'Best name?', instructions: 'Pick.', criteria: names } } };
+  h.study.stages.unshift(rank);
+  const plain = (value: unknown) => JSON.parse(JSON.stringify(value));
+  const act = (a: string, dataset: Record<string, string> = {}) => h.setupAction(a, { dataset });
+  act('setup-input', { source: 'previous' });
+  const pick = h.flowInspector(h.study, h.poll);
+  assert.match(pick, /data-source="previous" aria-pressed="true"/);
+  assert.match(pick, /data-act="setup-options-from" data-source="rank" data-question="pick"><strong>1\. Rank names: Best name\?<\/strong><span>6 options · ranked by share of answers/);
+  assert.equal(h.poll.questions.answer.optionsFrom, undefined, 'choosing the card alone changes nothing');
+
+  act('setup-options-from', { source: 'rank', question: 'pick' });
+  assert.deepEqual(plain(h.q.optionsFrom), { stage: 'rank', question: 'pick', top: 4 });
+  assert.deepEqual(plain(h.q.criteria), names);
+  assert.deepEqual(plain(h.poll.dependsOn), ['rank']);
+  assert.deepEqual(plain(h.poll.inputs), {}, 'the earlier answers are not passed along as context');
+  const taken = h.flowInspector(h.study, h.poll);
+  assert.match(taken, /Options come from<\/span><strong>1\. Rank names: Best name\?/);
+  assert.match(taken, />Top 4 of 6 options</);
+  assert.equal((taken.match(/<li><strong>/g) || []).length, 6);
+  assert.doesNotMatch(taken, /data-options-box/, 'the taken list is read-only');
+
+  act('setup-options-from-top', { top: '5' });
+  assert.equal(h.q.optionsFrom.top, 5);
+  act('setup-options-from-top', { top: 'all' });
+  assert.equal('top' in h.q.optionsFrom, false);
+  assert.match(h.flowInspector(h.study, h.poll), />All 6 options</);
+
+  // Editing the source flows through on the next render.
+  rank.questions.pick.criteria.n6 = 'Lumen';
+  h.render();
+  assert.equal(h.q.criteria.n6, 'Lumen');
+
+  h.S.sections['flow-inspector'] = 'connections';
+  assert.match(h.flowInspector(h.study, h.poll), /<h3>Options from<\/h3><div class="flow-connection-row" data-options-source="rank"><div><strong>1\. Rank names: Best name\?<\/strong><span>Supplies this step’s options · all of them/);
+  h.S.sections['flow-inspector'] = 'answers';
+
+  act('setup-input', { source: 'manual' });
+  assert.equal(h.q.optionsFrom, undefined);
+  assert.deepEqual(plain(Object.keys(h.q.criteria)), ['a', 'b'], 'the typed list comes back');
+  assert.deepEqual(plain(h.poll.dependsOn), [], 'the dependency goes with it');
 });

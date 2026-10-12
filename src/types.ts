@@ -6,7 +6,10 @@ export interface DistributionTargetBucket { label: string; percent: number; valu
 export interface DistributionTarget { field: string; kind: 'numeric' | 'categorical'; buckets: DistributionTargetBucket[] }
 export interface Cohort { version: 1; id: string; name: string; description: string; population: string; createdAt: string; sources: Source[]; segments: Segment[]; personas: Persona[]; assumptions: string[]; generationPrompt?: string; distributionTargets?: DistributionTarget[] }
 export type ChoiceCriterion = string | null | { label: string; description: string };
-export interface ChoiceQuestion { type: 'choice'; label: string; instructions: string; criteria: Record<string, ChoiceCriterion> }
+/** Takes a Choice question's options from an earlier step's Choice result when the study runs: that result's options ranked by share, the first `top` of them (all when absent). */
+export interface ChoiceOptionsFrom { stage: string; question: string; top?: number }
+/** With `optionsFrom`, `criteria` is only the editor's copy of the source's options; runs always read the source. */
+export interface ChoiceQuestion { type: 'choice'; label: string; instructions: string; criteria: Record<string, ChoiceCriterion>; optionsFrom?: ChoiceOptionsFrom }
 export interface NoulQuestion { type: 'noul'; label: string; instructions: string }
 export interface ScoreQuestion { type: 'score'; label: string; instructions: string; criteria: string[] }
 export type Question = ChoiceQuestion | NoulQuestion | ScoreQuestion;

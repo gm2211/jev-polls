@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import { readJson } from './io.js';
 import { outputQuestions, parseCohort, parsePipeline } from './schema.js';
-import { CHOICE_WINNER_TOLERANCE, hashValue } from './engine-utils.js';
+import { CHOICE_WINNER_TOLERANCE, hashValue, resolveOptionsFrom } from './engine-utils.js';
 import { GLINER_MODEL, GLINER_REVISION, validateClassifierAnswer } from './gliner-provider.js';
-import type { Answer, Question, RunRecord, SummaryBase } from './types.js';
+import type { Answer, Pipeline, Question, RunRecord, StageResult, SummaryBase } from './types.js';
 const probability = z.number().finite().min(0).max(1);
 const probabilities = z.record(z.string(), probability);
 const classifier = z.object({ semantics: z.literal('independent_sigmoid'), rawScores: probabilities, rawLogits: z.record(z.string(), z.number().finite()) }).strict();
@@ -126,7 +126,12 @@ export function parseRun(input: unknown): RunRecord {
     if (!Object.hasOwn(run.cohorts, name)) throw new Error(`Run is missing cohort snapshot: ${name}`);
   }
   for (const c of Object.values(run.cohorts)) parseCohort(c);
-  const questionsByStage = outputQuestions(pipeline);
+  // A step that took its options from an earlier step asked only the ones that ranked, and so did anything reading its result.
+  const asked: Pipeline = { ...pipeline, stages: pipeline.stages.map(stage => {
+    if (stage.kind !== 'poll' || !Object.values(stage.questions).some(q => q.type === 'choice' && q.optionsFrom)) return stage;
+    try { return { ...stage, questions: resolveOptionsFrom(pipeline, stage, run.stages as Record<string, StageResult>) }; } catch { return stage; }
+  }) };
+  const questionsByStage = outputQuestions(asked);
   const ids = pipeline.stages.map(s => s.id);
   if (ids.length !== Object.keys(run.stages).length) throw new Error('Run stages do not match its saved pipeline');
   for (const stage of pipeline.stages) {
