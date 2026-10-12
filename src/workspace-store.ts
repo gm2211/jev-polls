@@ -6,6 +6,7 @@ import type { Cohort, Json, Pipeline } from './types.js';
 import type { WorkspaceActivity, WorkspaceDocument, WorkspaceProject, WorkspaceSaved } from './workspace-types.js';
 import { parseCohort, parsePipeline, stageOrder } from './schema.js';
 import { validateTargets } from './cohort-insights.js';
+import { resolveHandOffs, type HandOff } from './hand-off.js';
 import { costOf, enforceBudgets, estimateBudgets, estimateStageUsage, type BatchPlan, type CostEstimate, type StageBudget, type UsageEstimate } from './request-budget.js';
 
 const FILE_NAME = 'workspace.json';
@@ -252,12 +253,13 @@ export function workspacePlan(document: WorkspaceDocument, pipelineId: string, p
   pipeline: Pipeline;
   cohorts: Record<string, Cohort>;
   maxRequests: number;
-  stages: Array<{ id: string; label: string; kind: string; dependsOn: string[]; cohort?: string; profiles?: number; repeats?: number; requests: number; budget?: StageBudget; batching?: BatchPlan; usage?: UsageEstimate }>;
+  stages: Array<{ id: string; label: string; kind: string; dependsOn: string[]; cohort?: string; profiles?: number; repeats?: number; requests: number; budget?: StageBudget; batching?: BatchPlan; usage?: UsageEstimate; handOffs?: HandOff[] }>;
   /** Estimated TypeSafe bill if every step runs and nothing is cached; absent for GLiNER, which runs locally. */
   cost?: CostEstimate;
   warnings: string[];
 } {
-  const { projectId, pipeline, cohorts } = resolveWorkspaceProject(document, pipelineId);
+  const { projectId, pipeline: saved, cohorts } = resolveWorkspaceProject(document, pipelineId);
+  const { pipeline, handOffs } = resolveHandOffs(saved, cohorts);
   let maxRequests = 0;
   const ordered = stageOrder(pipeline);
   // Jev limits apply per request; GLiNER has its own input limit enforced at run time.
@@ -273,7 +275,7 @@ export function workspacePlan(document: WorkspaceDocument, pipelineId: string, p
     const requests = profiles * repeats * (batching?.requestsPerRun ?? 1);
     maxRequests += requests;
     const usage = budgets[stage.id] && provider !== 'gliner' ? estimateStageUsage(budgets[stage.id]!, profiles * repeats) : undefined;
-    return { id: stage.id, label: stage.label, kind: stage.kind, dependsOn: [...stage.dependsOn], cohort: stage.cohort, profiles, repeats, requests, ...(budgets[stage.id] && provider !== 'gliner' ? { budget: budgets[stage.id]! } : {}), ...(batching ? { batching } : {}), ...(usage ? { usage } : {}) };
+    return { id: stage.id, label: stage.label, kind: stage.kind, dependsOn: [...stage.dependsOn], cohort: stage.cohort, profiles, repeats, requests, ...(budgets[stage.id] && provider !== 'gliner' ? { budget: budgets[stage.id]! } : {}), ...(batching ? { batching } : {}), ...(usage ? { usage } : {}), ...(handOffs.some((item) => item.stage === stage.id) ? { handOffs: handOffs.filter((item) => item.stage === stage.id) } : {}) };
   });
   const cost = provider === 'gliner' ? undefined : costOf(stages.flatMap((stage) => 'usage' in stage && stage.usage ? [stage.usage] : []));
   const warnings = new Set<string>(budgetWarnings);

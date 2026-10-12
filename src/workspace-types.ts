@@ -1,5 +1,6 @@
 import type { AuthStatus } from './auth.js';
 import type { Cohort, Pipeline, Usage } from './types.js';
+import type { HandOff } from './hand-off.js';
 import type { BatchPlan, CostEstimate, StageBudget, UsageEstimate } from './request-budget.js';
 
 /** Editable drafts use the same shape as runnable artifacts; validation happens at review. */
@@ -29,7 +30,7 @@ export interface WorkspacePlan {
   /** Requests the run is expected to send: the upper bound minus requests already answered by saved results. */
   newRequests: number;
   /** reused: every request is saved, so the step's results come back unchanged; partial: some are; run: none are, or an earlier step changes what it reads; skipped: its condition is false. */
-  stages: { id: string; label: string; kind: string; dependsOn: string[]; cohort?: string; profiles?: number; repeats?: number; requests: number; reused: number; reuse: 'reused' | 'partial' | 'run' | 'skipped'; budget?: StageBudget; batching?: BatchPlan; usage?: UsageEstimate }[];
+  stages: { id: string; label: string; kind: string; dependsOn: string[]; cohort?: string; profiles?: number; repeats?: number; requests: number; reused: number; reuse: 'reused' | 'partial' | 'run' | 'skipped'; budget?: StageBudget; batching?: BatchPlan; usage?: UsageEstimate; handOffs?: HandOff[] }[];
   /** Estimated TypeSafe bill if every request is new; absent for GLiNER. */
   cost?: CostEstimate;
   /** Estimated TypeSafe bill for the requests not answered by saved results. */

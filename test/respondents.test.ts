@@ -62,16 +62,16 @@ test('each individual response carries who gave it when it fits', async () => {
 test('when profiles would not fit, responses go plain and a summary of who answered remains', async () => {
   const log: EvaluationRequest[] = [];
   const pipeline = study({ stage: 'crowd', question: 'pick', select: 'responses' });
-  // ~140 tokens of background each: 300 plain responses fit, 300 profiles do not.
-  const cohorts = { crowd: makeCohort('crowd', 300, 'Plays games after work. '.repeat(18)), board: makeCohort('board', 2) };
+  // ~140 tokens of background each: 250 plain responses fit, 250 profiles do not (300 would be split into batches automatically).
+  const cohorts = { crowd: makeCohort('crowd', 250, 'Plays games after work. '.repeat(18)), board: makeCohort('board', 2) };
   assert.deepEqual(estimateBudgets(pipeline, cohorts, pipeline.stages).board!.respondents, { gamers: 'summary' });
   const record = await runPipeline(pipeline, cohorts, { ...options, provider: provider(log) });
   assert.equal(record.stages.board!.status, 'completed');
   const state = boardRequests(log)[0]!.state as { inputs: { gamers: Array<Record<string, Json>> }; respondents: { gamers: { profiles: string; people: number; distributions: Record<string, Json> } } };
-  assert.equal(state.inputs.gamers.length, 300);
+  assert.equal(state.inputs.gamers.length, 250);
   assert.ok(state.inputs.gamers.every((entry) => entry.respondent === undefined));
   assert.equal(state.respondents.gamers.profiles, 'left out to fit the request limit');
-  assert.equal(state.respondents.gamers.people, 300);
+  assert.equal(state.respondents.gamers.people, 250);
   assert.ok(state.respondents.gamers.distributions.platform);
 });
 
