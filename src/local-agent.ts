@@ -42,7 +42,8 @@ export interface LocalAgentProgress {
   /** Personas seen in partial output of batches that are not yet accepted. Always at most the batch sizes combined, and never part of completedPersonas. */
   inFlightPersonas?: number;
   /** Rough finish time from streaming speed. Present only before two batches have completed; later the batch timings give the estimate. */
-  estimate?: { seconds: number; basis: 'streaming'; at: string };
+  /** Seconds until every persona is written, at the pace personas have been written so far across all batches; 0 once all are written. */
+  estimate?: { seconds: number; basis: 'pace'; at: string };
   validation?: { scope: 'batch' | 'final' | 'persona' | 'workspace'; status: 'checking' | 'passed'; checks: string[]; checkedPersonas: number };
   /** The audience's shape for the live seat map. Personas of accepted batches are read from the job's members route. */
   audienceMap?: AudienceMap;
@@ -1494,6 +1495,8 @@ export class LocalAgentService {
     const batchList = (numbers: number[]) => numbers.length < 2 ? `batch ${numbers[0]}` : `batches ${numbers.slice(0, -1).join(', ')} and ${numbers[numbers.length - 1]}`;
 
     // Describes each batch from what its provider has shown so far. Streamed personas are a view of partial output only; acceptance still needs the batch checks.
+    // Pace of the whole job: personas written so far (checked or still streaming) per second since the first appeared, with every batch counted at once.
+    let paceFrom: { at: number; written: number } | undefined;
     const describe = () => {
       const now = Date.now();
       const batchDetails: BatchDetail[] = [...running.entries()].sort((a, b) => a[0] - b[0]).map(([index, state]) => {
@@ -1506,15 +1509,15 @@ export class LocalAgentService {
         return { index: index + 1, size, state: batchState, attempt: state.attempt, maxAttempts: 1 + BATCH_RETRIES, streamingPersonas: contentStreamed ? Math.min(size, seen.personas) : 0, outputChars: seen.chars, ...(seen.tokens !== undefined ? { outputTokens: seen.tokens } : {}), contentStreamed, startedAt: state.attemptStartedAt, ...(state.waiting ? { wait: state.waiting } : {}), ...(state.hedged ? { hedged: true } : {}) };
       });
       const inFlightPersonas = batchDetails.reduce((sum, detail) => sum + detail.streamingPersonas, 0);
-      // Rough pace from partial output: personas written per batch-second, scaled to the batches that will run at once. Superseded by batch timings after two batches finish.
       let estimate: LocalAgentProgress['estimate'];
-      const writing = batchDetails.filter(detail => detail.contentStreamed);
-      const batchSeconds = writing.reduce((sum, detail) => sum + Math.max(0, now - Date.parse(detail.startedAt)) / 1000, 0);
-      if (acceptedBatches < 2 && inFlightPersonas >= 2 && batchSeconds >= 3) {
-        const perBatch = inFlightPersonas / batchSeconds;
-        const left = request.size - acceptedPersonas - inFlightPersonas;
-        const seconds = left / (perBatch * Math.max(1, Math.min(concurrency, batches - acceptedBatches)));
-        if (Number.isFinite(seconds) && seconds > 0) estimate = { seconds: Math.round(seconds), basis: 'streaming', at: new Date(now).toISOString() };
+      const written = Math.min(request.size, acceptedPersonas + inFlightPersonas);
+      // Personas a continued run kept from before are not part of this run's pace.
+      if (!paceFrom) paceFrom = { at: now, written: acceptedPersonas };
+      if (written <= paceFrom.written) paceFrom.at = now;
+      const paceSeconds = (now - paceFrom.at) / 1000, paceWritten = written - paceFrom.written;
+      if (paceWritten >= 2 && paceSeconds >= 3) {
+        const seconds = (request.size - written) / (paceWritten / paceSeconds);
+        if (Number.isFinite(seconds)) estimate = { seconds: Math.max(0, Math.round(seconds)), basis: 'pace', at: new Date(now).toISOString() };
       }
       return { batchDetails: [...batchDetails, ...justAccepted], inFlightPersonas, estimate };
     };
