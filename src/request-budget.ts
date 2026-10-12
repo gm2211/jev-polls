@@ -1,7 +1,7 @@
-import type { Answer, Cohort, Json, Persona, PollInputBinding, PollStage, Pipeline, Question, Stage, Vote } from './types.js';
+import type { Answer, ChooseStage, Cohort, Json, Persona, PollInputBinding, PollStage, Pipeline, Question, Stage, Vote } from './types.js';
 import { respondentLookup, respondentProfile, respondentsSummary } from './respondents.js';
 import { resolveQuestion } from './engine-utils.js';
-import { batchedBinding, COMBINE_GUIDE, describeBatching, MAP_GUIDE, mapInput, reduceInput, verdictEntry, type BatchShape } from './batching.js';
+import { batchedBinding, COMBINE_GUIDE, describeBatching, FINAL_CHOICE_ROLE, FINAL_COMBINE_GUIDE, FINAL_MAP_GUIDE, MAP_GUIDE, mapInput, plural, reduceInput, verdictEntry, type BatchShape } from './batching.js';
 
 /** Jev hard limits (https://docs.typesafe.ai/models.md): 64k tokens per request, 32k for state plus the longest question. */
 export const JEV_STATE_AND_QUESTION_LIMIT = 32_000;
@@ -93,6 +93,8 @@ export interface StageBudget {
   replyTokens: number;
   /** Present when a `responses` input is read in batches and then combined. */
   batching?: BatchPlan;
+  /** Final choice only: how its inputs are read, in one request or in slices then combined. */
+  choose?: ChoosePlan;
   /** Who answered each input (by input name, or earlier step id without named inputs): each respondent's profile with their response, or only a summary of the group. */
   respondents?: Record<string, 'profiles' | 'summary'>;
 }
@@ -116,6 +118,7 @@ function sourceStats(pipeline: Pipeline, cohorts: Record<string, Cohort>, stageI
     return { votes: size * repeats, segments: cohort.segments.filter((s) => s.weight > 0).map((s) => s.id), repeats };
   }
   if (stage.kind === 'decision') return sourceStats(pipeline, cohorts, stage.from.stage, seen);
+  if (stage.kind === 'choose') return { votes: 1, segments: [], repeats: 1 };
   const parts = stage.inputs.map((input) => sourceStats(pipeline, cohorts, input.stage, new Set(seen)));
   return { votes: parts.reduce((sum, p) => sum + p.votes, 0), segments: [...new Set(parts.flatMap((p) => p.segments))], repeats: Math.max(1, ...parts.map((p) => p.repeats)) };
 }
@@ -186,7 +189,7 @@ function placeholderUpstream(pipeline: Pipeline, cohorts: Record<string, Cohort>
     const source = pipeline.stages.find((item) => item.id === id);
     if (!source) return [];
     const stats = sourceStats(pipeline, cohorts, id);
-    const questions: Record<string, Question> = source.kind === 'poll' ? source.questions : (() => {
+    const questions: Record<string, Question> = source.kind === 'poll' || source.kind === 'choose' ? source.questions : (() => {
       const question = resolveQuestion(pipeline.stages, id, source.outputQuestion);
       return question ? { [source.outputQuestion]: { ...question, label: source.label } as Question } : {};
     })();
@@ -202,6 +205,7 @@ function sourceCohorts(pipeline: Pipeline, cohorts: Record<string, Cohort>, stag
   seen.add(stageId);
   if (stage.kind === 'poll') return cohorts[stage.cohort] ? [cohorts[stage.cohort]!] : [];
   if (stage.kind === 'decision') return sourceCohorts(pipeline, cohorts, stage.from.stage, seen);
+  if (stage.kind === 'choose') return [];
   return [...new Set(stage.inputs.flatMap((input) => sourceCohorts(pipeline, cohorts, input.stage, new Set(seen))))];
 }
 
@@ -427,9 +431,9 @@ export interface CostEstimate extends UsageEstimate { usd: number; usdPerMillion
 
 /** Billed tokens for one step: `runs` is respondents times repeats; batched steps add their combining requests. */
 export function estimateStageUsage(budget: StageBudget, runs: number): UsageEstimate {
-  const layers = budget.batching?.layerRequests ?? [1];
+  const layers = budget.batching?.layerRequests ?? budget.choose?.layerRequests ?? [1];
   const combining = layers.slice(1).reduce((sum, count) => sum + count, 0);
-  const input = runs * (layers[0]! * budget.meanRequestTokens + combining * (budget.batching?.reduceTotal ?? 0));
+  const input = runs * (layers[0]! * budget.meanRequestTokens + combining * (budget.batching?.reduceTotal ?? budget.choose?.reduceTotal ?? 0));
   const output = runs * (layers[0]! + combining) * budget.replyTokens;
   return { inputTokens: Math.ceil(input * BILLED_INPUT_RATIO), outputTokens: Math.ceil(output * BILLED_OUTPUT_RATIO) };
 }
@@ -443,11 +447,150 @@ export function costOf(usage: UsageEstimate[]): CostEstimate {
 export function estimateBudgets(pipeline: Pipeline, cohorts: Record<string, Cohort>, stages: Stage[]): Record<string, StageBudget> {
   const result: Record<string, StageBudget> = {};
   for (const stage of stages) {
+    if (stage.kind === 'choose') { result[stage.id] = estimateChooseBudget(pipeline, cohorts, stage); continue; }
     if (stage.kind !== 'poll') continue;
     const budget = estimateStageBudget(pipeline, cohorts, stage);
     if (budget) result[stage.id] = budget;
   }
   return result;
+}
+
+/** The state a final choice sends: no persona, just the study, the step, what each input is, and the inputs. */
+export function buildChooseState(pipeline: Pipeline, stage: ChooseStage, parts: { inputs: Json; guide?: string; respondents?: Json }): Json {
+  const sources = Object.fromEntries(Object.entries(stage.inputs).map(([alias, binding]) => {
+    const source = pipeline.stages.find((item) => item.id === binding.stage);
+    const question = resolveQuestion(pipeline.stages, binding.stage, binding.question);
+    return [alias, { step: source?.label ?? binding.stage, question: question?.label ?? binding.question, reads: CHOOSE_READS[binding.select ?? 'summary'] }];
+  }));
+  const state: Record<string, Json> = { pipelineContext: pipeline.context, stageContext: stage.context ?? null, role: FINAL_CHOICE_ROLE, sources, inputs: parts.inputs };
+  if (parts.respondents !== undefined) state.respondents = parts.respondents;
+  if (parts.guide !== undefined) state.inputGuide = parts.guide;
+  return state;
+}
+const CHOOSE_READS: Record<string, string> = { summary: 'the weighted summary of answers', responses: 'every individual answer', winner: 'the leading option', mean: 'the weighted mean', probabilities: 'the weighted distribution' };
+
+/** One input of a final choice as the planner sees it: a whole value, or individual responses that can be split. */
+export interface ChooseInput { alias: string; sourceLabel: string; value: Json; responses?: { count: number; entryBytes: number } }
+export interface ChoosePart { alias: string; sourceLabel: string; totalResponses: number; batchSize: number; batches: number }
+export interface ChoosePlan {
+  /** Inputs read in slices; empty when everything fits one request. */
+  parts: ChoosePart[];
+  totalResponses: number; mapRequests: number; groupSize: number; reduceRounds: number;
+  /** Requests in each layer: one request, or the slices first, then each combining round. */
+  layerRequests: number[]; requestsPerRun: number;
+  largest: number; total: number; fits: boolean;
+  /** Average first-layer request and one combining request, in tokens, for the cost estimate. */
+  meanRequestTokens: number; reduceTotal: number;
+  /** Present when it cannot fit: why, in plain words. */
+  problem?: string;
+  line: string;
+}
+
+/** The key the combining requests use for earlier verdicts, clear of the step's own input names. */
+export function verdictKey(stage: ChooseStage): string {
+  let key = 'combine', n = 2;
+  while (Object.hasOwn(stage.inputs, key)) key = `combine_${n++}`;
+  return key;
+}
+
+/**
+ * How a final choice reads its inputs: in one request when everything fits, otherwise map-reduce. Each input that
+ * carries individual responses is read in slices next to the step's other (whole) inputs, then the verdicts are
+ * combined in rounds until one answer remains. Engine and review share it, so the reviewed count is the run's count.
+ */
+export function planChoose(pipeline: Pipeline, stage: ChooseStage, inputs: ChooseInput[], respondents?: Json): ChoosePlan {
+  const whole = Object.fromEntries(inputs.filter((item) => !item.responses?.count).map((item) => [item.alias, item.value]));
+  const split = inputs.filter((item) => item.responses?.count);
+  const stateOf = (value: Record<string, Json>, guide?: string): Json => buildChooseState(pipeline, stage, { inputs: value, ...(guide ? { guide } : {}), ...(respondents !== undefined ? { respondents } : {}) });
+  const room = (size: RequestSize): number => Math.min(BATCH_HEADROOM * JEV_STATE_AND_QUESTION_LIMIT - size.stateTokens - size.longestQuestionTokens, BATCH_HEADROOM * JEV_REQUEST_LIMIT - size.stateTokens - size.allQuestionsTokens);
+  const missingTokens = (item: ChooseInput): number => Math.ceil(Math.max(0, item.responses!.count - (Array.isArray(item.value) ? item.value.length : 0)) * (item.responses!.entryBytes + 1) / 3);
+  const full = requestSize(stateOf({ ...whole, ...Object.fromEntries(split.map((item) => [item.alias, item.value])) }), stage.questions);
+  const fullExtra = split.reduce((sum, item) => sum + missingTokens(item), 0);
+  const totalResponses = split.reduce((sum, item) => sum + item.responses!.count, 0);
+  const fullLargest = full.stateAndLongest + fullExtra, fullTotal = full.total + fullExtra;
+  const one = (fits: boolean, problem?: string): ChoosePlan => ({
+    parts: [], totalResponses, mapRequests: 1, groupSize: 0, reduceRounds: 0, layerRequests: [1], requestsPerRun: 1,
+    largest: fullLargest, total: fullTotal, fits, meanRequestTokens: fullTotal, reduceTotal: 0, ...(problem ? { problem } : {}),
+    line: `${stage.label} reads ${inputs.length === 1 ? 'its input' : `all ${inputs.length} inputs`} in one request`,
+  });
+  if (fullLargest <= BATCH_HEADROOM * JEV_STATE_AND_QUESTION_LIMIT && fullTotal <= BATCH_HEADROOM * JEV_REQUEST_LIMIT) return one(true);
+  if (!split.length) return one(fullLargest <= JEV_STATE_AND_QUESTION_LIMIT && fullTotal <= JEV_REQUEST_LIMIT, 'its inputs are summaries, which cannot be read in slices; read fewer outputs or shorten the questions');
+
+  const parts: ChoosePart[] = [];
+  let mapLargest = 0, mapTotal = 0, mapSum = 0, blocked: string | undefined;
+  for (const item of split) {
+    const count = item.responses!.count, entry = item.responses!.entryBytes + 1;
+    const empty = requestSize(stateOf({ ...whole, [item.alias]: mapInput(count, count, count, []) }, FINAL_MAP_GUIDE), stage.questions);
+    const batchSize = Math.min(count, Math.floor(room(empty) * 3 / entry));
+    if (batchSize < 1) { blocked ??= `the other inputs leave no room to read "${item.alias}" from ${item.sourceLabel}`; parts.push({ alias: item.alias, sourceLabel: item.sourceLabel, totalResponses: count, batchSize: 1, batches: count }); continue; }
+    const batches = Math.ceil(count / batchSize);
+    const state = empty.stateTokens + Math.ceil(batchSize * entry / 3);
+    mapLargest = Math.max(mapLargest, state + empty.longestQuestionTokens);
+    mapTotal = Math.max(mapTotal, state + empty.allQuestionsTokens);
+    mapSum += batches * (empty.stateTokens + empty.allQuestionsTokens) + Math.ceil(count * entry / 3);
+    parts.push({ alias: item.alias, sourceLabel: item.sourceLabel, totalResponses: count, batchSize, batches });
+  }
+  const mapRequests = parts.reduce((sum, part) => sum + part.batches, 0);
+  const sample = Object.fromEntries(Object.entries(stage.questions).map(([id, question]) => [id, representativeAnswer(question) as unknown as Answer]));
+  const longestAlias = split.map((item) => item.alias).reduce((best, alias) => alias.length > best.length ? alias : best, '');
+  const verdictBytes = bytesOf(verdictEntry({ input: longestAlias, batch: totalResponses, responses: totalResponses, answers: sample })) + 1;
+  const emptyReduce = requestSize(stateOf({ ...whole, [verdictKey(stage)]: reduceInput(99, totalResponses, []) }, FINAL_COMBINE_GUIDE), stage.questions);
+  const groupSize = Math.max(2, Math.floor(room(emptyReduce) * 3 / verdictBytes));
+  const layerRequests = [mapRequests];
+  let reduceRounds = 0;
+  if (mapRequests > 1) {
+    let count = mapRequests;
+    while (count > groupSize) { count = Math.ceil(count / groupSize); layerRequests.push(count); reduceRounds += 1; }
+    layerRequests.push(1);
+    reduceRounds += 1;
+  }
+  const reduceState = mapRequests > 1 ? emptyReduce.stateTokens + Math.ceil(Math.min(groupSize, mapRequests) * verdictBytes / 3) : 0;
+  const largest = Math.max(mapLargest, mapRequests > 1 ? reduceState + emptyReduce.longestQuestionTokens : 0);
+  const total = Math.max(mapTotal, mapRequests > 1 ? reduceState + emptyReduce.allQuestionsTokens : 0);
+  const fits = !blocked && largest <= JEV_STATE_AND_QUESTION_LIMIT && total <= JEV_REQUEST_LIMIT;
+  const list = parts.map((part) => `${plural(part.totalResponses, 'response')} from ${part.sourceLabel}`);
+  const reads = list.length > 1 ? `${list.slice(0, -1).join(', ')} and ${list.at(-1)}` : list[0]!;
+  return {
+    parts, totalResponses, mapRequests, groupSize, reduceRounds, layerRequests, requestsPerRun: layerRequests.reduce((sum, count) => sum + count, 0),
+    largest, total, fits, meanRequestTokens: Math.ceil(mapSum / Math.max(1, mapRequests)), reduceTotal: mapRequests > 1 ? reduceState + emptyReduce.allQuestionsTokens : 0, ...(blocked ? { problem: blocked } : !fits ? { problem: 'even one slice or one combining request is over the limit; read summaries instead of every answer, or shorten the questions' } : {}),
+    line: `${stage.label} reads ${reads} in ${plural(mapRequests, 'batch', 'batches')}${mapRequests > 1 ? `, then combines them in ${plural(reduceRounds, 'round')}` : ''}`,
+  };
+}
+
+/** Bytes of one individual response to this question as the review sizes it, with the longest ids and numbers. */
+export function responseEntryBytes(question: Question): number { return bytesOf(voteRecord(question, LONG_ID, LONG_ID, 1)); }
+
+/** Review-time estimate for a final choice: upper-bound placeholders for outputs that do not exist yet. */
+export function estimateChooseBudget(pipeline: Pipeline, cohorts: Record<string, Cohort>, stage: ChooseStage): StageBudget {
+  const items: ChooseInput[] = Object.entries(stage.inputs).map(([alias, binding]) => {
+    const source = pipeline.stages.find((item) => item.id === binding.stage);
+    const placeholder = placeholderInput(pipeline, cohorts, binding, LONG_ID, LONG_ID);
+    const sourceLabel = source?.label ?? binding.stage;
+    if (placeholder.kind !== 'responses') return { alias, sourceLabel, value: placeholder.value };
+    const entry = (placeholder.value as Json[])[0];
+    return { alias, sourceLabel, value: placeholder.value, responses: { count: sourceStats(pipeline, cohorts, binding.stage).votes, entryBytes: entry === undefined ? 0 : bytesOf(entry) } };
+  });
+  const summaries = Object.fromEntries(Object.entries(stage.inputs).map(([alias, binding]) => [alias, placeholderRespondents(pipeline, cohorts, binding.stage, [binding.question])]).filter(([, summary]) => summary !== null)) as Record<string, Json>;
+  const respondents = Object.keys(summaries).length ? summaries as Json : undefined;
+  const plan = planChoose(pipeline, stage, items, respondents);
+  const blocked = !plan.fits;
+  // Slices are sized to fill each request on purpose, so only an unsplit request near the limit is worth a warning.
+  const warned = !plan.parts.length && (plan.largest > JEV_STATE_AND_QUESTION_LIMIT * BUDGET_WARNING_RATIO || plan.total > JEV_REQUEST_LIMIT * BUDGET_WARNING_RATIO);
+  const top = items.map((item) => ({ name: `the input "${item.alias}" from ${item.sourceLabel}`, tokens: tokensOf(item.value) + (item.responses ? Math.ceil(Math.max(0, item.responses.count - 1) * (item.responses.entryBytes + 1) / 3) : 0) })).reduce((best, part) => part.tokens > best.tokens ? part : best, { name: 'the step context', tokens: tokensOf(stage.context ?? null) });
+  const message = blocked
+    ? `Step "${stage.label}" is too large for Jev: ${plan.problem ?? 'its largest request is over the limit'}. The biggest part is ${top.name}, about ${fmt(top.tokens)} tokens.`
+    : warned ? `Step "${stage.label}" is close to Jev's limit: its largest request is about ${fmt(plan.largest)} of ${fmt(JEV_STATE_AND_QUESTION_LIMIT)} tokens.` : undefined;
+  return {
+    stageId: stage.id, label: stage.label,
+    largestRequestTokens: plan.largest, limit: JEV_STATE_AND_QUESTION_LIMIT,
+    totalRequestTokens: plan.total, totalLimit: JEV_REQUEST_LIMIT,
+    status: blocked ? 'blocked' : warned ? 'warning' : 'ok',
+    ...(message ? { message } : {}),
+    largestPart: top,
+    meanRequestTokens: plan.meanRequestTokens,
+    replyTokens: Object.values(stage.questions).reduce((sum, question) => sum + tokensOf(representativeAnswer(question)), 0),
+    choose: plan,
+  };
 }
 
 /** Throws one clear message naming every over-limit step; returns warnings for steps near the limit. */

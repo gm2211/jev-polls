@@ -266,6 +266,14 @@ export function workspacePlan(document: WorkspaceDocument, pipelineId: string, p
   const budgets = estimateBudgets(pipeline, cohorts, ordered);
   const budgetWarnings = provider === 'gliner' ? [] : enforceBudgets(budgets);
   const stages = ordered.map((stage) => {
+    if (stage.kind === 'choose') {
+      const choose = budgets[stage.id]?.choose;
+      const requests = choose?.requestsPerRun ?? 1;
+      maxRequests += requests;
+      // A final choice is one Jev, so its estimate is one run of its layers.
+      const usage = budgets[stage.id] && provider !== 'gliner' ? estimateStageUsage(budgets[stage.id]!, 1) : undefined;
+      return { id: stage.id, label: stage.label, kind: stage.kind, dependsOn: [...stage.dependsOn], requests, ...(budgets[stage.id] && provider !== 'gliner' ? { budget: budgets[stage.id]! } : {}), ...(usage ? { usage } : {}) };
+    }
     if (stage.kind !== 'poll') return { id: stage.id, label: stage.label, kind: stage.kind, dependsOn: [...stage.dependsOn], requests: 0 };
     const cohort = cohorts[stage.cohort]!;
     const positiveIds = new Set(cohort.segments.filter((segment) => segment.weight > 0).map((segment) => segment.id));
@@ -356,9 +364,12 @@ function validateStageDraft(value: unknown, path: string): void {
   id(preliminary.id, `${path}.id`); string(preliminary.label, `${path}.label`); stringArray(preliminary.dependsOn, `${path}.dependsOn`, MAX_STAGES, true);
   if (preliminary.join !== undefined) enumValue(preliminary.join, ['all', 'any'], `${path}.join`);
   if (preliminary.when !== undefined) validateCondition(preliminary.when, `${path}.when`, 0);
-  if (preliminary.kind === 'poll') {
-    const s = object(value, path, [...common, 'cohort', 'questions', 'size', 'repeats', 'context', 'inputs'], ['id', 'label', 'kind', 'dependsOn', 'cohort', 'questions']);
-    string(s.cohort, `${path}.cohort`); if (s.cohort !== '') id(s.cohort, `${path}.cohort`);
+  if (preliminary.kind === 'poll' || preliminary.kind === 'choose') {
+    const choose = preliminary.kind === 'choose';
+    const s = choose
+      ? object(value, path, [...common, 'questions', 'context', 'inputs'], ['id', 'label', 'kind', 'dependsOn', 'questions', 'inputs'])
+      : object(value, path, [...common, 'cohort', 'questions', 'size', 'repeats', 'context', 'inputs'], ['id', 'label', 'kind', 'dependsOn', 'cohort', 'questions']);
+    if (!choose) { string(s.cohort, `${path}.cohort`); if (s.cohort !== '') id(s.cohort, `${path}.cohort`); }
     const questions = object(s.questions, `${path}.questions`, undefined, []);
     if (Object.keys(questions).length > MAX_QUESTIONS) throw new Error(`${path}.questions exceeds ${MAX_QUESTIONS} entries`);
     for (const [key, question] of Object.entries(questions)) { id(key, `${path}.questions key`); validateQuestionDraft(question, `${path}.questions.${key}`); }
@@ -376,6 +387,7 @@ function validateStageDraft(value: unknown, path: string): void {
         string(b.question, `${entryPath}.question`); if (b.question !== '') id(b.question, `${entryPath}.question`);
         if (b.select !== undefined) enumValue(b.select, ['summary', 'winner', 'mean', 'probabilities', 'responses'], `${entryPath}.select`);
         if (b.batch !== undefined) {
+          if (choose) throw new Error(`${entryPath}.batch is automatic for a final choice; remove it`);
           if (b.select !== 'responses') throw new Error(`${entryPath}.batch needs select 'responses'`);
           if (b.batch !== 'auto') {
             const setting = object(b.batch, `${entryPath}.batch`, ['size'], ['size']);
@@ -401,7 +413,7 @@ function validateStageDraft(value: unknown, path: string): void {
     string(from.stage, `${path}.from.stage`); if (from.stage !== '') id(from.stage, `${path}.from.stage`);
     string(from.question, `${path}.from.question`); if (from.question !== '') id(from.question, `${path}.from.question`);
     string(s.outputQuestion, `${path}.outputQuestion`); if (s.outputQuestion !== '') id(s.outputQuestion, `${path}.outputQuestion`);
-  } else throw new Error(`${path}.kind must be poll, aggregate, or decision`);
+  } else throw new Error(`${path}.kind must be poll, choose, aggregate, or decision`);
 }
 
 function validateQuestionDraft(value: unknown, path: string): void {

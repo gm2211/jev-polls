@@ -18,7 +18,7 @@ const voteSchema = z.object({ personaId: z.string(), cohortId: z.string().option
 export const runSchema = z.object({
   version: z.literal(1), id: z.string(), createdAt: z.string(), finishedAt: z.string(), pipeline: z.unknown(), pipelineHash: z.string(), provider: z.enum(['mock', 'typesafe', 'gliner']), model: z.string(), seed: z.string(), status: z.enum(['completed', 'failed']), cohorts: z.record(z.string(), z.unknown()), warnings: z.array(z.string()),
   usage: z.object({ inputTokens: z.number().nonnegative(), outputTokens: z.number().nonnegative(), requests: z.number().nonnegative(), cacheHits: z.number().nonnegative(), tokenUsage: z.literal('unreported').optional(), measuredInputTokens: z.number().int().nonnegative().optional() }).strict(),
-  stages: z.record(z.string(), z.object({ id: z.string(), kind: z.enum(['poll', 'aggregate', 'decision']), label: z.string(), status: z.enum(['completed', 'skipped', 'failed']), reason: z.string().optional(), dependsOn: z.array(z.string()), startedAt: z.string(), finishedAt: z.string(),
+  stages: z.record(z.string(), z.object({ id: z.string(), kind: z.enum(['poll', 'aggregate', 'decision', 'choose']), label: z.string(), status: z.enum(['completed', 'skipped', 'failed']), reason: z.string().optional(), dependsOn: z.array(z.string()), startedAt: z.string(), finishedAt: z.string(),
     votes: z.array(voteSchema),
     summaries: z.record(z.string(), summary.extend({ bySegment: z.record(z.string(), summary), byRepeat: z.record(z.string(), summary) }).strict()),
     batching: z.object({ input: z.string(), sourceStage: z.string(), sourceLabel: z.string(), totalResponses: z.number().int().nonnegative(), batchSize: z.number().int().positive(), batches: z.number().int().positive(), groupSize: z.number().int().positive(), reduceRounds: z.number().int().nonnegative(), note: z.string() }).strict().optional(),
@@ -128,7 +128,7 @@ export function parseRun(input: unknown): RunRecord {
   for (const c of Object.values(run.cohorts)) parseCohort(c);
   // A step that took its options from an earlier step asked only the ones that ranked, and so did anything reading its result.
   const asked: Pipeline = { ...pipeline, stages: pipeline.stages.map(stage => {
-    if (stage.kind !== 'poll' || !Object.values(stage.questions).some(q => q.type === 'choice' && q.optionsFrom)) return stage;
+    if ((stage.kind !== 'poll' && stage.kind !== 'choose') || !Object.values(stage.questions).some(q => q.type === 'choice' && q.optionsFrom)) return stage;
     try { return { ...stage, questions: resolveOptionsFrom(pipeline, stage, run.stages as Record<string, StageResult>) }; } catch { return stage; }
   }) };
   const questionsByStage = outputQuestions(asked);

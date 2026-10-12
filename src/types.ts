@@ -22,7 +22,9 @@ export interface PollInputBinding { stage: string; question: string; select?: Po
 export interface PollStage extends BaseStage { kind: 'poll'; cohort: string; questions: Record<string, Question>; size?: number; repeats?: number; context?: Json; inputs?: Record<string, PollInputBinding> }
 export interface AggregateStage extends BaseStage { kind: 'aggregate'; inputs: { stage: string; question: string; weight: number }[]; outputQuestion: string }
 export interface DecisionStage extends BaseStage { kind: 'decision'; from: { stage: string; question: string }; outputQuestion: string }
-export type Stage = PollStage | AggregateStage | DecisionStage;
+/** Final choice: one Jev request (no audience) reads every connected output and answers once. Inputs too large for one request are read in batches and combined automatically. */
+export interface ChooseStage extends BaseStage { kind: 'choose'; questions: Record<string, Question>; context?: Json; inputs: Record<string, PollInputBinding> }
+export type Stage = PollStage | AggregateStage | DecisionStage | ChooseStage;
 export interface Pipeline { version: 1; id: string; name: string; description: string; context: Json; cohorts: Record<string, string>; stages: Stage[]; /** Canvas positions by stage id; layout only, never study logic. */ layout?: Record<string, { x: number; y: number }> }
 /** Native independent sigmoid scores retained before relative normalization. These are not calibrated probabilities. */
 export interface LabelScoreEvidence { semantics: 'independent_sigmoid'; rawScores: Record<string, number>; rawLogits: Record<string, number> }

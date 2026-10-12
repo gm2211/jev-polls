@@ -5,7 +5,7 @@ const optionsBoxFlat=value=>String(value??'').replace(/\s+/g,' ').trim();
 function optionsBoxKey(p,s,qid){return [S.projectId,p.id,s.id,qid].join(':')}
 /** The choice question the step panel shows now, or null. */
 function optionsBoxCurrent(){
-  const p=pipeline(),s=selectedStage(),entry=s?.kind==='poll'?setupQuestion(s):null,q=entry?.[1];
+  const p=pipeline(),s=selectedStage(),entry=s?.kind==='poll'||s?.kind==='choose'?setupQuestion(s):null,q=entry?.[1];
   return p&&q&&q.type==='choice'?{p,s,qid:entry[0],q,key:optionsBoxKey(p,s,entry[0])}:null;
 }
 /** A pasted or typed line is a name, optionally followed by a description after a tab or a colon and a space: "Orbital Empire: an empire, but in orbit". A tab wins, so names that contain a colon stay whole. */

@@ -2,15 +2,17 @@
 export const STUDY_SETUP_CLIENT = String.raw`
 function answerName(type){return {choice:'Compare options',noul:'Yes / no',score:'Ordered scale'}[type]||'Result'}
 const ANSWER_HINTS={noul:'How likely each persona is to say yes.',choice:'Which of your options each persona prefers; results rank the options.',score:'Where each persona lands on levels you define, low to high.'};
-function setupTypeChooser(q){
-  return '<fieldset class="setup-type-choice"><legend>What kind of answer?</legend><div class="setup-type-cards">'+['noul','choice','score'].map(type=>'<button type="button" class="setup-type-card" data-act="setup-type" data-type="'+type+'" aria-pressed="'+(q.type===type)+'"><strong>'+answerName(type)+'</strong><span>'+ANSWER_HINTS[type]+'</span></button>').join('')+'</div></fieldset>';
+const CHOOSE_HINTS={noul:'How likely the answer is yes, judged once from everything it reads.',choice:'Which of your options Jev picks, with how likely each one is.',score:'Where the answer lands on levels you define, low to high.'};
+function setupTypeChooser(q,s){
+  const hints=s?.kind==='choose'?CHOOSE_HINTS:ANSWER_HINTS;
+  return '<fieldset class="setup-type-choice"><legend>What kind of answer?</legend><div class="setup-type-cards">'+['noul','choice','score'].map(type=>'<button type="button" class="setup-type-card" data-act="setup-type" data-type="'+type+'" aria-pressed="'+(q.type===type)+'"><strong>'+answerName(type)+'</strong><span>'+hints[type]+'</span></button>').join('')+'</div></fieldset>';
 }
 function optionName(key,value){return value&&typeof value==='object'?value.label:value??key}
 function optionDescription(value){return value&&typeof value==='object'?value.description:''}
 function stepTitle(p,s){
   const questions=Object.values(s.questions||{}),question=questions[0]?.label?.trim();
-  const custom=s.label?.trim(),prefix=s.kind==='poll'&&custom&&!['First question','Next question','New question'].includes(custom)&&custom!==question?custom+': ':'';
-  const title=s.kind==='poll'?prefix+(question&&!/^What should this (?:step|phase) decide\?$/.test(question)?question:'Untitled question')+(questions.length>1?' + '+(questions.length-1)+' more':''):(s.label?.trim()||(s.kind==='aggregate'?'Combine answers':'Final result'));
+  const custom=s.label?.trim(),prefix=(s.kind==='poll'||s.kind==='choose')&&custom&&!['First question','Next question','New question','Final choice'].includes(custom)&&custom!==question?custom+': ':'';
+  const title=s.kind==='choose'&&!(question&&!/^What should this (?:step|phase) decide\?$/.test(question))?(custom||'Final choice'):s.kind==='poll'||s.kind==='choose'?prefix+(question&&!/^What should this (?:step|phase) decide\?$/.test(question)?question:'Untitled question')+(questions.length>1?' + '+(questions.length-1)+' more':''):(s.label?.trim()||(s.kind==='aggregate'?'Combine answers':'Final result'));
   return (p.stages.findIndex(x=>x.id===s.id)+1)+'. '+title.replace(/\s+/g,' ');
 }
 function inputTitle(p,input){
@@ -20,6 +22,7 @@ function inputTitle(p,input){
 }
 function setupQuestionText(q){const text=q?.label||'';return /^What should this (?:step|phase) decide\?$/.test(text.trim())?'':text}
 function setupStageRole(p,s){
+  if(s.kind==='choose')return 'Final choice';
   if(s.kind!=='poll')return s.kind==='aggregate'?'Combined answer':'Final answer';
   const polls=p.stages.filter(x=>x.kind==='poll'),index=polls.findIndex(x=>x.id===s.id);
   return index===0?'Main question':s.dependsOn?.length?'Follow-up '+index:'Independent question '+(index+1);
@@ -32,9 +35,9 @@ function studyQuestionList(p){
   const page=pageItems(p.stages,'study-questions-'+p.id,6);
   const rows=page.items.map(s=>{
     const entries=Object.values(s.questions||{}),missing=s.kind==='poll'?entries.map(q=>setupWizardReady(q,poolForPhase(p,s)).findIndex(value=>!value)).find(index=>index>=0):undefined;
-    const status=s.kind==='poll'?(!entries.length?'Question needed':missing===undefined?'Ready to review':['Question needed','Choose cohort','Options needed'][missing]):s.kind==='aggregate'&&!s.inputs?.length?'Choose earlier answers':s.kind==='decision'&&!p.stages.some(x=>x.id===s.from?.stage)?'Choose source answer':'Ready to review';
+    const status=s.kind==='choose'?(!entries.length||entries.some(q=>!setupWizardReady(q,null)[0])?'Question needed':entries.some(q=>!setupWizardReady(q,null)[2])?'Options needed':!Object.keys(s.inputs||{}).length?'Connect earlier outputs':'Ready to review'):s.kind==='poll'?(!entries.length?'Question needed':missing===undefined?'Ready to review':['Question needed','Choose cohort','Options needed'][missing]):s.kind==='aggregate'&&!s.inputs?.length?'Choose earlier answers':s.kind==='decision'&&!p.stages.some(x=>x.id===s.from?.stage)?'Choose source answer':'Ready to review';
     const questions=entries.map(q=>setupQuestionText(q)||'Write your question').join(' · '),custom=s.label?.trim();
-    const text=s.kind==='poll'?(custom&&!['First question','Next question','New question'].includes(custom)&&custom!==questions?custom+': ':'')+questions:s.label||setupStageRole(p,s);
+    const text=s.kind==='poll'||s.kind==='choose'?(custom&&!['First question','Next question','New question'].includes(custom)&&custom!==questions?custom+': ':'')+questions:s.label||setupStageRole(p,s);
     return '<button type="button" class="setup-question-row" data-act="setup-edit-step" data-id="'+attr(s.id)+'" aria-label="Edit '+attr(setupStageRole(p,s))+': '+attr(text)+'"><span><strong>'+esc(setupStageRole(p,s))+'</strong><span>'+esc(text)+'</span></span><small>'+esc(status)+'</small>'+icon('right')+'</button>';
   }).join('');
   return '<section class="panel setup-question-list"><div class="setup-outline-heading"><h2 tabindex="-1">Questions in this study</h2><button type="button" class="button small" data-act="setup-edit-step" data-id="'+attr(S.stageId||p.stages[0]?.id||'')+'">Return to editor</button></div><p class="subtle">Each question has its own cohort and answer options.</p><div class="setup-question-rows">'+rows+'</div>'+page.controls+'</section>';
@@ -59,7 +62,7 @@ function setupCohortPicker(p,s){
   return notice+(saved?'<div class="setup-section-heading"><h3>Who answers?</h3></div><div class="setup-cohorts">'+choices+'</div>'+cohorts.controls+(!pool?'<p class="subtle">Choose a saved audience for this question, or create one below.</p>':''):'')+(pending?'':setupAudienceForm(p,s,pending,saved));
 }
 function stageForm(p,s,focused=false){
-  if(s.kind!=='poll')return resultSetup(p,s);
+  if(s.kind!=='poll'&&s.kind!=='choose')return resultSetup(p,s);
   const entry=setupQuestion(s),pool=poolForPhase(p,s);
   const picker=setupQuestionToolbar(p,s);
   if(!entry)return panel('Add a question','','<button class="button primary" data-act="add-question">Add question</button>',picker);
@@ -70,8 +73,8 @@ function stageForm(p,s,focused=false){
   const options=q.type==='score'?q.criteria.map((label,i)=>({key:String(i),label})):[],optionPage=pageItems(options,'setup-options-'+s.id+'-'+qid,4);
   const optionRows=optionPage.items.map((o,offset)=>{const i=optionPage.start+offset;return '<div class="setup-option" data-setup-option="'+attr(o.key)+'"><input name="setupOption" aria-label="Scale level '+(i+1)+'" placeholder="Describe this level" value="'+attr(o.label)+'"><button type="button" class="button small icon-button" data-act="setup-remove-option" data-key="'+attr(o.key)+'" aria-label="Remove level '+(i+1)+'" title="Remove level '+(i+1)+'" '+(options.length<=2?'disabled':'')+'>'+icon('trash')+'</button></div>'}).join('');
   const answer=q.type==='choice'?choiceOptionSetup(p,s,qid,q,types):(q.type==='noul'?'<p class="subtle">'+(S.evaluationProvider==='gliner'?'Returns a relative yes score from 0 to 1; not a calibrated probability.':'Returns probability of yes, from 0 to 1.')+'</p>':'<p class="subtle">Describe ordered levels, from lowest to highest.</p><div class="setup-options">'+optionRows+'</div>'+optionPage.controls+'<div class="row"><button type="button" class="button small icon-button" title="Add level" aria-label="Add level" data-act="setup-add-option" '+(options.length>=10?'disabled':'')+'>'+icon('plus')+'</button><button type="button" class="button small icon-button" aria-label="Paste list" title="Paste list" data-act="answer-list-open">'+icon('paste')+'</button><button type="button" class="button small icon-button" aria-label="Import CSV" title="Import CSV" data-act="answer-list-import">'+icon('upload')+'</button></div><p class="setup-answer-summary">'+(S.evaluationProvider==='gliner'?'Local GLiNER returns a position from 0 to '+(options.length-1)+', plus relative level scores normalized to total 1. These are not calibrated probabilities.':'Jev Score returns a position from 0 to '+(options.length-1)+', plus probabilities across these levels totaling 1.')+'</p>');
-  const questionBody=questionPicker+setupTypeChooser(q)+'<div class="setup-prompt-row">'+area('What do you want to ask?','setupPrompt',setupQuestionText(q),'','3')+'</div>'+setupContextSummary(p,s);
-  const cohortBody=setupCohortPicker(p,s);
+  const questionBody=questionPicker+setupTypeChooser(q,s)+'<div class="setup-prompt-row">'+area(s.kind==='choose'?'What should it decide?':'What do you want to ask?','setupPrompt',setupQuestionText(q),'','3')+'</div>'+setupContextSummary(p,s);
+  const cohortBody=s.kind==='choose'?'':setupCohortPicker(p,s);
   // Compare options needs no heading of its own: the options box or the source choice names itself.
   const answerBody=(q.type==='choice'?'':'<div class="setup-section-heading"><h3>How should they answer?</h3></div>')+answer;
   const toolbar='<div class="setup-step-toolbar">'+picker+'</div>';
@@ -189,6 +192,7 @@ function pruneAndAnnounce(p){optionsFromSync(p);const removed=pruneDanglingAlias
 function setupContextSummary(p,s){
   const sources=s.inputs===undefined?s.dependsOn.map(id=>{const source=p.stages.find(x=>x.id===id);return source?stepTitle(p,source):id}):Object.values(s.inputs).map(input=>inputTitle(p,input));
   const labels=[...new Set(sources)];
+  if(s.kind==='choose')return labels.length?'<p class="setup-context subtle">Reads: '+labels.map(label=>'“'+esc(label)+'”').join('; ')+'.</p>':'<p class="setup-context subtle">Connect the earlier outputs it should weigh on the Reads tab.</p>';
   return labels.length?'<p class="setup-context subtle">This cohort also sees results from: '+labels.map(label=>'“'+esc(label)+'”').join('; ')+'.</p>':'';
 }
 function reconcileSetupDependencies(s,removed,remaining){
@@ -208,14 +212,26 @@ function resultSetup(p,s){
     const selected=current.some(x=>x.stage===source.id&&x.question===q.id);
     return '<button class="setup-choice" data-act="setup-result" data-source="'+attr(source.id)+'" data-question="'+attr(q.id)+'" aria-pressed="'+selected+'"><strong>'+esc(q.label||source.label)+'</strong><span>'+'Step '+(p.stages.indexOf(source)+1)+' · '+answerName(q.type)+(selected?' · Selected':'')+'</span></button>';
   }).join('');
-  return panel(s.kind==='decision'?'Which answer should supply the result?':'Which answers should be combined?',s.kind==='decision'?'Uses the leading option from one earlier answer.':'Choose answers with matching options or ordered levels. New selections get equal weight.','<div class="setup-connections">'+(content||'<p>No compatible earlier answers available.</p>')+'</div>'+page.controls,'<div class="setup-step-toolbar">'+setupQuestionToolbar(p,s)+'</div>');
+  // Combine answers is a weighted average; a Final choice has Jev read the same outputs and pick one answer.
+  const switchToChoice=s.kind==='aggregate'?'<div class="notice setup-to-choice"><p>Want Jev to weigh these answers and pick one, instead of averaging them?</p><button type="button" class="button small" data-act="setup-to-choice">Switch to Final choice</button></div>':'';
+  return switchToChoice+panel(s.kind==='decision'?'Which answer should supply the result?':'Which answers should be combined?',s.kind==='decision'?'Uses the leading option from one earlier answer.':'Choose answers with matching options or ordered levels. New selections get equal weight.','<div class="setup-connections">'+(content||'<p>No compatible earlier answers available.</p>')+'</div>'+page.controls,'<div class="setup-step-toolbar">'+setupQuestionToolbar(p,s)+'</div>');
 }
 function setupAction(a,el){
   if(!a.startsWith('setup-'))return false;
   const p=pipeline(),s=selectedStage();if(!p)return true;
   if(a==='setup-question-list'){S.sections['question-list-'+p.id]=true;render();root.querySelector('.setup-question-list h2')?.focus();return true}
-  if(a==='setup-edit-step'){const target=p.stages.find(x=>x.id===el.dataset.id);if(target){S.stageId=target.id;S.sections.pipeline='flow';S.sections['flow-inspector']=target.kind==='poll'?'question':'connections';S.sections['question-list-'+p.id]=false;render();root.querySelector('.setup-question-location strong')?.focus()}return true}
+  if(a==='setup-edit-step'){const target=p.stages.find(x=>x.id===el.dataset.id);if(target){S.stageId=target.id;S.sections.pipeline='flow';S.sections['flow-inspector']=target.kind==='poll'||target.kind==='choose'?'question':'connections';S.sections['question-list-'+p.id]=false;render();root.querySelector('.setup-question-location strong')?.focus()}return true}
   if(!s)return true;
+  if(a==='setup-to-choice'){
+    if(s.kind!=='aggregate')return true;
+    // Keeps the output name, so later steps that read the combined answer keep working.
+    const base=s.inputs[0]&&resolvedQuestion(p,s.inputs[0].stage,s.inputs[0].question),inputs={};
+    s.inputs.forEach(input=>{let key='answer_'+(p.stages.findIndex(x=>x.id===input.stage)+1),n=2;while(Object.hasOwn(inputs,key))key='answer_'+(p.stages.findIndex(x=>x.id===input.stage)+1)+'_'+n++;inputs[key]={stage:input.stage,question:input.question,select:'responses'}});
+    const question=base?{...clone(base),instructions:'Weigh every earlier output you are given and answer once for the study as a whole.'}:{type:'choice',label:'',instructions:'Weigh every earlier output you are given and choose the best option for the study as a whole.',criteria:{option_a:'',option_b:''}};
+    const next={id:s.id,kind:'choose',label:s.label==='Combined answers'?'Final choice':s.label,questions:{[s.outputQuestion||'choice']:question},inputs,dependsOn:[...s.dependsOn],...(s.join?{join:s.join}:{}),...(s.when?{when:s.when}:{})};
+    Object.keys(s).forEach(key=>delete s[key]);Object.assign(s,next);
+    S.sections['flow-inspector']='question';S.dirty=true;S.plan=null;render();say('Switched to Final choice. Jev reads every connected answer and picks one.');return true;
+  }
   if(a==='setup-result'){
     const source=dataInputOptions(p,s).find(x=>x.id===el.dataset.source),qid=el.dataset.question,q=source&&resolvedQuestion(p,source.id,qid);
     if(!q||!phaseOutput(p,source).some(x=>x.id===qid))throw Error('Choose an available earlier answer.');
@@ -229,7 +245,7 @@ function setupAction(a,el){
     reconcileSetupDependencies(s,before,s.kind==='decision'?[s.from.stage]:s.inputs.map(x=>x.stage));
     S.dirty=true;S.plan=null;render();return true;
   }
-  if(s.kind!=='poll')return true;
+  if(s.kind!=='poll'&&s.kind!=='choose')return true;
   const entry=setupQuestion(s),q=entry?.[1];
   if(a==='setup-wizard'){
     const steps=['question','cohort','options','review'],target=el.dataset.step;if(!steps.includes(target))return true;
@@ -252,7 +268,7 @@ function setupAction(a,el){
     const type=el.dataset.type;if(!['choice','noul','score'].includes(type)||q.type===type)return true;
     // Cache formats per question so exploring formats never destroys typed options.
     const key=p.id+':'+s.id+':'+entry[0];setupFormats[key]??={};setupFormats[key][q.type]=clone(q);
-    s.questions[entry[0]]=setupFormats[key][type]?{...clone(setupFormats[key][type]),label:q.label}:{type,label:q.label,instructions:'Answer the question using your persona and the supplied context.',...(type==='choice'?{criteria:{option_1:'',option_2:''}}:type==='score'?{criteria:['Does not meet the stated goal','Partly meets the stated goal','Fully meets the stated goal']}: {})};
+    s.questions[entry[0]]=setupFormats[key][type]?{...clone(setupFormats[key][type]),label:q.label}:{type,label:q.label,instructions:s.kind==='choose'?'Weigh every earlier output you are given and answer once for the study as a whole.':'Answer the question using your persona and the supplied context.',...(type==='choice'?{criteria:{option_1:'',option_2:''}}:type==='score'?{criteria:['Does not meet the stated goal','Partly meets the stated goal','Fully meets the stated goal']}: {})};
   }else if(a==='setup-add-option'){
     S.sections['setup-input-'+p.id+'-'+s.id+'-'+entry[0]]='manual';
     if(q.type==='choice'){if(Object.keys(q.criteria).length>=255)return true;let key='option_'+id();while(Object.hasOwn(q.criteria,key))key='option_'+id();q.criteria[key]='';S.sections['setup-option-'+s.id+'-'+entry[0]]=key}
@@ -267,7 +283,7 @@ function setupAction(a,el){
 const setupFormats={};
 function validateSetupAnswers(p){
   pruneAndAnnounce(p);
-  for(const s of p?.stages||[])if(s.kind==='poll')for(const [qid,q] of Object.entries(s.questions)){
+  for(const s of p?.stages||[])if(s.kind==='poll'||s.kind==='choose')for(const [qid,q] of Object.entries(s.questions)){
     // Blank placeholder rows are not shown, so they never block a list that already names two options.
     if(q.type==='choice'&&!q.optionsFrom&&optionsFromNamed(q).length>=2)q.criteria=Object.fromEntries(Object.entries(q.criteria).filter(([key,value])=>String(optionName(key,value)).trim()||optionDescription(value)));
     const missing=!setupHasQuestion(q)||(q.type==='choice'&&Object.entries(q.criteria).some(([key,value])=>!String(optionName(key,value)).trim()))||(q.type==='score'&&q.criteria.some(value=>!value.trim()));

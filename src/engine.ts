@@ -3,7 +3,7 @@ import { resolveHandOffs } from './hand-off.js';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type {
-  Answer, ChoiceQuestion, Cohort, Condition, Evaluation, EvaluationRequest, Json, Persona, Pipeline, PollInputBinding, PollStage,
+  Answer, ChoiceQuestion, ChooseStage, Cohort, Condition, Evaluation, EvaluationRequest, Json, Persona, Pipeline, PollInputBinding, PollStage,
   Provider, Question, QuestionSummary, RunOptions, RunRecord, Stage, StageLayer, StageResult, Vote,
 } from './types.js';
 import { summarizeVotes } from './analysis.js';
@@ -11,9 +11,9 @@ import { ProviderError, probabilitySumTolerance, scoreMeanTolerance, type Provid
 import { validateClassifierAnswer } from './gliner-provider.js';
 import { inputSelectCompatible } from './schema.js';
 import { CHOICE_WINNER_TOLERANCE, errorMessage, hashValue, isFiniteProbability, resolveOptionsFrom, resolveQuestion, seededRandom, stableStringify } from './engine-utils.js';
-import { buildPollState, fitsWithHeadroom, planBatching, requestSizeProblem } from './request-budget.js';
+import { buildChooseState, buildPollState, fitsWithHeadroom, planBatching, planChoose, requestSizeProblem, responseEntryBytes, verdictKey, type ChooseInput } from './request-budget.js';
 import { respondentLookup, respondentProfile, respondentsSummary, type RespondentLookup } from './respondents.js';
-import { batchedBinding, chunk, describeBatching, COMBINE_GUIDE, mapInput, MAP_GUIDE, reduceInput, type Verdict } from './batching.js';
+import { batchedBinding, chunk, describeBatching, COMBINE_GUIDE, FINAL_COMBINE_GUIDE, FINAL_MAP_GUIDE, mapInput, MAP_GUIDE, reduceInput, type Verdict } from './batching.js';
 
 interface CacheEntry { version: 1; key: string; request: EvaluationRequest; evaluation: Evaluation }
 
@@ -267,6 +267,118 @@ export async function runPipeline(pipeline: Pipeline, cohorts: Record<string, Co
   let pending = new Set(order.map((stage) => stage.id));
   const lookup = respondentLookup(Object.values(cohorts));
 
+  const evaluate = async (stageId: string, request: EvaluationRequest): Promise<{ evaluation: Evaluation; cacheHit: boolean }> => {
+    const requestKey = hashValue({ version: 1, provider: options.provider.name, ...(options.provider.cacheIdentity ? { providerIdentity: options.provider.cacheIdentity } : {}), request });
+    const oversized = options.provider.name === 'gliner' ? undefined : requestSizeProblem(request.state, request.questions);
+    if (oversized) throw new RequestTooLargeError(oversized);
+    let evaluation = options.cacheDir && !options.refresh ? await loadCached(options.cacheDir, requestKey, request, request.questions) : undefined;
+    const cacheHit = Boolean(evaluation);
+    options.onRequest?.({ stage: stageId, cacheHit });
+    if (evaluation) usage.cacheHits += 1;
+    else {
+      evaluation = await limiter.run(async () => {
+        if (usage.requests >= maximum) throw new RequestLimitError();
+        usage.requests += 1;
+        const result = await options.provider.evaluate(request);
+        try { validateEvaluation(result, request.questions); }
+        catch { throw new InvalidEvaluationError(); }
+        usage.inputTokens += result.usage.inputTokens;
+        usage.outputTokens += result.usage.outputTokens;
+        if (result.usage.measuredInputTokens !== undefined) usage.measuredInputTokens = (usage.measuredInputTokens ?? 0) + result.usage.measuredInputTokens;
+        if (options.cacheDir) await saveCached(options.cacheDir, requestKey, request, result);
+        return result;
+      });
+    }
+    return { evaluation, cacheHit };
+  };
+  const settle = async <T>(work: Array<Promise<T>>): Promise<T[]> => {
+    const settled = await Promise.allSettled(work);
+    const failed = settled.find((item): item is PromiseRejectedResult => item.status === 'rejected');
+    if (failed) throw failed.reason;
+    return settled.map((item) => (item as PromiseFulfilledResult<T>).value);
+  };
+
+  /** Final choice: one Jev, no audience, reads every connected output; map-reduce when they do not fit one request. */
+  const runChoose = async (written: ChooseStage, startedAt: string): Promise<StageResult> => {
+    const fail = (reason: string): StageResult => ({ id: written.id, kind: written.kind, label: written.label, status: 'failed', reason, dependsOn: written.dependsOn, votes: [], summaries: {}, startedAt, finishedAt: new Date().toISOString() });
+    // Options taken from an earlier step are fixed here, so every slice and combining request asks the same ones.
+    let stage: ChooseStage;
+    try { stage = { ...written, questions: resolveOptionsFrom(pipeline, written, stages) }; }
+    catch (error) { return fail(errorMessage(error)); }
+    // With join 'any', an input whose step was skipped is left out rather than sent empty.
+    const bindings = Object.entries(stage.inputs).filter(([, binding]) => stages[binding.stage]?.status === 'completed');
+    const whole = resolvePollInputs(Object.fromEntries(bindings.filter(([, binding]) => (binding.select ?? 'summary') !== 'responses')), stages) as Record<string, Json>;
+    const items: ChooseInput[] = bindings.map(([alias, binding]) => {
+      const sourceLabel = pipeline.stages.find((item) => item.id === binding.stage)?.label ?? binding.stage;
+      if ((binding.select ?? 'summary') !== 'responses') return { alias, sourceLabel, value: whole[alias] ?? null };
+      const result = stages[binding.stage];
+      const records = result?.status === 'completed' && result.summaries[binding.question] ? responseRecords(binding, result) : [];
+      // Sized like the review sizes it (longest ids and numbers), so the run makes the requests the review counted.
+      const question = resolveQuestion(pipeline.stages, binding.stage, binding.question);
+      const entryBytes = Math.max(question ? responseEntryBytes(question) : 0, ...records.map((record) => Buffer.byteLength(JSON.stringify(record), 'utf8')));
+      return { alias, sourceLabel, value: records, responses: { count: records.length, entryBytes } };
+    });
+    const summaries: Record<string, Json> = {};
+    for (const [alias, binding] of bindings) {
+      const result = stages[binding.stage];
+      if (result?.status !== 'completed' || !result.summaries[binding.question]) continue;
+      const summary = respondentsSummary(result.votes, [binding.question], lookup);
+      if (summary !== null) summaries[alias] = summary;
+    }
+    const respondents = Object.keys(summaries).length ? summaries as Json : undefined;
+    const plan = planChoose(pipeline, stage, items, respondents);
+    if (!plan.fits) return fail(`too large for Jev: ${plan.problem ?? 'its largest request is over the limit'}`);
+    const total = plan.requestsPerRun;
+    let done = 0;
+    const seedBase = `${options.seed}:${stage.id}:final`;
+    const ask = async (suffix: string, inputs: Record<string, Json>, guide?: string): Promise<{ evaluation: Evaluation; cacheHit: boolean }> => {
+      const seed = `${seedBase}:${suffix}`;
+      const state = buildChooseState(pipeline, stage, { inputs, ...(guide ? { guide } : {}), ...(respondents !== undefined ? { respondents } : {}) });
+      const result = await evaluate(stage.id, { model: options.model, seed, state, questions: questionsForSeed(stage.questions, seed) });
+      options.onProgress?.({ stage: stage.id, completed: ++done, total });
+      return result;
+    };
+    const vote = (result: { evaluation: Evaluation; cacheHit: boolean }, batch?: number): Vote => ({ personaId: 'final-choice', segment: 'final-choice', repeat: 1, weight: 1, answers: result.evaluation.answers, cacheHit: result.cacheHit, model: result.evaluation.model, ...(batch !== undefined ? { batch } : {}) });
+    const layerVotes = new Map<string, Vote[]>();
+    let final: { evaluation: Evaluation; cacheHit: boolean };
+    try {
+      if (!plan.parts.length) final = await ask('all', Object.fromEntries(items.map((item) => [item.alias, item.value])));
+      else {
+        const slices = plan.parts.flatMap((part) => {
+          const records = items.find((item) => item.alias === part.alias)!.value as Json[];
+          const parts = chunk(records, part.batchSize);
+          return parts.map((slice, index) => ({ alias: part.alias, index, count: parts.length, total: records.length, slice }));
+        });
+        const mapped = await settle(slices.map((item) => ask(`${item.alias}.b${item.index + 1}`, { ...whole, [item.alias]: mapInput(item.index + 1, item.count, item.total, item.slice) }, FINAL_MAP_GUIDE)));
+        if (mapped.length === 1) final = mapped[0]!;
+        else {
+          layerVotes.set('map', mapped.map((result, index) => vote(result, index + 1)));
+          let verdicts: Verdict[] = mapped.map((result, index) => ({ input: slices[index]!.alias, batch: slices[index]!.index + 1, responses: slices[index]!.slice.length, answers: result.evaluation.answers }));
+          let allCached = mapped.every((result) => result.cacheHit);
+          const key = verdictKey(stage);
+          for (let round = 1; ; round += 1) {
+            const groups = chunk(verdicts, plan.groupSize);
+            const results = await settle(groups.map((group, index) => ask(`r${round}.${index + 1}`, { ...whole, [key]: reduceInput(round, plan.totalResponses, group) }, FINAL_COMBINE_GUIDE)));
+            allCached = allCached && results.every((result) => result.cacheHit);
+            if (groups.length === 1) { final = { evaluation: results[0]!.evaluation, cacheHit: allCached }; break; }
+            layerVotes.set(`reduce:${round}`, results.map((result, index) => vote(result, index + 1)));
+            verdicts = results.map((result, index) => ({ batch: index + 1, responses: groups[index]!.reduce((sum, item) => sum + item.responses, 0), answers: result.evaluation.answers }));
+          }
+        }
+      }
+    } catch (error) {
+      return fail(safeRequestFailure(error));
+    }
+    const votes = [vote(final)];
+    const layers: StageLayer[] | undefined = plan.parts.length && plan.mapRequests > 1 ? batchLayers(plan.layerRequests, layerVotes) : undefined;
+    const batching = plan.parts.length ? {
+      input: plan.parts.map((part) => part.alias).join(', '), sourceStage: stage.inputs[plan.parts[0]!.alias]!.stage, sourceLabel: plan.parts.map((part) => part.sourceLabel).join(' and '),
+      totalResponses: plan.totalResponses, batchSize: Math.max(...plan.parts.map((part) => part.batchSize)), batches: plan.mapRequests, groupSize: plan.groupSize, reduceRounds: plan.reduceRounds,
+      note: plan.line.replace(' reads ', ' read ').replace(', then combines them', ', then combined them'),
+    } : undefined;
+    return { id: stage.id, kind: stage.kind, label: stage.label, status: 'completed', dependsOn: stage.dependsOn, votes, summaries: summarizeVotes(stage.questions, votes), ...(batching ? { batching } : {}), ...(layers ? { layers } : {}), startedAt, finishedAt: new Date().toISOString() };
+  };
+
   const runStage = async (stage: Stage): Promise<StageResult> => {
     const startedAt = new Date().toISOString();
     const dependencies = stage.dependsOn.map((id) => stages[id]!);
@@ -331,37 +443,6 @@ export async function runPipeline(pipeline: Pipeline, cohorts: Record<string, Co
       }) as unknown as Json : undefined;
       const chunks = batchPlan && responses ? (responses.length ? chunk(responses, batchPlan.batchSize) : [[]]) : [];
 
-      const evaluate = async (request: EvaluationRequest): Promise<{ evaluation: Evaluation; cacheHit: boolean }> => {
-        const requestKey = hashValue({ version: 1, provider: options.provider.name, ...(options.provider.cacheIdentity ? { providerIdentity: options.provider.cacheIdentity } : {}), request });
-        const oversized = options.provider.name === 'gliner' ? undefined : requestSizeProblem(request.state, request.questions);
-        if (oversized) throw new RequestTooLargeError(oversized);
-        let evaluation = options.cacheDir && !options.refresh ? await loadCached(options.cacheDir, requestKey, request, request.questions) : undefined;
-        const cacheHit = Boolean(evaluation);
-        options.onRequest?.({ stage: stage.id, cacheHit });
-        if (evaluation) usage.cacheHits += 1;
-        else {
-          evaluation = await limiter.run(async () => {
-            if (usage.requests >= maximum) throw new RequestLimitError();
-            usage.requests += 1;
-            const result = await options.provider.evaluate(request);
-            try { validateEvaluation(result, request.questions); }
-            catch { throw new InvalidEvaluationError(); }
-            usage.inputTokens += result.usage.inputTokens;
-            usage.outputTokens += result.usage.outputTokens;
-            if (result.usage.measuredInputTokens !== undefined) usage.measuredInputTokens = (usage.measuredInputTokens ?? 0) + result.usage.measuredInputTokens;
-            if (options.cacheDir) await saveCached(options.cacheDir, requestKey, request, result);
-            return result;
-          });
-        }
-        return { evaluation, cacheHit };
-      };
-      const settle = async <T>(work: Array<Promise<T>>): Promise<T[]> => {
-        const settled = await Promise.allSettled(work);
-        const failed = settled.find((item): item is PromiseRejectedResult => item.status === 'rejected');
-        if (failed) throw failed.reason;
-        return settled.map((item) => (item as PromiseFulfilledResult<T>).value);
-      };
-
       const workers = Array.from({ length: perStageConcurrency }, async () => {
         while (cursor < jobs.length) {
           const job = jobs[cursor++]!;
@@ -379,7 +460,7 @@ export async function runPipeline(pipeline: Pipeline, cohorts: Record<string, Co
               const state = buildPollState(pipeline, cohort, stage, job.persona, handoff
                 ? { inputs: handoff.inputs, respondents: handoff.respondents }
                 : { upstream: upstreamHandoff });
-              final = await evaluate({ model: options.model, seed: requestSeed, state, questions: questionsForSeed(questions, requestSeed) });
+              final = await evaluate(stage.id, { model: options.model, seed: requestSeed, state, questions: questionsForSeed(questions, requestSeed) });
             } else {
               const record = (key: string, batch: number, result: { evaluation: Evaluation; cacheHit: boolean }): void => {
                 const list = layerVotes.get(key) ?? [];
@@ -389,7 +470,7 @@ export async function runPipeline(pipeline: Pipeline, cohorts: Record<string, Co
               const ask = (suffix: string, value: Json, guide: string): Promise<{ evaluation: Evaluation; cacheHit: boolean }> => {
                 const seed = `${requestSeed}:${suffix}`;
                 const state = buildPollState(pipeline, cohort, stage, job.persona, { inputs: { ...otherInputs, [batched.alias]: value }, guide, respondents: handoff?.respondents });
-                return evaluate({ model: options.model, seed, state, questions: questionsForSeed(questions, seed) });
+                return evaluate(stage.id, { model: options.model, seed, state, questions: questionsForSeed(questions, seed) });
               };
               const total = responses!.length;
               if (chunks.length === 1) final = await ask('b1', mapInput(1, 1, total, chunks[0]!), MAP_GUIDE);
@@ -431,6 +512,8 @@ export async function runPipeline(pipeline: Pipeline, cohorts: Record<string, Co
       const batching = batchPlan && batched ? { input: batched.alias, sourceStage: batchPlan.sourceStage, sourceLabel: batchPlan.sourceLabel, totalResponses: batchPlan.totalResponses, batchSize: batchPlan.batchSize, batches: chunks.length, groupSize: batchPlan.groupSize, reduceRounds: batchPlan.reduceRounds, note: describeBatching(stage.label, batchPlan.sourceLabel, batchPlan) } : undefined;
       return { id: stage.id, kind: stage.kind, label: stage.label, status, ...(reason ? { reason } : {}), dependsOn: stage.dependsOn, votes, summaries, ...(batching ? { batching } : {}), ...(layers ? { layers } : {}), startedAt, finishedAt: new Date().toISOString() };
     }
+
+    if (stage.kind === 'choose') return runChoose(stage, startedAt);
 
     if (stage.kind === 'decision') {
       const source = stages[stage.from.stage];
@@ -659,14 +742,18 @@ function validateExecutionGraph(pipeline: Pipeline, order: Stage[]): void {
       }
       if (new Set(signatures).size > 1) throw new Error(`aggregate stage '${stage.id}' combines incompatible question types or options`);
     }
-    if (stage.kind === 'poll') for (const question of Object.values(stage.questions)) {
+    if (stage.kind === 'poll' || stage.kind === 'choose') for (const question of Object.values(stage.questions)) {
       if (question.type !== 'choice' || !question.optionsFrom) continue;
       const from = question.optionsFrom;
       requireDependency(from.stage, 'options source');
       if (resolveQuestion(pipeline.stages, from.stage, from.question)?.type !== 'choice') throw new Error(`poll stage '${stage.id}' takes options from '${from.stage}.${from.question}', which is not a Choice question`);
       if (from.top !== undefined && !(Number.isInteger(from.top) && from.top >= 2 && from.top <= 255)) throw new Error(`poll stage '${stage.id}' must keep 2–255 options from '${from.stage}.${from.question}'`);
     }
-    if (stage.kind === 'poll' && stage.inputs !== undefined) {
+    if (stage.kind === 'choose') {
+      if (!Object.keys(stage.inputs).length) throw new Error(`final choice '${stage.id}' reads no earlier output`);
+      if (Object.values(stage.inputs).some((binding) => binding.batch !== undefined)) throw new Error(`final choice '${stage.id}' splits large inputs automatically; remove batch`);
+    }
+    if ((stage.kind === 'poll' || stage.kind === 'choose') && stage.inputs !== undefined) {
       if (Object.keys(stage.inputs).length > 1000) throw new Error(`poll stage '${stage.id}' has too many input bindings`);
       for (const [alias, binding] of Object.entries(stage.inputs)) {
         if (!/^[a-z][a-z0-9_-]{0,159}$/.test(alias) || ['__proto__', 'prototype', 'constructor'].includes(alias)) throw new Error(`poll stage '${stage.id}' has an invalid input alias`);
