@@ -97,7 +97,11 @@ behaviors:
       assumptions), since every persona waits for it. Measured on a 4-core, 16 GB container with
       1,000 people: 1 min 59 s before; 62.6 s with 48 at once; 55.2 s with warm processes (setup
       15.6 s, then 12.6 s median for 48 CLIs to send their request, then about 19 s writing). The
-      remaining CLI time is CPU contention, so a machine with more cores is faster.
+      remaining CLI time is CPU contention, so a machine with more cores is faster. Changed 2026-10-12: the
+      model is pinned by id (claude-sonnet-5-5), because the sonnet alias follows the CLI version: on an
+      18-core Mac with Claude Code 2.1.282 it meant Sonnet 5, whose first token came 33 to 53 s after each
+      request (Sonnet 5.5: 3 to 7 s on the same batch), and 1,000 people took 2 min 45 s. A CLI or account
+      without the id is asked again with the alias, which is then kept, and then with no model flag.
     source:
       text: this is still too slow - it should take no longer than 30 seconds
       reference: 2026-10-11 jev-polls project thread, Giulio

@@ -1562,7 +1562,7 @@ test('Claude writes persona batches as a table on Sonnet with thinking off, and 
     const service = new LocalAgentService({ temporaryRoot: root, spawn: fakeSpawner(async ({ args, child, options }) => {
       const schema = JSON.parse(args[args.indexOf('--json-schema') + 1]!) as { properties: Record<string, unknown> };
       const reply = JSON.parse(cohortBatchResponse(child.input)) as { documentJson: string };
-      if (!schema.properties.rows) { assert.equal(args[args.indexOf('--model') + 1], 'sonnet', 'the setup call also writes on the audience model'); child.stdout.write(JSON.stringify({ type: 'result', is_error: false, structured_output: { documentJson: reply.documentJson, explanation: 'ok' } }) + '\n'); child.finish(); return; }
+      if (!schema.properties.rows) { assert.equal(args[args.indexOf('--model') + 1], 'claude-sonnet-5-5', 'the setup call also writes on the audience model'); child.stdout.write(JSON.stringify({ type: 'result', is_error: false, structured_output: { documentJson: reply.documentJson, explanation: 'ok' } }) + '\n'); child.finish(); return; }
       batchArgs.push([...args]);
       if (!effortSupported && args.includes('--effort')) { child.finish(1); return; }
       // A table of only the fields that differ between people: the app fills id, weight, sourceIds and syntheticFields.
@@ -1575,7 +1575,7 @@ test('Claude writes persona batches as a table on Sonnet with thinking off, and 
     assert.equal(done.status, 'completed', done.message); assert.equal(done.progress!.completedPersonas, 30);
     const persona = done.proposal!.document.cohorts[0]!.personas[0]!;
     assert.equal(persona.id, 'persona-00001'); assert.equal(persona.weight, 1); assert.deepEqual(persona.sourceIds, []); assert.deepEqual(persona.syntheticFields, ['label', 'age', 'background', 'attributes']);
-    assert.equal(batchArgs[0]![batchArgs[0]!.indexOf('--effort') + 1], 'low'); assert.equal(batchArgs[0]![batchArgs[0]!.indexOf('--model') + 1], 'sonnet');
+    assert.equal(batchArgs[0]![batchArgs[0]!.indexOf('--effort') + 1], 'low'); assert.equal(batchArgs[0]![batchArgs[0]!.indexOf('--model') + 1], 'claude-sonnet-5-5');
     assert.deepEqual(persona.attributes, proposed.cohorts[0]!.personas[0]!.attributes);
     if (effortSupported) assert.equal(batchArgs.length, 3);
     else assert.equal(batchArgs.filter(args => !args.includes('--effort') && !args.includes('--model')).length, 3, 'each batch is drafted again without --model and --effort');
@@ -1636,6 +1636,26 @@ test('Claude Code runs more persona batches at once on a larger machine, within 
   process.env.JEV_CONCURRENT_BATCHES = '200'; assert.equal(concurrentBatches('claude'), 48);
   process.env.JEV_CONCURRENT_BATCHES = '24'; assert.equal(concurrentBatches('codex'), 24);
   assert.equal(batchSizes(1000, 48).length, 48); assert.equal(batchSizes(1000).length, 48);
+});
+
+test('Claude Code without the pinned audience model id falls back to the sonnet alias and keeps it', async t => {
+  const root = await setup(t); const models: string[] = [];
+  const service = new LocalAgentService({ temporaryRoot: root, spawn: fakeSpawner(async ({ args, child }) => {
+    const schema = JSON.parse(args[args.indexOf('--json-schema') + 1]!) as { properties: Record<string, unknown> };
+    const model = args[args.indexOf('--model') + 1]!; models.push(model);
+    if (model === 'claude-sonnet-5-5') { child.stderr.write('model not found'); child.finish(1); return; }
+    const reply = JSON.parse(cohortBatchResponse(child.input)) as { documentJson: string };
+    if (!schema.properties.rows) { child.stdout.write(JSON.stringify({ type: 'result', is_error: false, structured_output: { documentJson: reply.documentJson, explanation: 'ok' } }) + '\n'); child.finish(); return; }
+    const fields = ['position', 'label', 'segment', 'age', 'background', ...Object.keys(proposed.cohorts[0]!.personas[0]!.attributes).map(name => `attributes.${name}`)];
+    const rows = (JSON.parse(reply.documentJson) as Cohort).personas.map(({ label, segment, age, background, attributes }, index) => [index + 1, label, segment, age, background, ...Object.values(attributes)]);
+    child.stdout.write(JSON.stringify({ type: 'result', is_error: false, structured_output: { fields, rows } }) + '\n'); child.finish();
+  }) }); t.after(() => service.close());
+  const done = await terminal(service, service.start({ engine: 'claude', prompt: 'Create 30 adults', revision: 0, document: empty, cohort: { id: 'customers', size: 30 } }));
+  assert.equal(done.status, 'completed', done.message);
+  assert.deepEqual(models.slice(0, 2), ['claude-sonnet-5-5', 'sonnet'], 'the setup call retries with the alias');
+  const again = await terminal(service, service.start({ engine: 'claude', prompt: 'Create 30 adults', revision: 0, document: empty, cohort: { id: 'customers', size: 30 } }));
+  assert.equal(again.status, 'completed', again.message);
+  assert.equal(models.at(-1), 'sonnet', 'later calls use the alias the CLI accepted');
 });
 
 test('a persona batch may leave id, weight, sources and synthetic fields to the app, and cited sources are still checked', () => {
