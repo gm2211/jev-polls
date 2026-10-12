@@ -131,6 +131,17 @@ behaviors:
     source:
       text: I should be able to drag connect from "connect output"
       reference: jev-polls project thread, 2026-10-11
+  - id: canvas-drop-to-create
+    description: >-
+      Dropping a dragged output on blank canvas opens the add-step menu at the drop point; the step
+      picked is created there already reading that output.
+    details: >-
+      A dashed wire runs from the output to the menu while it is open. The menu offers only step kinds
+      that can use the output (Final result needs a Choice). Esc or an outside click closes it with no
+      change. Dropping on a step that can't use the output, or on the step panel, still cancels.
+    source:
+      text: connecting output to blank canvas should trigger popup for new node creation
+      reference: jev-polls project chat, 2026-10-12
   - id: edge-labels-on-hover
     description: >-
       A wire is named only while the pointer is on it, or while keyboard focus is on its step's

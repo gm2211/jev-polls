@@ -529,3 +529,30 @@ test('a drop with the step panel closed keeps the canvas clear for the next wire
   assert.equal(S.stageId, 'other');
   assert.deepEqual(plain(pipeline.stages[1].dependsOn), ['source']);
 });
+
+test('a wire dropped on blank canvas opens the add-step menu there, and the step picked reads that output', async () => {
+  const { S, pipeline, flowAction, flowCreateMenu, flowInputs } = await flowHarness();
+  S.flowCreate = { pipelineId: 'study', x: 500.2, y: 220.7, left: 0, top: 0, query: '', index: 0, connect: { stage: 'source', question: 'answer' } };
+  assert.match(flowCreateMenu(pipeline), /Add a step that uses this output/);
+  flowAction('flow-create', { dataset: { kind: 'poll' } });
+  const added = pipeline.stages.at(-1);
+  assert.equal(added.kind, 'poll');
+  assert.equal(added.cohort, 'audience', 'a follow-up asks the same audience as its source');
+  assert.deepEqual(plain(pipeline.layout[added.id]), { x: 500, y: 221 });
+  assert.deepEqual(plain(flowInputs(pipeline, added).map(([, input]: any) => [input.stage, input.question])), [['source', 'answer']]);
+  assert.equal(S.stageId, added.id);
+  assert.equal(S.flowCreate, null);
+});
+
+test('a dropped wire only offers step kinds that can use it', async () => {
+  const { S, pipeline, flowAction, flowKindMatches } = await flowHarness();
+  const connect = { stage: 'source', question: 'answer' };
+  S.pipelineId = 'study';
+  assert.deepEqual(plain(flowKindMatches('', connect).map((k: any) => k.kind)), ['poll', 'aggregate', 'decision']);
+  pipeline.stages[0].questions.answer = { type: 'score', label: 'How much?', instructions: 'Rate it.', scale: { min: 1, max: 5 } };
+  assert.deepEqual(plain(flowKindMatches('', connect).map((k: any) => k.kind)), ['poll', 'aggregate'], 'a Final result needs a Choice');
+  const count = pipeline.stages.length;
+  S.flowCreate = { pipelineId: 'study', x: 0, y: 0, left: 0, top: 0, query: '', index: 0, connect };
+  flowAction('flow-create', { dataset: { kind: 'decision' } });
+  assert.equal(pipeline.stages.length, count);
+});
