@@ -255,6 +255,22 @@ behaviors:
         why did I lose my prose when page refreshed - if we have issues with generation we should
         keep the attempt around so I can retry instead of losing everything
       reference: 2026-10-12 jev-polls project thread, Giulio
+  - id: draft-in-cohort-list
+    description: >-
+      From the moment a generation starts until its audience is used or discarded, it is listed first
+      in Cohorts as a Draft, named once the plan names it, showing its brief and its state (Generating
+      with the live count, Ready to review, Stopped with what was kept, or Generation failed). Opening
+      it goes to the step it was started from, or to its progress. It becomes a saved cohort only
+      through proposal-then-adopt.
+    details: >-
+      Added 2026-10-12. Replaces the separate notice above the list. The draft is the running or
+      finished assistant job, not a workspace cohort, so an unreviewed proposal never enters saved
+      data.
+    source:
+      text: >-
+        I would expect this to show up in cohorts at least once generated, and probably as draft as
+        soon as I hit "generate"
+      reference: 2026-10-12 jev-polls project thread, Giulio
   - id: cancel-generation
     description: Cancel generation stops the job and leaves the workspace unchanged.
   - id: regenerate-persona

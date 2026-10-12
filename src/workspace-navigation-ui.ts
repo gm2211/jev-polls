@@ -69,7 +69,7 @@ export const NAVIGATION_CSS = `
 .run-review .warning{margin-bottom:8px}
 /* Short task pages; natural overflow remains available for zoom and long content. */
 .list{display:grid;gap:0;border-top:1px solid var(--line);background:var(--surface)}
-.list-item{display:flex;align-items:center;min-width:0;border-bottom:1px solid var(--line);transition:background 160ms ease-out}.list-item:hover,.list-item:focus-within{background:var(--hover)}
+.list-item{display:flex;align-items:center;min-width:0;border-bottom:1px solid var(--line);transition:background 160ms ease-out}.draft-cohort .list-meta small:first-child{font-weight:600;color:var(--blue)}.list-item:hover,.list-item:focus-within{background:var(--hover)}
 .list-item>.list-open{flex:1;display:flex;align-items:center;justify-content:space-between;gap:24px;min-width:0;padding:18px 20px;border:0;border-radius:0;background:transparent;text-align:left;font:inherit;color:var(--ink);cursor:pointer}
 .list-body{display:grid;gap:6px;min-width:0;overflow-wrap:anywhere}.list-body strong{font:500 var(--text-lg)/1.35 var(--display);letter-spacing:-.025em}.list-sub{font-size:var(--text-sm);line-height:1.5;color:var(--muted);white-space:pre-wrap}.list-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:var(--muted);font:500 var(--text-sm)/20px var(--body)}
 .list-open>.ui-icon{flex:none;color:var(--blue);background:var(--blue-soft);border-radius:50%;width:14px;height:14px;padding:7px;box-sizing:content-box;transition:transform 160ms ease-out}.list-item:hover .list-open>.ui-icon{transform:translateX(2px)}
