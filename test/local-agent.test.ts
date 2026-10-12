@@ -1660,12 +1660,12 @@ test('a persona table becomes persona objects, and a row with the wrong number o
   assert.match(String(personasFromTable({ rows: [] })), /not a persona table/);
 });
 
-test('Claude Code runs more persona batches at once on a larger machine, within sixteen and 64', t => {
+test('Claude Code runs more persona batches at once on a larger machine, within sixteen and 48', t => {
   const saved = process.env.JEV_CONCURRENT_BATCHES; t.after(() => { if (saved === undefined) delete process.env.JEV_CONCURRENT_BATCHES; else process.env.JEV_CONCURRENT_BATCHES = saved; });
   delete process.env.JEV_CONCURRENT_BATCHES;
-  const claude = concurrentBatches('claude'); assert.ok(claude >= 16 && claude <= 64, String(claude));
+  const claude = concurrentBatches('claude'); assert.ok(claude >= 16 && claude <= 48, String(claude));
   assert.equal(concurrentBatches('codex'), 16);
-  process.env.JEV_CONCURRENT_BATCHES = '200'; assert.equal(concurrentBatches('claude'), 64);
+  process.env.JEV_CONCURRENT_BATCHES = '200'; assert.equal(concurrentBatches('claude'), 48);
   process.env.JEV_CONCURRENT_BATCHES = '24'; assert.equal(concurrentBatches('codex'), 24);
   assert.equal(batchSizes(1000, 48).length, 48); assert.equal(batchSizes(1000).length, 48);
 });

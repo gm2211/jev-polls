@@ -30,7 +30,7 @@ behaviors:
     description: >-
       A cohort of more than 25 personas first gets its details (segments, weights, sources,
       assumptions) from one setup call that writes no personas; then every persona batch can start at
-      once, sixteen at a time (up to 64 on Claude Code, by the machine's cores and memory), each
+      once, sixteen at a time (up to 48 on Claude Code, by the machine's cores and memory), each
       writing only personas, and persona IDs and order follow batch position, never completion order.
     details: >-
       Changed 2026-10-11 (second time that day) after a 1,000-person run still showed about 7 to 18
@@ -78,7 +78,7 @@ behaviors:
     description: >-
       On Claude Code, audience generation (the setup call and persona batches) runs on Sonnet at low
       effort with thinking off, persona batches come back as a table (fields named once, one row of
-      values per persona), up to 64 batches run at once by machine size, and the first round's batch
+      values per persona), up to 48 batches run at once by machine size, and the first round's batch
       processes are started during the setup call so they need only the rest of their prompt.
     details: >-
       Added 2026-10-11 after "this is still too slow - it should take no longer than 30 seconds" (a
@@ -90,7 +90,7 @@ behaviors:
       them). MAX_THINKING_TOKENS=0 cut thinking to about 250 tokens a batch. The table cut a 21-person
       batch from 3,921 to 2,634 written tokens. 48 Sonnet streams at once hit no rate limit, but each
       Claude Code batch is its own process (about 240 MB and 1.6 CPU-seconds), so concurrency is four
-      per core and half the memory, between 16 and 64 (JEV_CONCURRENT_BATCHES overrides it); other
+      per core and half the memory, between 16 and 48 (JEV_CONCURRENT_BATCHES overrides it); other
       engines keep sixteen until their limits are measured. Warm processes start at niceness 10 so
       they do not slow the setup call, and unused ones are stopped when the job ends or is
       cancelled. The setup reply is kept short (one-sentence segments and description, at most four
@@ -103,8 +103,10 @@ behaviors:
       request (Sonnet 5.5: 3 to 7 s on the same batch), and 1,000 people took 2 min 45 s. A CLI or account
       without the id is asked again with the alias, which is then kept, and then with no model flag.
       With Sonnet 5.5 pinned, the same Mac took 58 s: setup 11 s, about 6 s for batches to start, about
-      17 s writing 21 people per batch, and one slow batch for the last 17 s. The most at once was raised
-      from 48 to 64 so a large machine writes about 16 people per batch.
+      17 s writing 21 people per batch, and one slow batch for the last 17 s. Raising the most at once to 64
+      made it 75 s: the first reply came later (median 25 s) and seven requests got no reply for about 20 s
+      after the rest, so the limit stayed 48. A Claude Code batch still silent 10 s after three quarters of
+      the running batches started writing now gets a second request, up to an eighth of the window beyond it.
     source:
       text: this is still too slow - it should take no longer than 30 seconds
       reference: 2026-10-11 jev-polls project thread, Giulio
@@ -127,8 +129,9 @@ behaviors:
       reference: 2026-10-12 jev-polls project thread, Giulio
   - id: slow-batch-second-request
     description: >-
-      A batch attempt running far longer than the accepted batches gets one second, identical request;
-      the first reply is checked and the other request is stopped, and it is never counted as a retry.
+      A batch attempt running far longer than the accepted batches, or a Claude Code batch with no reply
+      while most batches are writing, gets one second, identical request; the first reply is checked and
+      the other request is stopped, and it is never counted as a retry.
     details: >-
       Added 2026-10-11 after one batch of a 400-person Claude run streamed at a quarter of the usual
       speed and took 3 min 24 s while its fifteen peers took about 50 s, holding up the finish. A
