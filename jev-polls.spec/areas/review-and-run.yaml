@@ -11,7 +11,7 @@ behaviors:
       never start a study.
   - id: request-plan
     description: >-
-      Review run validates and saves, then shows each step's request count, the total upper bound
+      Check and run validates and saves, then shows each step's request count, the total upper bound
       (sum of size × repeats), provider and model, and evidence warnings.
   - id: plan-busy-state
     description: A visible busy state shows while the plan is prepared, and repeated clicks have no effect.

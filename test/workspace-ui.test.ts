@@ -135,7 +135,7 @@ test('review exposes one run action outside tab panels and retains provider read
     const html = review();
     assert.equal([...html.matchAll(/data-act="start-run"/g)].length, 1);
     assert.ok(ancestorsOfRunAction(html).some(tag => /class="header-actions"/.test(tag)), 'Run is a top-level header command');
-    assert.ok(html.indexOf('data-act="start-run"') < html.indexOf('aria-label="Run review"'));
+    assert.ok(html.indexOf('data-act="start-run"') < html.indexOf('aria-label="Before you run"'));
     assert.ok(ancestorsOfRunAction(html).every(tag => !/data-section-panel|\bhidden\b/.test(tag)), 'Run action must remain outside hidden or switchable panels');
     assert.doesNotMatch(html.match(/<button[^>]*data-act="start-run"[^>]*>/)![0], /\bdisabled\b/);
   }
@@ -3023,7 +3023,7 @@ test('run review retains clickable breadcrumbs and returns to the same study',as
   act(null,{dataset:{act:'open-pipeline',id:'study'}});
   S.plan=runReviewPlan();render();
   const html=browser.element('app').innerHTML;
-  assert.match(html,/aria-label="Breadcrumb".*data-act="projects">Projects.*data-act="project-overview">Existing research.*data-act="back-studies">Studies.*data-act="breadcrumb-study">Original study.*aria-current="page">Review run/);
+  assert.match(html,/aria-label="Breadcrumb".*data-act="projects">Projects.*data-act="project-overview">Existing research.*data-act="back-studies">Studies.*data-act="breadcrumb-study">Original study.*aria-current="page">Before you run/);
   const before=JSON.stringify(S.doc);
   act(null,{dataset:{act:'edit-review'}});
   assert.equal(S.plan,null);assert.equal(S.pipelineId,'study');assert.equal(JSON.stringify(S.doc),before);
@@ -3533,7 +3533,7 @@ test('a new project lands on an empty study canvas with two entry points and no 
   assert.match(html(), /class="flow-empty" data-act="flow-add" data-kind="independent"/, 'clicking anywhere on the empty canvas adds the first question');
   assert.match(html(), /data-act="flow-add" data-kind="independent"[^>]*><span class="flow-empty-icon"[\s\S]*?Add your first question/);
   assert.match(html(), /data-act="draft-panel-open"><span class="flow-empty-icon"[\s\S]*?Describe the study in words/);
-  assert.doesNotMatch(html(), /data-act="review"|Review run/, 'nothing to review on an empty canvas');
+  assert.doesNotMatch(html(), /data-act="review"|Check and run/, 'nothing to review on an empty canvas');
   assert.doesNotMatch(html(), /data-act="new-cohort"/, 'no cohort setup is needed first');
   act(null, { dataset: { act: 'draft-panel-open' } });
   assert.match(html(), /Draft with assistant/, 'the words target opens the drafting panel');
@@ -3621,7 +3621,7 @@ test('the study header always names one next action, from the first question to 
   assert.doesNotMatch(html(), /study-next|data-act="draft-panel-open">Draft with assistant|data-act="flow-create-open"|flow-empty-hint/, 'an empty study offers its two ways in once, on the canvas');
   assert.equal((html().match(/class="flow-empty-target"/g) || []).length, 2);
   study.stages = stages;
-  render(); assert.equal(next(), 'next-review|Review run', 'a finished study offers the review');
+  render(); assert.equal(next(), 'next-review|Check and run', 'a finished study offers the review');
   q.label = ''; render(); assert.equal(next(), 'flow-fix|Next: write the question');
   q.label = 'Which option fits?'; q.criteria = { a: '', b: '' }; render(); assert.equal(next(), 'flow-fix|Next: add the options');
   q.criteria = { a: 'A', b: 'B' }; study.cohorts.audience = ''; render(); assert.equal(next(), 'flow-fix|Next: choose who answers');
@@ -3630,7 +3630,7 @@ test('the study header always names one next action, from the first question to 
   study.cohorts.audience = 'cohort'; S.flowPanel = false;
   study.stages.push({ ...structuredClone(stages[0]), id: 'second', inputs: {}, dependsOn: [] });
   render(); assert.equal(next(), 'next-connect|Next: connect step 2 to step 1');
-  assert.match(html(), /<button type="button" class="button" data-act="next-review">Review run<\/button>/, 'independent steps are never blocked from reviewing');
+  assert.match(html(), /<button type="button" class="button" data-act="next-review">Check and run<\/button>/, 'independent steps are never blocked from reviewing');
   act(null, { dataset: { act: 'next-connect', id: 'second' } });
   assert.equal(S.stageId, 'second'); assert.equal(S.sections['flow-inspector'], 'connections'); assert.equal(S.flowPanel, true);
   study.stages.pop(); S.flowPanel = false; render();
@@ -3642,12 +3642,12 @@ test('the study header always names one next action, from the first question to 
   assert.equal(S.tab, 'runs'); assert.equal(S.liveRunId, 'run-1');
   S.tab = 'studies'; S.pipelineId = 'study'; render();
   q.label = 'Changed after the run'; render();
-  assert.equal(next(), 'next-review|Review run', 'editing the study after a run asks for a new review');
+  assert.equal(next(), 'next-review|Check and run', 'editing the study after a run asks for a new review');
   study.layout = { panel: { x: 1, y: 2 } }; q.label = 'Which option fits?'; render();
   assert.equal(next(), 'next-results|See results', 'moving cards never invalidates results');
 });
 
-test('Review run opens as a panel on the canvas with Run study one click away and never starts a run on its own', async () => {
+test('Check and run opens as a panel on the canvas with Run study one click away and never starts a run on its own', async () => {
   const browser = browserHarness(); await settle();
   const { S, act, render } = browser.client;
   const html = () => browser.element('app').innerHTML;

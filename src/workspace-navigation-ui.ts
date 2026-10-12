@@ -12,7 +12,7 @@ function workspaceBreadcrumbItems(){
       // One crumb per page, and the last crumb always matches the page heading. The step panel is an overlay on the study page, not a page.
       const s=selectedStage();
       items.push({label:studyQuestion(study),action:'breadcrumb-study'});
-      if(reviewPage())items.push({label:'Review run'});
+      if(reviewPage())items.push({label:'Before you run'});
       else if(S.sections.pipeline==='context')items.push({label:'Study settings'});
     }
   }else if(S.tab==='cohorts'){
