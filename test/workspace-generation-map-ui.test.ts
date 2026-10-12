@@ -6,7 +6,7 @@ import { GENERATION_MAP_CLIENT } from '../src/workspace-generation-map-ui.js';
 function harness() {
   const escape = (value: unknown) => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;');
   const calls: string[] = [];
-  const context: any = { S: {}, esc: escape, attr: escape, render() {}, root: { querySelector: () => null }, calls,
+  const context: any = { S: {}, esc: escape, seatPageSize: () => 240, pageItems: (items: unknown[], _key: string, limit: number) => ({ items: items.slice(0, limit), controls: items.length > limit ? '<nav class="pagination"></nav>' : '' }), attr: escape, render() {}, root: { querySelector: () => null }, calls,
     api: async (path: string) => { calls.push(path); return { personas: Array.from({ length: 4 }, (_, k) => ({ id: 'p' + k, label: 'Ada <Lovelace> ' + k, age: 30 + k, segment: k % 2 ? 'transit' : 'car', background: 'Drives to work.', attributes: { budget: 'low' } })) }; } };
   new Script(GENERATION_MAP_CLIENT + ';globalThis.t={liveMap,liveMapView,liveMapSignature,liveMapFetch,liveMapAction,liveMapDetail}').runInNewContext(context);
   return context;
@@ -73,4 +73,14 @@ test('a checked persona always sits in its own segment row, even when the AI wro
   assert.equal(t.liveMapSignature(S.localJob), 'plan:12:0=5,1=7', 'a changed row size asks for a full render');
   view.st.members[0][0].segment = 'unknown';
   assert.match(t.liveMap(S.localJob), /Other segments/);
+});
+
+test('the live map shows one page of seats in row order, with whole-segment counts', () => {
+  const context = harness(), { t } = context;
+  context.seatPageSize = () => 5;
+  const html = t.liveMap(shaped());
+  assert.equal((html.match(/class="live-seat"/g) || []).length, 5);
+  assert.match(html, /class="pagination"/);
+  assert.match(html, /Car commuters<span data-live-count="0">2 of 6<\/span>/);
+  assert.doesNotMatch(html, /Train riders/, 'a row with no seats on this page is left out');
 });

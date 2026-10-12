@@ -2,20 +2,21 @@
 export const WORKSPACE_HOST_MAP_CLIENT = String.raw`
 function hostMapState(key){S.hostMaps??={};return S.hostMaps[key]??={page:0,selectedId:null}}
 function hostMapMember(c,key){return c?.personas?.find(person=>person.id===hostMapState(key).selectedId)||null}
-/* The same seat map as live generation: one seat per member, in a row per segment, each segment in its own colour. */
+/* Seats per page in either seat map: a screenful of small seats on a laptop, fewer on a phone. */
+function seatPageSize(){return viewportPageSize(240,96)}
+/* The same seat map as live generation: one seat per member, in a row per segment, each segment in its own colour, paged. */
 function hostMap(c,options={}){
   if(!c?.personas?.length)return '<p class="subtle">No synthetic members yet. Choose or create a cohort.</p>';
-  const key=options.key||c.id,state=hostMapState(key),limit=Math.max(1,Math.min(1000,options.limit||1000)),pages=Math.ceil(c.personas.length/limit);
-  state.page=Math.max(0,Math.min(pages-1,state.page));
-  const members=c.personas.slice(state.page*limit,(state.page+1)*limit),order=(c.segments||[]).map(item=>item.id);
-  const groups=[...new Set([...order,...members.map(person=>person.segment||'unassigned')])].filter(segment=>members.some(person=>(person.segment||'unassigned')===segment));
-  return '<section class="live-map host-map'+(members.length>60?' live-map-small':'')+'" aria-label="'+attr((c.name||'Cohort')+' synthetic member map')+'"><div class="live-map-groups">'+groups.map(segment=>{
-    const label=c.segments?.find(item=>item.id===segment)?.label||segment,index=order.indexOf(segment),style=index>=0?'--seg:var(--seg-'+(index%8)+')':'',mine=members.filter(person=>(person.segment||'unassigned')===segment);
-    return '<section class="live-map-group" style="'+style+'"><h4><i aria-hidden="true"></i>'+esc(label)+'<span>'+mine.length.toLocaleString('en-US')+'</span></h4><div class="live-map-seats">'+mine.map(person=>{
-      const status=options.statusFor?.(person)||'synthetic',selected=(options.selectedId??state.selectedId)===person.id,description=[person.label||person.id,label,status,person.age?'Age '+person.age:''].filter(Boolean).join(' · ');
+  const key=options.key||c.id,state=hostMapState(key),order=(c.segments||[]).map(item=>item.id);
+  const groups=[...new Set([...order,...c.personas.map(person=>person.segment||'unassigned')])].map(segment=>({segment,label:c.segments?.find(item=>item.id===segment)?.label||segment,index:order.indexOf(segment),members:c.personas.filter(person=>(person.segment||'unassigned')===segment)})).filter(group=>group.members.length);
+  const page=pageItems(groups.flatMap(group=>group.members),'seats:'+key,options.limit||seatPageSize()),shown=new Set(page.items);
+  return '<section class="live-map host-map'+(c.personas.length>60?' live-map-small':'')+'" aria-label="'+attr((c.name||'Cohort')+' synthetic member map')+'"><div class="live-map-groups">'+groups.filter(group=>group.members.some(person=>shown.has(person))).map(group=>{
+    const style=group.index>=0?'--seg:var(--seg-'+(group.index%8)+')':'';
+    return '<section class="live-map-group" style="'+style+'"><h4><i aria-hidden="true"></i>'+esc(group.label)+'<span>'+group.members.length.toLocaleString('en-US')+'</span></h4><div class="live-map-seats">'+group.members.filter(person=>shown.has(person)).map(person=>{
+      const status=options.statusFor?.(person)||'synthetic',selected=(options.selectedId??state.selectedId)===person.id,description=[person.label||person.id,group.label,status,person.age?'Age '+person.age:''].filter(Boolean).join(' · ');
       return '<button type="button" class="live-seat" data-state="done" style="'+style+'" data-act="'+attr(options.memberAction||'host-member')+'" data-map="'+attr(key)+'" data-id="'+attr(person.id)+'" data-status="'+attr(status)+'" aria-pressed="'+selected+'" aria-label="'+attr(description)+'" title="'+attr(description)+'"><span aria-hidden="true">'+esc((person.label||person.id).split(/\s+/).slice(0,2).map(word=>word[0]).join('').toUpperCase())+'</span></button>';
     }).join('')+'</div></section>';
-  }).join('')+'</div><footer class="host-map-footer"><span>'+(pages>1?(state.page*limit+1)+'–'+Math.min((state.page+1)*limit,c.personas.length)+' of ':'')+c.personas.length.toLocaleString('en-US')+' synthetic '+(c.personas.length===1?'member':'members')+'</span>'+(pages>1?'<div class="row"><button class="button small icon-button" data-act="host-page" data-map="'+attr(key)+'" data-page="'+(state.page-1)+'" '+(!state.page?'disabled':'')+' aria-label="Previous members">'+icon('left')+'</button><span>'+(state.page+1)+' / '+pages+'</span><button class="button small icon-button" data-act="host-page" data-map="'+attr(key)+'" data-page="'+(state.page+1)+'" '+(state.page===pages-1?'disabled':'')+' aria-label="Next members">'+icon('right')+'</button></div>':'')+'</footer></section>';
+  }).join('')+'</div>'+(page.pages>1?page.controls:'<footer class="host-map-footer"><span>'+c.personas.length.toLocaleString('en-US')+' synthetic '+(c.personas.length===1?'member':'members')+'</span></footer>')+'</section>';
 }
 function hostMapDetails(c,person,extra=''){
   if(!person)return '<div class="host-member-detail host-member-empty"><strong>Inspect a member</strong><p>Hover for a quick look. Click or press Enter to inspect a synthetic profile.</p></div>';

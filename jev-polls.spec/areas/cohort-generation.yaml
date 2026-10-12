@@ -331,8 +331,9 @@ behaviors:
       that row's colour; row sizes follow what was actually written. Changed 2026-10-12 after Giulio
       saw other segments' colours inside one row. Larger audiences show the progress readout without
       the map. Once the audience exists, a study step's Who answers shows the same seat map (every
-      member, a coloured row per segment), paged only past 1,000 members; changed 2026-10-12 after
-      Giulio asked why the saved audience showed a different, 24-at-a-time map.
+      member, a coloured row per segment); changed 2026-10-12 after Giulio asked why the saved audience
+      showed a different, 24-at-a-time map. Both maps page instead of scrolling, with the shared list
+      pager (240 seats a page, 96 on a phone); row counts stay whole-segment counts.
     source:
       text: >-
         it would also be cool to get a "host map" mini-view that gets populated with personas as they
