@@ -1,5 +1,6 @@
 import type { Cohort, RunRecord, Stage, StageResult } from './types.js';
 import { TEXT_SELECTION_CSS } from './text-selection.js';
+import { FAVICON_LINKS } from './workspace-icon.js';
 import { WORKSPACE_FONT_CSS, WORKSPACE_PALETTES, paletteCSS } from './workspace-theme.js';
 
 const escapeHtml = (value: unknown): string => String(value ?? '')
@@ -33,7 +34,7 @@ export function renderReport(run: RunRecord, options: { workspace?: boolean } = 
 <html lang="en">
 <head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="color-scheme" content="light"><title>${escapeHtml(pipeline.name)} — study report</title>
+  <meta name="color-scheme" content="light"><title>${escapeHtml(pipeline.name)} · Report · Jev</title>${FAVICON_LINKS}
   <script id="themeInit">(()=>{try{const saved=localStorage.getItem('jev-workspace-theme');const dark=saved?saved==='dark'||saved==='sepia':matchMedia('(prefers-color-scheme: dark)').matches;document.documentElement.dataset.theme=dark?'dark':'light'}catch{}})();</script>
   <style>
     ${TEXT_SELECTION_CSS}

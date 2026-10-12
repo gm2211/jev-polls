@@ -42,7 +42,7 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
   }
   const context = {
     location: { origin: "http://127.0.0.1:4180" },
-    localStorage: { getItem: (key: string) => preferences.get(key) ?? null, setItem: (key: string, value: string) => preferences.set(key, value), removeItem: (key: string) => preferences.delete(key) },
+    localStorage: { getItem: (key: string) => preferences.get(key) ?? null, setItem: (key: string, value: string) => preferences.set(key, value), removeItem: (key: string) => preferences.delete(key), key: (index: number) => [...preferences.keys()][index] ?? null, get length() { return preferences.size; } },
     sessionStorage: { getItem: (key: string) => storage.get(key) ?? null, setItem: (key: string, value: string) => storage.set(key, value), removeItem: (key: string) => storage.delete(key) },
     document: { getElementById: element, querySelectorAll: () => [], visibilityState: 'visible', addEventListener: (name: string, fn: Function) => listeners.set(name, fn) },
     window: { addEventListener: (name: string, fn: Function) => listeners.set(name, fn) },
@@ -1954,6 +1954,47 @@ test('progress keeps checking while the app is unreachable and says plainly when
   assert.equal(browser.bodies.length, 0, 'checking never submits a generation');
 });
 
+test('the audience description and count survive a page refresh until the audience is used', async () => {
+  const preferences = new Map<string, string>();
+  let browser = browserHarness(true, preferences); await settle();
+  let { S, setupCohortPicker } = browser.client;
+  S.tab = 'studies'; S.pipelineId = 'study'; S.stageId = 'panel';
+  const form = { dataset: { form: 'cohort-generator' } };
+  const prose = 'Adults who play strategy games at night, from casual to competitive.';
+  browser.listeners.get('input')!({ target: { name: 'cohortPrompt', value: prose, closest: () => form } });
+  browser.listeners.get('input')!({ target: { name: 'cohortSize', value: '250', closest: () => form } });
+
+  // A refresh starts a new page with an empty form; the saved draft fills it.
+  browser = browserHarness(true, preferences); await settle();
+  ({ S, setupCohortPicker } = browser.client);
+  S.tab = 'studies'; S.pipelineId = 'study'; S.stageId = 'panel';
+  const p = S.doc.pipelines[0], stage = p.stages[0];
+  const html = setupCohortPicker(p, stage);
+  assert.match(html, /Adults who play strategy games at night, from casual to competitive\./);
+  assert.equal(S.cohortSize, 250);
+  S.cohortPrompt = 'Edited after the refresh';
+  assert.match(setupCohortPicker(p, stage), /Edited after the refresh/, 'text already in the form is not overwritten');
+});
+
+test('a remembered run the app lost comes back after a refresh as stopped, with its description, ready to start again', async () => {
+  const preferences = new Map<string, string>();
+  const browser = browserHarness(true, preferences); await settle();
+  const { S, cohortGenerator } = browser.client;
+  const prose = 'Night-time gamers in the US, mixed ages and budgets.';
+  preferences.set('jev-audience-draft:http://127.0.0.1:4180:existing-research:study/panel', JSON.stringify({ prompt: prose, size: 1000, jobId: 'lost-job', cohortId: 'gamers', step: { pipelineId: 'study', stageId: 'panel' } }));
+  browser.storage.set('jev-local-job:http://127.0.0.1:4180:existing-research', 'lost-job');
+  browser.respond('/api/local-agents', { engines: [{ id: 'claude', label: 'Claude Code', available: true }] });
+  browser.respond('/api/agent/jobs?projectId=existing-research', { jobs: [] });
+  browser.fail('/api/agent/jobs/lost-job', 'Assistant task was not found. Start a new task.', undefined, 'AGENT_JOB_NOT_FOUND');
+  await browser.client.loadLocalAgents();
+  assert.equal(S.localJob.status, 'failed'); assert.equal(S.localJob.cohort.prompt, prose); assert.equal(S.localJob.cohort.size, 1000);
+  assert.deepEqual({ ...S.cohortInlineTarget }, { pipelineId: 'study', stageId: 'panel' });
+  const html = cohortGenerator(true);
+  assert.match(html, /Generation stopped/); assert.match(html, /none of its personas were kept/);
+  assert.match(html, /data-act="cohort-retry">Start again</);
+  assert.equal(S.cohortPrompt, prose);
+});
+
 test('a stopped run with kept personas continues from them', async () => {
   const browser = browserHarness(); await settle();
   const { S, act, cohortGenerator } = browser.client;
@@ -3694,4 +3735,15 @@ test('drafting progress separates accepted from being written and describes each
   const early = draftEstimate({ ...progress, estimate: { seconds: 240, basis: 'streaming', at: new Date().toISOString() } });
   assert.match(early, /^About 2–7 min left$/);
   assert.match(draftEstimate({ ...progress, estimate: undefined }), /Estimating time left…/);
+});
+
+test('the browser tab shows the Jev icon and names the open page first', () => {
+  const html = renderWorkspace('nonce-test', 'token');
+  assert.match(html, /<link rel="icon" type="image\/svg\+xml" href="data:image\/svg\+xml;base64,/);
+  assert.match(html, /<link rel="icon" type="image\/png" sizes="32x32" href="data:image\/png;base64,/);
+  assert.match(html, /<link rel="apple-touch-icon" href="data:image\/png;base64,/);
+  assert.match(html, /<title>Jev<\/title>/);
+  assert.match(html, /<span class="glyph" aria-hidden="true"><svg /);
+  assert.ok(html.includes("const title=(S.doc?pageTitle()+' · ':'')+'Jev'"), 'tab title leads with the page and ends with Jev');
+  assert.ok(html.includes('syncLocation();syncTitle()}'), 'every render refreshes the tab title');
 });

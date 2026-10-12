@@ -241,6 +241,19 @@ behaviors:
       text: >-
         why don't we prompt model to show and provide phases / more details on its thinking and why
         don't we stream some here
+  - id: audience-draft-kept
+    description: >-
+      A step's audience description and count are kept in the browser as they are typed and with
+      every run started from them, so a page refresh shows them again, and a remembered run the app
+      no longer has comes back after a refresh as stopped with that description and Start again.
+      They are forgotten only when the audience is used for the step.
+    details: >-
+      Added 2026-10-12 after a refresh emptied the Who answers form back to 8 people and lost the
+      written description. Kept in localStorage per project and step; the AI choice was already kept.
+    source:
+      text: >-
+        why did I lose my prose when page refreshed - if we have issues with generation we should
+        keep the attempt around so I can retry instead of losing everything
       reference: 2026-10-12 jev-polls project thread, Giulio
   - id: cancel-generation
     description: Cancel generation stops the job and leaves the workspace unchanged.
