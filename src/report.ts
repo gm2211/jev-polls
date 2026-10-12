@@ -2,6 +2,7 @@ import { createCohortInsights } from './cohort-insights.js';
 import type { Cohort, RunRecord } from './types.js';
 import { TEXT_SELECTION_CSS } from './text-selection.js';
 import { FAVICON_LINKS } from './workspace-icon.js';
+import { RUN_GRAPH_CSS, RUN_GRAPH_FACTORY } from './run-graph-ui.js';
 import { PALETTE_DARK, PALETTE_LIGHT } from './workspace-live-ui.js';
 import { WORKSPACE_FONT_CSS, WORKSPACE_PALETTES, paletteCSS } from './workspace-theme.js';
 import { ATTRIBUTE_FORMAT_CSS, createAttributeFormat } from './persona-attributes.js';
@@ -122,6 +123,8 @@ export function renderReport(run: RunRecord, options: { workspace?: boolean; pro
     @media(max-width:640px){.shell{padding:0 16px 44px}.card{padding:16px}.intro h1{font-size:var(--text-xl)}.bar{grid-template-columns:minmax(0,110px) minmax(0,1fr) 42px}}
     @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important}}
       ${ATTRIBUTE_FORMAT_CSS}
+${RUN_GRAPH_CSS}
+.method-graph{margin:2px 0 14px}
   </style>
 </head>
 <body>
@@ -141,6 +144,7 @@ export function renderReport(run: RunRecord, options: { workspace?: boolean; pro
   <script>
   (()=>{
     'use strict';
+    const runGraph=${RUN_GRAPH_FACTORY};
     const {run,audiences,cohortLink}=JSON.parse(document.getElementById('reportData').textContent);
     const $=selector=>document.querySelector(selector);
     const el=(tag,className,text)=>{const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=String(text);return node;};
@@ -387,16 +391,21 @@ export function renderReport(run: RunRecord, options: { workspace?: boolean; pro
       box.append(rows);return box;
     }
     function renderMethod(){
-      const host=$('#method');const steps=el('ol','steps');let skipped=0,failed=0;
+      // The study as a graph first: each step with the inputs it read and the outputs it gave, wired to where they came from.
+      const host=$('#method');const steps=el('ol','steps');let skipped=0,failed=0;const statuses={},notes={};
       run.pipeline.stages.forEach((stage,index)=>{
         const result=stageResult(stage.id),status=result?.status??'unknown';if(status==='skipped')skipped++;if(status==='failed')failed++;
+        statuses[stage.id]=status;notes[stage.id]=kindLabel(stage);
         const li=el('li',status);li.append(el('span','step-n',status==='skipped'?'–':status==='failed'?'!':String(index+1)));
         const body=el('div','step-body');body.append(el('strong','',nameOf(stage)),el('span','',kindLabel(stage)+(stage.when?' · runs only when a condition is met':'')));
         if(status==='completed')body.append(el('span','',stagePlain(stage)));else if(status==='skipped'){const why=el('span','','Skipped. ');appendReason(why,result?.reason,status);body.append(why);}else if(status==='failed'){const why=el('span','','Failed. ');appendReason(why,result?.reason,status);body.append(why);}else body.append(el('span','','No result was recorded.'));
         if(stage.kind==='poll'&&status==='completed'&&audiences[stage.id])body.append(audienceBlock(stage,audiences[stage.id]));
         li.append(body);steps.append(li);
       });
-      host.append(steps);
+      const cohortNames=Object.fromEntries(Object.entries(run.pipeline.cohorts||{}).map(([ref,id])=>[ref,(run.cohorts[ref]||run.cohorts[id])?.name||ref]));
+      const pipeline={...run.pipeline,stages:run.pipeline.stages.map(stage=>({...stage,label:nameOf(stage)}))};
+      const graph=el('div','method-graph');graph.innerHTML=runGraph.html({pipeline,statuses,notes,audiences:cohortNames,mode:'full',label:'How the study ran: each step with its inputs and outputs'});
+      host.append(graph,steps);
       $('#methodHint').textContent=plural(run.pipeline.stages.length,'step')+(skipped?' · '+skipped+' skipped':'')+(failed?' · '+failed+' failed':'');
       host.append(repeatNote());
       const facts=el('dl','run-facts');const add=(label,value)=>{const item=el('div');item.append(el('dt','',label),el('dd','',value));facts.append(item);};
