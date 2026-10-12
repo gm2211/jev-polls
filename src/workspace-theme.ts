@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { TEXT_SELECTION_CSS } from './text-selection.js';
+import { TEXT_SELECTION_CSS, WORKSPACE_SELECTION_CSS } from './text-selection.js';
 
 /** Local display preference; never changes or redraws the research document. */
 export const THEME_CONTROL = `<button type="button" id="themeToggle" class="button theme-toggle" role="switch" aria-checked="false" aria-label="Dark mode"><span class="theme-track" aria-hidden="true"><span></span></span><span id="themeLabel">Light</span></button>`;
@@ -68,7 +68,7 @@ ${WORKSPACE_FONT_CSS}
 :root[data-theme=dark]{color-scheme:dark;${paletteCSS(WORKSPACE_PALETTES.dark)}}
 /* IDE-style hierarchy: dark chassis, task surfaces, lighter editable controls. */
 body{font-family:var(--body);background:var(--paper)}
-${TEXT_SELECTION_CSS}
+${TEXT_SELECTION_CSS}${WORKSPACE_SELECTION_CSS}
 .topbar{height:56px;padding:0 24px;background:var(--surface);border-bottom:1px solid var(--line)}
 .wordmark{font-family:var(--brand);font-size:var(--text-xl);letter-spacing:-.04em;gap:12px}.wordmark i{font-family:var(--body);font-size:var(--text-sm);letter-spacing:.02em}
 .glyph{width:28px;height:28px;background:none}.glyph svg{display:block;width:100%;height:100%}

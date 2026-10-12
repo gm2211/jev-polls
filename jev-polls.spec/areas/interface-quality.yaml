@@ -234,3 +234,26 @@ behaviors:
     source:
       text: we can do better than raw json in report
       reference: jev-polls project thread, Giulio, 2026-10-12
+  - id: chrome-not-selectable
+    description: >-
+      Workspace chrome (buttons, labels, tabs, menus, list rows, headings, hints, dialog text and
+      the command palette) cannot be text-selected; produced content stays selectable.
+    details: >-
+      Selectable content: typed fields, persona profiles, stories and sources, live and replay
+      answers, Jev's drafted proposals and command replies, code to copy, and error text. The
+      workspace is unselectable at the page level and that content opts back in, so new chrome is
+      covered without per-element rules. The standalone report stays selectable throughout.
+    source:
+      text: most ui elements that are not produced text should not be selectable
+      reference: jev-polls project thread, Giulio, 2026-10-12
+  - id: modal-click-outside-closes
+    description: >-
+      Clicking outside any modal (every dialog and the command palette) closes it through its own
+      close or Cancel action; a press that starts inside the modal and ends outside does not.
+    details: >-
+      Confirmation dialogs (delete, reload saved) treat it as Cancel. Import workspace, Connect
+      TypeSafe and Paste a list stay open while they hold typed text or a loaded file and say how to
+      discard it; the command palette stays open while an AI request runs.
+    source:
+      text: clicking out of a modal should close it
+      reference: jev-polls project thread, Giulio, 2026-10-12

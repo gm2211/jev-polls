@@ -28,6 +28,7 @@ import { PROJECT_DELETION_CLIENT, PROJECT_DELETION_DIALOG } from './project-dele
 import { FAVICON_LINKS, JEV_MARK_SVG } from './workspace-icon.js';
 import { STUDY_DELETION_CLIENT, STUDY_DELETION_CSS, STUDY_DELETION_DIALOG } from './study-deletion-ui.js';
 import { STEP_DELETION_CLIENT, STEP_DELETION_CSS, STEP_DELETION_DIALOG } from './step-deletion-ui.js';
+import { MODAL_DISMISS_CLIENT } from './modal-dismiss-ui.js';
 
 /** Standalone, same-origin research workspace. All values from workspace data are HTML escaped. */
 export function renderWorkspace(nonce: string, csrf: string): string {
@@ -96,6 +97,7 @@ ${SIDEBAR_CLIENT}
 ${STUDY_START_CLIENT}
 ${STUDY_DELETION_CLIENT}
 ${STEP_DELETION_CLIENT}
+${MODAL_DISMISS_CLIENT}
 ${STUDY_SETUP_CLIENT}
 ${STUDY_NEXT_CLIENT}
 ${DRAFT_CONTENT_CLIENT}
