@@ -6,7 +6,7 @@ import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promise
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { ChildProcessWithoutNullStreams, SpawnOptionsWithoutStdio } from 'node:child_process';
-import { BatchRejected, LocalAgentError, readSetupPlan, backoffCause, batchSizes, LocalAgentService, checkCohortBatch, checkCohortSetup, checkPersonaBatch, ShortBatch, concurrentBatches, personasFromTable, segmentSequence, claudeEnvelope, takeAudienceRequests, type LocalAgentJob, type LocalAgentSpawner } from '../src/local-agent.js';
+import { BatchRejected, LocalAgentError, readSetupPlan, backoffCause, batchSizes, LocalAgentService, checkCohortBatch, checkCohortSetup, checkPersonaBatch, ShortBatch, concurrentBatches, earlySetupDetails, personasFromTable, segmentSequence, claudeEnvelope, takeAudienceRequests, type LocalAgentJob, type LocalAgentSpawner } from '../src/local-agent.js';
 import type { ChatGptDraftClient } from '../src/chatgpt.js';
 import type { Cohort, DistributionTargetBucket, Persona } from '../src/types.js';
 import { validateWorkspaceDocument } from '../src/workspace-store.js';
@@ -1688,6 +1688,47 @@ test('Claude Code without the pinned audience model id falls back to the sonnet 
   const again = await terminal(service, service.start({ engine: 'claude', prompt: 'Create 30 adults', revision: 0, document: empty, cohort: { id: 'customers', size: 30 } }));
   assert.equal(again.status, 'completed', again.message);
   assert.equal(models.at(-1), 'sonnet', 'later calls use the alias the CLI accepted');
+});
+
+test('Claude Code persona batches start once the streaming setup reply has its segments and sources, before it ends', async t => {
+  for (const setupFails of [false, true]) {
+    const root = await setup(t); const setupGate = deferred<void>(); let batchesBeforeSetupEnded = 0; let setupEnded = false; let setupCalls = 0;
+    const service = new LocalAgentService({ temporaryRoot: root, spawn: fakeSpawner(async ({ args, child }) => {
+      const schema = JSON.parse(args[args.indexOf('--json-schema') + 1]!) as { properties: Record<string, unknown> };
+      const reply = JSON.parse(cohortBatchResponse(child.input)) as { documentJson: string };
+      if (!schema.properties.rows) {
+        setupCalls++;
+        // The whole reply streams, then the call ends only when the test lets it.
+        child.stdout.write(claudeDelta(JSON.stringify({ documentJson: reply.documentJson, explanation: 'ok' })));
+        await setupGate.promise; setupEnded = true;
+        if (setupFails) { child.stdout.write(JSON.stringify({ type: 'result', is_error: true, result: 'boom' }) + '\n'); child.finish(1); return; }
+        child.stdout.write(JSON.stringify({ type: 'result', is_error: false, structured_output: { documentJson: reply.documentJson, explanation: 'ok' } }) + '\n'); child.finish(); return;
+      }
+      if (!setupEnded) batchesBeforeSetupEnded++;
+      const fields = ['position', 'label', 'segment', 'age', 'background', ...Object.keys(proposed.cohorts[0]!.personas[0]!.attributes).map(name => `attributes.${name}`)];
+      const rows = (JSON.parse(reply.documentJson) as Cohort).personas.map(({ label, segment, age, background, attributes }, index) => [index + 1, label, segment, age, background, ...Object.values(attributes)]);
+      child.stdout.write(JSON.stringify({ type: 'result', is_error: false, structured_output: { fields, rows } }) + '\n'); child.finish();
+    }) }); t.after(() => service.close());
+    const job = service.start({ engine: 'claude', prompt: 'Create 30 adults', revision: 0, document: empty, cohort: { id: 'customers', size: 30 } });
+    await waitFor(() => batchesBeforeSetupEnded === 3);
+    setupGate.resolve();
+    const done = await terminal(service, job);
+    if (setupFails) { assert.equal(done.status, 'failed'); assert.match(done.message, /Setting up the audience/); assert.equal(done.proposal, undefined); continue; }
+    assert.equal(done.status, 'completed', done.message); assert.equal(done.progress!.completedPersonas, 30); assert.equal(setupCalls, 1);
+    const cohort = done.proposal!.document.cohorts[0]!;
+    assert.equal(cohort.name, proposed.cohorts[0]!.name, 'the finished setup reply replaces the placeholders');
+    assert.equal(cohort.description, proposed.cohorts[0]!.description);
+  }
+});
+
+test('early setup details need complete, valid segments and sources from the streamed reply', () => {
+  const { personas, ...metadata } = batchCohort(1); void personas;
+  const streamed = JSON.stringify({ documentJson: JSON.stringify(metadata), explanation: 'ok' });
+  const full = earlySetupDetails(streamed, 'customers')!;
+  assert.deepEqual(full.segments, metadata.segments); assert.deepEqual(full.sources, metadata.sources); assert.equal(full.population, metadata.population);
+  const segmentsEnd = streamed.indexOf(']', streamed.indexOf('segments'));
+  assert.equal(earlySetupDetails(streamed.slice(0, segmentsEnd - 5), 'customers'), undefined, 'segments still streaming');
+  assert.equal(earlySetupDetails(JSON.stringify({ documentJson: JSON.stringify({ ...metadata, segments: [{ id: 'a' }] }) }), 'customers'), undefined, 'an invalid segment waits for the full reply');
 });
 
 test('a persona batch may leave id, weight, sources and synthetic fields to the app, and cited sources are still checked', () => {
