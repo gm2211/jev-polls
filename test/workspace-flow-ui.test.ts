@@ -42,7 +42,7 @@ async function flowHarness() {
   };
   const html = renderWorkspace('flow-test', 'token');
   const script = html.match(/<script nonce="flow-test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.flowTest={S,flowAction,flowCreateMenu,flowKindMatches,flowConnect,flowDisconnect,flowInputs,flowNode,flowReadiness,flowConnections,flowCohortMap,flowTodo,flowRoundTabs,flowNode,flowInspector,flowCanvas,flowWorkspace,flowReads,flowRunOrder,flowListMode,flowTipShow,flowNodeInputs,flowWireEnd};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.flowTest={S,flowAction,flowCreateMenu,flowKindMatches,flowConnect,flowDisconnect,flowInputs,flowNode,flowReadiness,flowConnections,flowCohortMap,flowTodo,flowRoundTabs,flowNode,flowInspector,flowCanvas,flowWorkspace,flowReads,flowRunOrder,flowListMode,flowTipShow,flowNodeInputs,flowWireEnd,setupAction,stageForm,resultSetup};})();');
   new Script(exposed).runInNewContext(context);
   await new Promise<void>(resolve => setImmediate(resolve));
   const client = context.flowTest;
@@ -326,15 +326,17 @@ test('canvas create menu lists every step kind, filters by text and places the n
   assert.equal(flowCreateMenu(pipeline), '');
   S.flowCreate = { pipelineId: 'study', x: 412.4, y: 96.6, left: 0, top: 0, query: '', index: 0 };
   const menu = flowCreateMenu(pipeline);
-  for (const label of ['Ask the audience', 'Combine answers', 'Final result']) assert.match(menu, new RegExp(label));
-  assert.deepEqual(plain(flowKindMatches('comb').map((k: any) => k.kind)), ['aggregate']);
+  for (const label of ['Ask the audience', 'Final choice', 'Final result']) assert.match(menu, new RegExp(label));
+  assert.doesNotMatch(menu, /Combine answers/, 'new studies get the Jev-backed Final choice instead of the weighted merge');
+  assert.deepEqual(plain(flowKindMatches('comb').map((k: any) => k.kind)), ['choose']);
   assert.deepEqual(plain(flowKindMatches('winner').map((k: any) => k.kind)), ['decision']);
   const before = JSON.stringify(pipeline.stages);
-  flowAction('flow-create', { dataset: { kind: 'aggregate' } });
+  flowAction('flow-create', { dataset: { kind: 'choose' } });
   const added = pipeline.stages.at(-1);
   assert.equal(JSON.stringify(pipeline.stages.slice(0, -1)), before);
-  assert.equal(added.kind, 'aggregate');
-  assert.deepEqual(plain(added.inputs), []);
+  assert.equal(added.kind, 'choose');
+  assert.deepEqual(plain(added.inputs), {});
+  assert.equal(added.cohort, undefined, 'a final choice has no audience');
   assert.deepEqual(plain(pipeline.layout[added.id]), { x: 412, y: 97 });
   assert.equal(S.stageId, added.id);
   assert.equal(S.flowCreate, null);
@@ -548,9 +550,9 @@ test('a dropped wire only offers step kinds that can use it', async () => {
   const { S, pipeline, flowAction, flowKindMatches } = await flowHarness();
   const connect = { stage: 'source', question: 'answer' };
   S.pipelineId = 'study';
-  assert.deepEqual(plain(flowKindMatches('', connect).map((k: any) => k.kind)), ['poll', 'aggregate', 'decision']);
+  assert.deepEqual(plain(flowKindMatches('', connect).map((k: any) => k.kind)), ['poll', 'choose', 'decision']);
   pipeline.stages[0].questions.answer = { type: 'score', label: 'How much?', instructions: 'Rate it.', scale: { min: 1, max: 5 } };
-  assert.deepEqual(plain(flowKindMatches('', connect).map((k: any) => k.kind)), ['poll', 'aggregate'], 'a Final result needs a Choice');
+  assert.deepEqual(plain(flowKindMatches('', connect).map((k: any) => k.kind)), ['poll', 'choose'], 'a Final result needs a Choice');
   const count = pipeline.stages.length;
   S.flowCreate = { pipelineId: 'study', x: 0, y: 0, left: 0, top: 0, query: '', index: 0, connect };
   flowAction('flow-create', { dataset: { kind: 'decision' } });
@@ -570,4 +572,44 @@ test('canvas cards keep the same rows whether a step is named, connected or not'
   assert.match(wired, /Connect output /);
   assert.match(wired, /<div class="flow-node-header">[\s\S]*data-act="flow-inputs"[\s\S]*title="Uses step 1"[\s\S]*<\/div><button class="flow-select"/, 'inputs sit in the header, not their own row');
   assert.match(WORKSPACE_FLOW_CSS, /\.flow-map \.flow-node\[data-selected=true\]\{border:1px solid/, 'selection does not change card height');
+});
+
+test('a final choice dropped on an output reads every answer, starts from its options, and needs no audience', async () => {
+  const { S, pipeline, flowAction, flowReadiness, flowRoundTabs, flowNode, flowConnections, flowTodo, stageForm } = await flowHarness();
+  S.flowCreate = { pipelineId: 'study', x: 10, y: 10, left: 0, top: 0, query: '', index: 0, connect: { stage: 'source', question: 'answer' } };
+  flowAction('flow-create', { dataset: { kind: 'choose' } });
+  const added = pipeline.stages.at(-1);
+  assert.equal(added.kind, 'choose');
+  assert.deepEqual(plain(added.inputs), { answer_1: { stage: 'source', question: 'answer', select: 'responses' } });
+  assert.deepEqual(plain(added.questions.choice.criteria), { a: 'A', b: 'B' });
+  assert.deepEqual(plain(added.dependsOn), ['source']);
+  assert.equal(flowReadiness(pipeline, added), 'Ready');
+  assert.deepEqual(plain(flowRoundTabs(pipeline, added).map(([key, label]: any) => [key, label])), [['question', 'What to decide'], ['answers', 'Options'], ['connections', 'Reads'], ['settings', 'Settings']]);
+  assert.match(flowNode(pipeline, added, false), /<span class="flow-kind">Final choice<\/span>/);
+  assert.doesNotMatch(flowNode(pipeline, added, false), /flow-who/);
+  assert.match(stageForm(pipeline, added, 'question'), /What should it decide\?/);
+  const reads = flowConnections(pipeline, added);
+  assert.match(reads, /reads it in slices and combines its own verdicts automatically/);
+  assert.match(reads, /data-act="flow-choose-read"[^>]*data-mode="responses" aria-pressed="true"/);
+  flowAction('flow-choose-read', { dataset: { id: added.id, key: 'answer_1', mode: 'summary' } });
+  assert.equal(added.inputs.answer_1.select, 'summary');
+  assert.ok(!flowTodo(pipeline).some((item: any) => item.stageId === added.id));
+  flowAction('flow-disconnect', { dataset: { id: added.id, key: 'answer_1' } });
+  assert.equal(flowReadiness(pipeline, added), 'Needs input');
+  assert.deepEqual(plain(flowTodo(pipeline).find((item: any) => item.stageId === added.id)), { stageId: added.id, tab: 'connections' });
+});
+
+test('an existing Combine answers step switches to a Final choice that keeps its output name', async () => {
+  const { S, pipeline, setupAction, resultSetup } = await flowHarness();
+  const combine = { id: 'combine', kind: 'aggregate', label: 'Combined answers', dependsOn: ['source', 'other'], inputs: [{ stage: 'source', question: 'answer', weight: 1 }, { stage: 'other', question: 'answer', weight: 2 }], outputQuestion: 'combined' };
+  pipeline.stages.push(combine, { id: 'result', kind: 'decision', label: 'Final result', dependsOn: ['combine'], from: { stage: 'combine', question: 'combined' }, outputQuestion: 'decision' });
+  S.stageId = 'combine';
+  assert.match(resultSetup(pipeline, combine), /Switch to Final choice/);
+  setupAction('setup-to-choice', { dataset: {} });
+  assert.equal(combine.kind, 'choose');
+  assert.equal(combine.label, 'Final choice');
+  assert.deepEqual(Object.keys(combine), ['id', 'kind', 'label', 'questions', 'inputs', 'dependsOn']);
+  assert.deepEqual(plain((combine as any).inputs), { answer_1: { stage: 'source', question: 'answer', select: 'responses' }, answer_2: { stage: 'other', question: 'answer', select: 'responses' } });
+  assert.deepEqual(plain((combine as any).questions.combined.criteria), { a: 'A', b: 'B' });
+  assert.equal(S.dirty, true);
 });

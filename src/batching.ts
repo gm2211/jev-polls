@@ -4,6 +4,13 @@ import type { Answer, Json, PollInputBinding, PollStage } from './types.js';
 export const MAP_GUIDE = 'The input marked with batch is one slice of a larger set of individual responses (batch k of batches, out of totalResponses). Answer the same questions for this slice only.';
 export const COMBINE_GUIDE = 'The input marked with combine holds your own earlier verdicts, one per batch of individual responses, each saying how many responses it covered and your answers to the same questions. Answer the same questions for everything those batches cover together.';
 
+/** Final choice: what the single Jev reading every connected output is asked to do. */
+export const FINAL_CHOICE_ROLE = 'You make one final choice for this study. inputs holds outputs of earlier steps, and sources says which step and question each one comes from. Weigh all of them and answer the questions once, for the study as a whole.';
+/** Final choice, map layer: one slice of one input's individual responses. */
+export const FINAL_MAP_GUIDE = 'This request shows only part of the earlier outputs. The input marked with batch is one slice of that step\'s individual responses (batch k of batches, out of totalResponses); inputs not shown here are read in other requests. Answer the same questions from what this slice shows.';
+/** Final choice, combine layer: verdicts from slices of possibly several inputs. */
+export const FINAL_COMBINE_GUIDE = 'The input marked with combine holds your own earlier verdicts, one per slice of the earlier outputs, each naming the input it read, how many responses it covered, and your answers to the same questions. Answer the same questions once, for all of the earlier outputs together.';
+
 /** The one binding of a step that reads its responses in batches, if any. */
 export function batchedBinding(stage: PollStage): { alias: string; binding: PollInputBinding } | undefined {
   const found = Object.entries(stage.inputs ?? {}).find(([, binding]) => binding.batch !== undefined);
@@ -31,9 +38,9 @@ export function compactAnswer(answer: Answer): Json {
   return { noul: round3(answer.noul) };
 }
 
-export interface Verdict { batch: number; responses: number; answers: Record<string, Answer> }
+export interface Verdict { batch: number; responses: number; answers: Record<string, Answer>; /** Final choice only: the input this verdict read. */ input?: string }
 export function verdictEntry(verdict: Verdict): Json {
-  return { batch: verdict.batch, responses: verdict.responses, answers: Object.fromEntries(Object.entries(verdict.answers).map(([id, answer]) => [id, compactAnswer(answer)])) };
+  return { ...(verdict.input !== undefined ? { input: verdict.input } : {}), batch: verdict.batch, responses: verdict.responses, answers: Object.fromEntries(Object.entries(verdict.answers).map(([id, answer]) => [id, compactAnswer(answer)])) };
 }
 export function reduceInput(round: number, totalResponses: number, verdicts: Verdict[]): Json {
   return { combine: true, round, totalResponses, batches: verdicts.map(verdictEntry) };

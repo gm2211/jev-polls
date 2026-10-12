@@ -33,6 +33,7 @@ export const pipelineSchema = z.object({ version: z.literal(1), id, name: text, 
   z.object({ ...base, kind: z.literal('poll'), cohort: id, questions: z.record(id, questionSchema).refine(v => Object.keys(v).length > 0, 'At least one question is required'), size: z.number().int().positive().optional(), repeats: z.number().int().min(1).max(100).optional(), context: z.json().optional(), inputs: z.record(id, pollInputBinding).optional() }).strict(),
   z.object({ ...base, kind: z.literal('aggregate'), inputs: z.array(z.object({ stage: id, question: id, weight: positive }).strict()).min(1), outputQuestion: id }).strict(),
   z.object({ ...base, kind: z.literal('decision'), from: z.object({ stage: id, question: id }).strict(), outputQuestion: id }).strict(),
+  z.object({ ...base, kind: z.literal('choose'), questions: z.record(id, questionSchema).refine(v => Object.keys(v).length > 0, 'At least one question is required'), context: z.json().optional(), inputs: z.record(id, pollInputBinding).refine(v => Object.keys(v).length > 0, 'A final choice reads at least one earlier output') }).strict(),
 ])).min(1), layout: z.record(id, z.object({ x: z.number().finite(), y: z.number().finite() }).strict()).optional() }).strict();
 
 function assert(value: unknown, message: string): asserts value { if (!value) throw new Error(message); }
@@ -72,7 +73,7 @@ export function stageOrder(pipeline: Pipeline): Stage[] {
 export function outputQuestions(pipeline: Pipeline): Record<string, Record<string, Question>> {
   const outputs: Record<string, Record<string, Question>> = {};
   for (const s of stageOrder(pipeline)) {
-    if (s.kind === 'poll') {
+    if (s.kind === 'poll' || s.kind === 'choose') {
       outputs[s.id] = Object.fromEntries(Object.entries(s.questions).map(([qid, q]) => {
         if (q.type !== 'choice' || !q.optionsFrom) return [qid, q];
         const from = q.optionsFrom;
@@ -107,7 +108,7 @@ export function parsePipeline(input: unknown): Pipeline {
     unique(s.dependsOn, `dependency in ${s.id}`);
     if (s.kind === 'poll') assert(Object.hasOwn(p.cohorts, s.cohort), `Stage ${s.id}: unknown cohort ${s.cohort}`);
     if (s.kind === 'aggregate') unique(s.inputs.map(i => `${i.stage}.${i.question}`), `aggregate input in ${s.id}`);
-    if (s.kind === 'poll' && s.inputs) assert(Object.keys(s.inputs).length <= 1000, `Stage ${s.id}: inputs exceeds 1000 bindings`);
+    if ((s.kind === 'poll' || s.kind === 'choose') && s.inputs) assert(Object.keys(s.inputs).length <= 1000, `Stage ${s.id}: inputs exceeds 1000 bindings`);
   }
   const outputs = outputQuestions(p);
   for (const s of p.stages) {
@@ -122,7 +123,8 @@ export function parsePipeline(input: unknown): Pipeline {
       if (c.metric === 'winner' && q.type === 'choice') assert(Object.hasOwn(q.criteria, c.value as string), `Stage ${s.id}: unknown winner option ${c.value}`);
     }
     if (s.when) check(s.when);
-    if (s.kind === 'poll' && s.inputs) {
+    if ((s.kind === 'poll' || s.kind === 'choose') && s.inputs) {
+      if (s.kind === 'choose') assert(Object.values(s.inputs).every(binding => binding.batch === undefined), `Stage ${s.id}: a final choice splits large inputs automatically; remove batch`);
       for (const [alias, binding] of Object.entries(s.inputs)) {
         assert(!['__proto__', 'prototype', 'constructor'].includes(alias), `Stage ${s.id}: reserved input alias ${alias}`);
         assert(s.dependsOn.includes(binding.stage), `Stage ${s.id}: input ${binding.stage} must be in dependsOn`);

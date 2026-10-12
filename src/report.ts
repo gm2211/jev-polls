@@ -122,7 +122,7 @@ export function renderReport(run: RunRecord, options: { workspace?: boolean } = 
 
     function questionFor(stage,qid,seen=new Set()){
       if(!stage)return undefined;const visitKey=stage.id+'.'+qid;if(seen.has(visitKey))return undefined;seen.add(visitKey);
-      if(stage.kind==='poll')return stage.questions[qid];
+      if(stage.kind==='poll'||stage.kind==='choose')return stage.questions[qid];
       if(stage.kind==='decision'&&stage.outputQuestion===qid)return questionFor(stageDef(stage.from.stage),stage.from.question,seen);
       if(stage.kind==='aggregate'&&stage.outputQuestion===qid){const input=stage.inputs[0];return input?questionFor(stageDef(input.stage),input.question,seen):undefined;}
       return undefined;
@@ -147,7 +147,7 @@ export function renderReport(run: RunRecord, options: { workspace?: boolean } = 
       const index=optionIndex(question,key);return index<14?'var(--c'+index+')':'hsl('+Math.round((index*137.508)%360)+' 40% 60%)';
     }
     function ranked(summary){return Object.entries(summary?.probabilities??{}).sort((a,b)=>b[1]-a[1]);}
-    function stageQuestions(stage){return stage?.kind==='poll'?Object.keys(stage.questions):stage?(stage.outputQuestion?[stage.outputQuestion]:[]):[];}
+    function stageQuestions(stage){return stage?.kind==='poll'||stage?.kind==='choose'?Object.keys(stage.questions):stage?(stage.outputQuestion?[stage.outputQuestion]:[]):[];}
     function segmentLabel(key,stage){
       const cohort=cohortFor(stage);const own=cohort?.segments.find(item=>item.id===key);if(own)return own.label;
       const split=key.lastIndexOf(':');if(split>0){const source=Object.values(run.cohorts).find(item=>item.id===key.slice(0,split));const segment=source?.segments.find(item=>item.id===key.slice(split+1));return (source?.name??key.slice(0,split))+' · '+(segment?.label??key.slice(split+1));}
@@ -158,6 +158,7 @@ export function renderReport(run: RunRecord, options: { workspace?: boolean } = 
     function stagePlain(stage){
       if(stage.kind==='poll'){const n=peopleOf(stage),r=repeatsOf(stage);return 'Asked '+(n?plural(n,'person').replace('persons','people'):'the audience')+(r>1?', '+r+' times each':'')+'.';}
       if(stage.kind==='aggregate')return 'Combined answers from '+stage.inputs.map(input=>stageDef(input.stage)?.label??input.stage).join(' and ')+'.';
+      if(stage.kind==='choose')return 'One Jev read '+Object.values(stage.inputs).map(input=>stageDef(input.stage)?.label??input.stage).join(' and ')+' and made one choice.';
       return 'Took the result of '+(stageDef(stage.from.stage)?.label??stage.from.stage)+'.';
     }
     const toggleRows=(rows,limit,parent,noun)=>{
@@ -359,7 +360,7 @@ export function renderReport(run: RunRecord, options: { workspace?: boolean } = 
         if(cohort.sources.length){box.append(el('h4','','Sources'));cohort.sources.forEach(source=>box.append(sourceItem(source)));}d.append(box);host.append(d);
       });
       const questions=el('details');questions.append(el('summary','','Questions as asked'));const qbox=el('div','details');
-      run.pipeline.stages.filter(stage=>stage.kind==='poll').forEach(stage=>Object.entries(stage.questions).forEach(([id,question])=>{const item=el('div','source-item');item.append(el('strong','',stage.label+' · '+question.label),el('span','',question.instructions));
+      run.pipeline.stages.filter(stage=>stage.kind==='poll'||stage.kind==='choose').forEach(stage=>Object.entries(stage.questions).forEach(([id,question])=>{const item=el('div','source-item');item.append(el('strong','',stage.label+' · '+question.label),el('span','',question.instructions));
         if(question.type==='choice')Object.entries(question.criteria).forEach(([key,meaning])=>item.append(el('span','',choiceLabel(question,key)+': '+(meaning&&typeof meaning==='object'?meaning.description:meaning??'No-match option'))));
         if(question.type==='score')question.criteria.forEach((meaning,index)=>item.append(el('span','','Level '+index+': '+meaning)));qbox.append(item);}));
       const conditions=run.pipeline.stages.filter(stage=>stage.when);conditions.forEach(stage=>{const item=el('div','source-item');item.append(el('strong','',stage.label+' · condition'),el('pre','',JSON.stringify(stage.when,null,2)));qbox.append(item);});

@@ -29,11 +29,12 @@ function flowConnect(p,sourceId,questionId,targetId){
   const q=resolvedQuestion(p,sourceId,questionId);
   if(!q||!phaseOutput(p,source).some(x=>x.id===questionId))throw Error('Choose an available output.');
   const before=flowInputs(p,target).map(([,input])=>input.stage);
-  if(target.kind==='poll'){
+  if(target.kind==='poll'||target.kind==='choose'){
     flowMaterializeInputs(p,target);
     if(!Object.values(target.inputs).some(input=>input.stage===sourceId&&input.question===questionId)){
       let key='answer_'+(p.stages.indexOf(source)+1),n=2;while(Object.hasOwn(target.inputs,key))key='answer_'+(p.stages.indexOf(source)+1)+'_'+n++;
-      target.inputs[key]={stage:sourceId,question:questionId,select:'summary'};
+      // A final choice reads every answer by default; it splits them into slices itself when they do not fit one request.
+      target.inputs[key]={stage:sourceId,question:questionId,select:target.kind==='choose'?'responses':'summary'};
     }
   }else if(target.kind==='aggregate'){
     const base=target.inputs[0]&&resolvedQuestion(p,target.inputs[0].stage,target.inputs[0].question);
@@ -47,7 +48,7 @@ function flowConnect(p,sourceId,questionId,targetId){
 }
 function flowDisconnect(p,s,key){
   const before=flowInputs(p,s).map(([,input])=>input.stage);
-  if(s.kind==='poll'){flowMaterializeInputs(p,s);delete s.inputs[key]}
+  if(s.kind==='poll'||s.kind==='choose'){flowMaterializeInputs(p,s);delete s.inputs[key]}
   else if(s.kind==='aggregate')s.inputs.splice(Number(key),1);
   else s.from={stage:'',question:''};
   reconcileSetupDependencies(s,before,flowInputs(p,s).map(([,input])=>input.stage));
@@ -61,11 +62,12 @@ function flowSampleNotice(p,s){
   return '<div class="warning flow-sample-notice" role="alert"><p>Asks '+short.asks.toLocaleString('en-US')+' people but this cohort has '+short.have.toLocaleString('en-US')+'. Lower the sample size to '+short.have.toLocaleString('en-US')+' or add personas.</p><div class="row"><button type="button" class="button small primary" data-act="flow-sample-all" data-id="'+attr(s.id)+'">Use all '+short.have.toLocaleString('en-US')+'</button><button type="button" class="button small" data-act="phase-pool" data-id="'+attr(poolForPhase(p,s).id)+'">Add personas</button></div></div>';
 }
 function flowReadiness(p,s){
-  if(s.kind==='poll'){
+  if(s.kind==='poll'||s.kind==='choose'){
     if(!Object.values(s.questions||{}).length||Object.values(s.questions).some(q=>!q.label.trim()||(/^What should this (?:step|phase) decide\?$/).test(q.label)))return 'Needs question';
-    if(!poolForPhase(p,s)?.personas.length)return 'Needs an audience';
+    if(s.kind==='poll'&&!poolForPhase(p,s)?.personas.length)return 'Needs an audience';
     if(Object.values(s.questions).some(q=>q.type==='choice'?Object.keys(q.criteria).length<2||Object.entries(q.criteria).some(([key,value])=>!String(optionName(key,value)).trim()):q.type==='score'?q.criteria.length<2||q.criteria.some(value=>!value.trim()):false))return 'Needs options';
     if(flowSampleShort(p,s))return 'Needs more personas';
+    if(s.kind==='choose'&&!flowInputs(p,s).length)return 'Needs input';
   }else if(!flowInputs(p,s).length)return 'Needs input';
   if(flowInputs(p,s).some(([,input])=>!resolvedQuestion(p,input.stage,input.question)))return 'Needs input';
   if(s.kind==='aggregate'&&new Set(s.inputs.map(input=>setupAnswerSignature(resolvedQuestion(p,input.stage,input.question)))).size>1)return 'Options differ';
@@ -80,7 +82,8 @@ function flowDepths(p){
 function flowPlural(n,word){return Number(n).toLocaleString('en-US')+' '+word+(Number(n)===1?'':'s')}
 function flowNodeTitle(p,s){
   const question=Object.values(s.questions||{})[0]?.label?.trim(),custom=s.label?.trim();
-  if(s.kind!=='poll')return {title:custom||(s.kind==='aggregate'?'Combine answers':'Final result'),sub:s.kind==='aggregate'?'Weights the connected answers together':'Picks the leading option'};
+  if(s.kind!=='poll'&&s.kind!=='choose')return {title:custom||(s.kind==='aggregate'?'Combine answers':'Final result'),sub:s.kind==='aggregate'?'Weights the connected answers together':'Picks the leading option'};
+  if(s.kind==='choose'){const asked=question&&!/^What should this (?:step|phase) decide\?$/.test(question)?question:'';return custom&&custom!=='Final choice'&&custom!==asked?{title:custom,sub:asked||'Add what to decide'}:{title:asked||'Final choice',sub:asked?'Final choice from the connected outputs':'Add what to decide'}}
   const asked=question&&!/^What should this (?:step|phase) decide\?$/.test(question)?question:'',more=Object.keys(s.questions||{}).length-1,named=custom&&!['First question','Next question','New question'].includes(custom)&&custom!==asked;
   const q=Object.values(s.questions||{})[0],n=Object.keys(q?.criteria||{}).length,kind=q?.type==='choice'?(n?'Compare '+n+' options':'Compare options'):q?.type==='noul'?'Yes / no':q?.type==='score'?'Ordered scale':'';
   return named?{title:custom,sub:asked?asked+(more>0?' (+'+more+' more)':''):'Add the question'}:{title:asked||'Untitled question',sub:more>0?'+'+more+' more '+(more===1?'question':'questions'):kind};
@@ -97,7 +100,7 @@ function flowReads(p,s){
   return flowInputs(p,s).map(([key,input])=>{
     const source=p.stages.find(x=>x.id===input.stage);if(!source)return null;
     const q=phaseOutput(p,source).find(x=>x.id===input.question);
-    return {key,input,source,q,n:p.stages.indexOf(source)+1,label:s.kind==='poll'?flowProjectionLabel(p,source,q,input.select):q?flowOutputLabel(p,source,q):'Missing output'};
+    return {key,input,source,q,n:p.stages.indexOf(source)+1,label:s.kind==='poll'||s.kind==='choose'?flowProjectionLabel(p,source,q,input.select):q?flowOutputLabel(p,source,q):'Missing output'};
   }).filter(Boolean);
 }
 function flowReadsText(reads){return reads.map(r=>r.label+' from step '+r.n).join('; ')}
@@ -111,7 +114,7 @@ function flowNodeInputs(p,s,list){
 function flowNode(p,s,list){
   const pool=poolForPhase(p,s),outputs=phaseOutput(p,s),status=flowReadiness(p,s),pending=S.flowSource?.pipelineId===p.id?S.flowSource:null;
   const targetable=pending&&flowCanConnect(p,pending.stage,pending.question,s)&&!flowAlreadyConnected(p,s,pending.stage,pending.question);
-  const {title,sub}=flowNodeTitle(p,s),kind=s.kind==='poll'?'Ask the audience':s.kind==='aggregate'?'Combine':'Final result';
+  const {title,sub}=flowNodeTitle(p,s),kind=s.kind==='poll'?'Ask the audience':s.kind==='choose'?'Final choice':s.kind==='aggregate'?'Combine':'Final result';
   const downstream=p.stages.some(x=>x.dependsOn.includes(s.id)),short=s.kind==='poll'&&flowSampleShort(p,s);
   const who=s.kind!=='poll'?'':pool?.personas.length?'<button class="flow-who" data-act="flow-cohort-map" data-id="'+attr(s.id)+'" aria-label="Explore '+attr(pool.name)+' ('+flowPlural(pool.personas.length,'member')+')" title="Explore the cohort"><span class="flow-host-dots" aria-hidden="true">'+pool.personas.slice(0,8).map(()=>'<i></i>').join('')+'</span><span class="flow-who-text"><strong>'+esc(pool.name)+'</strong><span>'+(short?'<span class="flow-sample-short">'+short.asks.toLocaleString('en-US')+' of '+flowPlural(short.have,'persona')+'</span>':flowPlural(s.size??pool.personas.length,'persona'))+'</span></span></button>':'';
   return '<article class="flow-node" data-flow-node="'+attr(s.id)+'" data-stage-index="'+p.stages.indexOf(s)+'" data-selected="'+(S.stageId===s.id)+'" data-targetable="'+!!targetable+'" aria-label="'+attr(stepTitle(p,s))+'">'+
@@ -130,6 +133,11 @@ function flowOutputSentText(p,s,q,downstream){
   return 'Sent to '+(to.length===1?'step ':'steps ')+to.join(', ');
 }
 function flowNewStage(p,kind,source){
+  if(kind==='choose'){
+    // Starts from the options of the output it reads, when that output compares options, since the final pick is usually among them.
+    const from=source&&phaseOutput(p,source)[0],base=from&&resolvedQuestion(p,source.id,from.id),choice=base?.type==='choice';
+    return {id:id(),kind:'choose',label:'Final choice',questions:{choice:{type:'choice',label:choice?base.label:'',instructions:'Weigh every earlier output you are given and choose the best option for the study as a whole.',criteria:choice?clone(base.criteria):{option_a:'',option_b:''}}},inputs:{},dependsOn:[]};
+  }
   return kind==='aggregate'?{id:id(),kind:'aggregate',label:'Combined answers',inputs:[],outputQuestion:'combined',dependsOn:[]}:kind==='decision'?{id:id(),kind:'decision',label:'Final result',from:{stage:'',question:''},outputQuestion:'decision',dependsOn:[]}:{id:id(),kind:'poll',label:'New question',cohort:source?.kind==='poll'?source.cohort:Object.keys(p.cohorts)[0]||'',questions:{answer:{type:'choice',label:'',instructions:'Answer the question using your persona and the supplied context.',criteria:{option_a:'',option_b:''}}},inputs:{},dependsOn:[],repeats:1};
 }
 /** The empty canvas is itself the way in: a question target, a describe-in-words target, and a click anywhere adds the first question. */
@@ -162,10 +170,15 @@ function flowBatchControl(s,key,input){
 }
 function flowConnections(p,s){
   const inputs=flowInputs(p,s),available=dataInputOptions(p,s).flatMap(source=>phaseOutput(p,source).filter(q=>flowCanConnect(p,source.id,q.id,s)&&!flowAlreadyConnected(p,s,source.id,q.id)).map(q=>({source,q})));
-  const taken=s.kind==='poll'?Object.values(s.questions||{}).filter(q=>q?.optionsFrom).map(q=>q.optionsFrom):[];
+  const taken=s.kind==='poll'||s.kind==='choose'?Object.values(s.questions||{}).filter(q=>q?.optionsFrom).map(q=>q.optionsFrom):[];
   const options=taken.map(from=>'<div class="flow-connection-row" data-options-source="'+attr(from.stage)+'"><div><strong>'+esc(inputTitle(p,from))+'</strong><span>Supplies this step’s options · '+(from.top===undefined?'all of them':'top '+from.top)+'</span></div><button class="button small" data-act="flow-inspector" data-section="answers">Edit</button></div>').join('');
-  return '<section class="flow-connections">'+(options?'<h3>Options from</h3>'+options:'')+'<h3>Connected results</h3>'+(inputs.length?inputs.map(([key,input])=>{const source=p.stages.find(x=>x.id===input.stage),q=source&&phaseOutput(p,source).find(x=>x.id===input.question),projection={summary:'Answer summary',probabilities:q?flowOutputLabel(p,source,q):'Distribution',responses:'Individual answers',winner:'Leading option',mean:'Mean score'}[input.select||'summary'];return '<div class="flow-connection-row"><div><strong>'+esc(inputTitle(p,input))+'</strong><span>'+esc(s.kind==='poll'?projection+' · plus who answered':q?flowOutputLabel(p,source,q):'Missing output')+'</span></div><button class="button small icon-button" data-act="flow-disconnect" data-id="'+attr(s.id)+'" data-key="'+attr(key)+'" title="Disconnect result" aria-label="Disconnect '+attr(inputTitle(p,input))+'">'+icon('trash')+'</button></div>'+(s.kind==='poll'&&input.select==='responses'?flowBatchControl(s,key,input):'')}).join(''):'<p class="subtle">No results connected. Choose an output below.</p>')+
+  return '<section class="flow-connections">'+(s.kind==='choose'?'<p class="subtle flow-choose-note">One Jev reads everything connected here and gives one answer. When it is too much for one request, Jev reads it in slices and combines its own verdicts automatically.</p>':'')+(options?'<h3>Options from</h3>'+options:'')+'<h3>Connected results</h3>'+(inputs.length?inputs.map(([key,input])=>{const source=p.stages.find(x=>x.id===input.stage),q=source&&phaseOutput(p,source).find(x=>x.id===input.question),projection={summary:'Answer summary',probabilities:q?flowOutputLabel(p,source,q):'Distribution',responses:'Individual answers',winner:'Leading option',mean:'Mean score'}[input.select||'summary'];return '<div class="flow-connection-row"><div><strong>'+esc(inputTitle(p,input))+'</strong><span>'+esc(s.kind==='poll'||s.kind==='choose'?projection+' · plus who answered':q?flowOutputLabel(p,source,q):'Missing output')+'</span></div><button class="button small icon-button" data-act="flow-disconnect" data-id="'+attr(s.id)+'" data-key="'+attr(key)+'" title="Disconnect result" aria-label="Disconnect '+attr(inputTitle(p,input))+'">'+icon('trash')+'</button></div>'+(s.kind==='poll'&&input.select==='responses'?flowBatchControl(s,key,input):'')+(s.kind==='choose'?flowChooseReadControl(s,key,input):'')}).join(''):'<p class="subtle">No results connected. Choose an output below.</p>')+
     '<div class="flow-input-picker"><h3>Connect an output</h3>'+(available.length?available.map(({source,q})=>'<button class="flow-input-choice" data-act="flow-connect-input" data-id="'+attr(s.id)+'" data-source="'+attr(source.id)+'" data-question="'+attr(q.id)+'" aria-label="Connect '+attr(inputTitle(p,{stage:source.id,question:q.id}))+' to '+attr(stepTitle(p,s))+'"><span><strong>'+esc(inputTitle(p,{stage:source.id,question:q.id}))+'</strong><small>'+esc(flowOutputLabel(p,source,q))+'</small></span>'+icon('plus')+'</button>').join(''):'<p class="subtle">No other compatible outputs available. Add a question, or select another step.</p>')+'</div>'+(s.when?'<p class="subtle">Conditional dependencies also apply. Edit them in step settings.</p>':'')+'</section>';
+}
+/** A final choice reads each output either answer by answer (split automatically when large) or as its weighted summary. */
+function flowChooseReadControl(s,key,input){
+  const mode=input.select==='responses'?'responses':'summary';
+  return '<div class="row flow-choose-read" role="group" aria-label="How to read '+attr(key)+'">'+[['responses','Every answer'],['summary','Summary only']].map(([value,label])=>'<button type="button" class="button small" data-act="flow-choose-read" data-id="'+attr(s.id)+'" data-key="'+attr(key)+'" data-mode="'+value+'" aria-pressed="'+(mode===value)+'">'+label+'</button>').join('')+'</div>';
 }
 function flowCohortMap(p,s){
   const c=poolForPhase(p,s);if(inlineCohortTarget(p,s))return setupCohortPicker(p,s);
@@ -180,6 +193,7 @@ function flowTodo(p){
   for(const s of p.stages){
     if(s.kind==='poll'){const pool=poolForPhase(p,s),questions=Object.values(s.questions||{});if(!questions.length){todo.push({stageId:s.id,tab:'question'});continue}
       const ready=questions.map(q=>setupWizardReady(q,pool)),tab=ready.some(r=>!r[0])?'question':ready.some(r=>!r[2])?'answers':ready.some(r=>!r[1])?'cohort':flowSampleShort(p,s)?'cohort':null;if(tab)todo.push({stageId:s.id,tab,pick:tab==='cohort'&&!flowSampleShort(p,s)})}
+    else if(s.kind==='choose'){const ready=Object.values(s.questions||{}).map(q=>setupWizardReady(q,null)),tab=!ready.length||ready.some(r=>!r[0])?'question':ready.some(r=>!r[2])?'answers':!Object.keys(s.inputs||{}).length?'connections':null;if(tab)todo.push({stageId:s.id,tab})}
     else if(s.kind==='aggregate'&&!s.inputs?.length)todo.push({stageId:s.id,tab:'connections'});
     else if(s.kind==='decision'&&!p.stages.some(x=>x.id===s.from?.stage))todo.push({stageId:s.id,tab:'question'});
   }
@@ -188,15 +202,17 @@ function flowTodo(p){
 /** The guided stops of an Ask the audience step, in order: what to ask, its options (Yes/no has none), who answers. Inputs sits outside the sequence. */
 const FLOW_STOP_LABEL={question:'What to ask',answers:'Options',cohort:'Who answers',connections:'Inputs'};
 function flowGuidedStops(s){
-  if(s.kind!=='poll')return [];
+  if(s.kind!=='poll'&&s.kind!=='choose')return [];
   const q=Object.values(s.questions||{})[0];
+  if(s.kind==='choose')return q?.type==='noul'?['question','connections']:['question','answers','connections'];
   return q?.type==='noul'?['question','cohort']:['question','answers','cohort'];
 }
 function flowStopDone(p,s,key){
   const q=Object.values(s.questions||{})[0],ready=q?setupWizardReady(q,poolForPhase(p,s)):[false,false,false];
-  return key==='question'?ready[0]:key==='answers'?ready[2]:key==='cohort'?ready[1]&&!flowSampleShort(p,s):false;
+  return key==='question'?ready[0]:key==='answers'?ready[2]:key==='cohort'?ready[1]&&!flowSampleShort(p,s):key==='connections'?flowInputs(p,s).length>0:false;
 }
 function flowRoundTabs(p,s){
+  if(s.kind==='choose')return [...flowGuidedStops(s).map(key=>[key,key==='question'?'What to decide':key==='connections'?'Reads':FLOW_STOP_LABEL[key],!flowStopDone(p,s,key),flowStopDone(p,s,key)]),['settings','Settings',false,false]];
   if(s.kind!=='poll')return [['question','Result',false],['connections','Inputs',false]];
   const tabs=flowGuidedStops(s).map(key=>[key,FLOW_STOP_LABEL[key],!flowStopDone(p,s,key),flowStopDone(p,s,key)]);
   if(p.stages.length>1||flowInputs(p,s).length)tabs.push(['connections','Inputs',false,false]);
@@ -213,17 +229,17 @@ function flowGuidedFooter(p,s,tab){
 function flowInspector(p,s){
   if(!s||S.flowPanel===false)return '';
   const tabs=flowRoundTabs(p,s),requested=S.sections['flow-inspector']==='answer'?'answers':S.sections['flow-inspector']||'question',tab=tabs.some(([key])=>key===requested)?requested:'question';
-  const kind=s.kind==='poll'?'Ask the audience · '+answerName(Object.values(s.questions||{})[0]?.type):s.kind==='aggregate'?'Combine answers':'Final result';
+  const kind=s.kind==='poll'?'Ask the audience · '+answerName(Object.values(s.questions||{})[0]?.type):s.kind==='choose'?'Final choice · one Jev, no audience':s.kind==='aggregate'?'Combine answers':'Final result';
   // The panel names the step without its canvas number; a custom step name moves under the question so the title stays one line.
-  const full=stepTitle(p,s).replace(/^\d+\. /,''),name=s.label?.trim()||'',named=s.kind==='poll'&&!!name&&full.startsWith(name+': '),title=named?full.slice(name.length+2):full;
-  const body=tab==='settings'?advancedStageForm(p,s):tab==='connections'?flowConnections(p,s):tab==='cohort'?flowSampleNotice(p,s)+flowCohortMap(p,s):s.kind==='poll'?stageForm(p,s,tab):stageForm(p,s,true);
+  const full=stepTitle(p,s).replace(/^\d+\. /,''),name=s.label?.trim()||'',named=(s.kind==='poll'||s.kind==='choose')&&!!name&&full.startsWith(name+': '),title=named?full.slice(name.length+2):full;
+  const body=tab==='settings'?advancedStageForm(p,s):tab==='connections'?flowConnections(p,s):tab==='cohort'?flowSampleNotice(p,s)+flowCohortMap(p,s):s.kind==='poll'||s.kind==='choose'?stageForm(p,s,tab):stageForm(p,s,true);
   const error=S.sections['flow-inspector-error']?'<p class="setup-wizard-error" role="alert" tabindex="-1">'+esc(S.sections['flow-inspector-error'])+'</p>':'';
   const footer=inlineCohortTarget(p,s)&&tab==='cohort'?cohortReviewFooter():flowGuidedFooter(p,s,tab);
   return '<aside class="flow-inspector round-panel" aria-label="Selected step editor" data-inspector-tab="'+attr(tab)+'"><div class="flow-inspector-head"><div class="round-panel-title"><h2 tabindex="-1" title="'+attr(title)+'">'+esc(title)+'</h2><span class="round-panel-kind">'+esc((named?name+' · ':'')+kind)+'</span></div><div class="row"><button class="button small icon-button" data-act="flow-panel-close" aria-label="Close step panel" title="Close (Esc)">'+icon('close')+'</button></div></div><nav class="round-tabs" role="tablist" aria-label="Selected step sections">'+tabs.map(([key,label,todo,done])=>'<button type="button" role="tab" class="round-tab" data-act="flow-inspector" data-section="'+key+'" aria-selected="'+(tab===key)+'"'+(todo?' data-todo="true"':'')+(done?' data-done="true"':'')+'>'+flowTabContent(label,todo,done)+'</button>').join('')+'</nav><div class="flow-inspector-body" role="tabpanel">'+body+error+'</div>'+footer+'</aside>';
 }
 function flowAddBar(p,add){
   const first=phaseOutput(p,add)[0];
-  return '<div class="flow-action-bar" aria-label="Add after selected step"><span>After '+esc(stepTitle(p,add))+'</span><div class="row"><button class="button small" data-act="flow-add" data-id="'+attr(add.id)+'" data-kind="poll">Follow-up / branch</button><button class="button small" data-act="flow-add" data-id="'+attr(add.id)+'" data-kind="aggregate">Combine answers</button><button class="button small" data-act="flow-add" data-id="'+attr(add.id)+'" data-kind="decision" '+(first?.type!=='choice'?'disabled':'')+'>Final result</button><button class="button small icon-button" data-act="flow-add-close" aria-label="Close add step actions">'+icon('close')+'</button></div></div>';
+  return '<div class="flow-action-bar" aria-label="Add after selected step"><span>After '+esc(stepTitle(p,add))+'</span><div class="row"><button class="button small" data-act="flow-add" data-id="'+attr(add.id)+'" data-kind="poll">Follow-up / branch</button><button class="button small" data-act="flow-add" data-id="'+attr(add.id)+'" data-kind="choose">Final choice</button><button class="button small" data-act="flow-add" data-id="'+attr(add.id)+'" data-kind="decision" '+(first?.type!=='choice'?'disabled':'')+'>Final result</button><button class="button small icon-button" data-act="flow-add-close" aria-label="Close add step actions">'+icon('close')+'</button></div></div>';
 }
 function flowWorkspace(p,s){
   const pending=S.flowSource?.pipelineId===p.id?S.flowSource:null,add=p.stages.find(x=>x.id===S.flowAdd),list=flowListMode();
@@ -236,6 +252,7 @@ function flowAction(a,el){
   const p=pipeline();if(!p)return true;
   if(S.reviewPanel&&['flow-select','flow-inputs','flow-fix','flow-add','flow-create','flow-cohort-map','flow-settings','flow-connect-input'].includes(a)){S.reviewPanel=false;S.plan=null}
   if(a==='flow-batch'){const target=p.stages.find(x=>x.id===el.dataset.id),input=target?.inputs?.[el.dataset.key];if(!input)return true;const mode=el.dataset.mode;if(mode==='off')delete input.batch;else if(mode==='auto')input.batch='auto';else{const typed=Number(root.querySelector('[data-flow-batch-size="'+el.dataset.key+'"]')?.value);input.batch={size:mode==='size-set'&&Number.isInteger(typed)&&typed>=1?typed:input.batch&&input.batch!=='auto'?input.batch.size:100}}S.dirty=true;S.plan=null;render();return true}
+  if(a==='flow-choose-read'){const target=p.stages.find(x=>x.id===el.dataset.id),input=target?.kind==='choose'?target.inputs?.[el.dataset.key]:null;if(!input)return true;input.select=el.dataset.mode==='responses'?'responses':'summary';S.dirty=true;S.plan=null;render();return true}
   if(a==='flow-sample-all'){const target=p.stages.find(x=>x.id===el.dataset.id),have=target?flowAvailablePeople(p,target):0;if(target&&have>0){target.size=have;S.dirty=true;S.plan=null;render();say('Sample size lowered to '+have+'.')}return true}
   if(a==='flow-cohort-change'){S.flowCohortPick=!S.flowCohortPick;render();return true}
   if(a==='flow-cohort-map'){S.flowCohortPick=false;S.stageId=el.dataset.id;S.flowPanel=true;S.sections['flow-inspector']='cohort';render();root.querySelector('.flow-inspector h2')?.focus();return true}
@@ -248,9 +265,9 @@ function flowAction(a,el){
     startCohortJob().catch(fail);return true;
   }
   if(a==='flow-next'){
-    const s=selectedStage();if(!s||s.kind!=='poll')return true;
+    const s=selectedStage();if(!s||(s.kind!=='poll'&&s.kind!=='choose'))return true;
     const stops=flowGuidedStops(s),current=S.sections['flow-inspector']==='answer'?'answers':S.sections['flow-inspector']||'question',tab=stops.includes(current)?current:'question',i=stops.indexOf(tab);
-    if(!flowStopDone(p,s,tab)){S.sections['flow-inspector-error']={question:'Write the question before continuing.',answers:'Add at least two named options before continuing.',cohort:poolForPhase(p,s)?.personas.length?'Lower the sample size or add personas before finishing.':'Choose who answers, or create the audience, before finishing.'}[tab];render();root.querySelector('.setup-wizard-error')?.focus();return true}
+    if(!flowStopDone(p,s,tab)){S.sections['flow-inspector-error']={question:'Write the question before continuing.',answers:'Add at least two named options before continuing.',connections:'Connect at least one earlier output before finishing.',cohort:poolForPhase(p,s)?.personas.length?'Lower the sample size or add personas before finishing.':'Choose who answers, or create the audience, before finishing.'}[tab];render();root.querySelector('.setup-wizard-error')?.focus();return true}
     delete S.sections['flow-inspector-error'];
     if(i<stops.length-1){S.sections['flow-inspector']=stops[i+1];render();root.querySelector('.flow-inspector-body textarea, .flow-inspector-body input, .flow-inspector-body .setup-cohort-row button')?.focus()}
     else{S.flowPanel=false;render();root.querySelector('[data-flow-node="'+S.stageId+'"] [data-act=flow-select]')?.focus({preventScroll:true})}
@@ -356,7 +373,7 @@ function drawFlowEdges(){
 /* Freeform canvas: drag steps, pan empty canvas, click empty canvas to add a step (Railway/Hex style). */
 const FLOW_KINDS=[
   {kind:'poll',label:'Ask the audience',hint:'Ask one or more questions to an audience',keys:'question poll ask survey',icon:'<path d="M5 5h14v10H9l-4 4z"/>'},
-  {kind:'aggregate',label:'Combine answers',hint:'Weight compatible answers together',keys:'aggregate merge weight join',icon:'<path d="M5 5c0 7 7 7 7 14M19 5c0 7-7 7-7 14"/>'},
+  {kind:'choose',label:'Final choice',hint:'One Jev reads earlier outputs and picks one answer',keys:'choice choose final pick combine merge aggregate decide judge reduce',icon:'<path d="M5 5c0 7 7 7 7 14M19 5c0 7-7 7-7 14"/>'},
   {kind:'decision',label:'Final result',hint:'Select the leading option from a Choice',keys:'decision winner outcome',icon:'<path d="M6 21V4h11l-2 4 2 4H6"/>'},
 ];
 let flowDrag=null,flowSuppressClick=false,flowScaleApplied=1,flowFrame=0;

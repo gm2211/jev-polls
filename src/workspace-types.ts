@@ -14,7 +14,7 @@ export interface WorkspaceRun {
   provider?: 'typesafe' | 'gliner';
   /** The seed this run sampled and asked with; a later run of the same study reuses it so unchanged steps come from saved answers. */
   seed?: string;
-  stages?: { id: string; label: string; kind: 'poll' | 'aggregate' | 'decision'; dependsOn: string[]; status: 'pending' | 'running' | 'completed' | 'skipped' | 'failed'; reason?: string; /** Present when a step reads earlier responses in batches: its members finish batches, then combine rounds. */ batching?: { batches: number; reduceRounds: number; layers: number } }[];
+  stages?: { id: string; label: string; kind: 'poll' | 'aggregate' | 'decision' | 'choose'; dependsOn: string[]; status: 'pending' | 'running' | 'completed' | 'skipped' | 'failed'; reason?: string; /** Present when a step reads earlier responses in batches: its members finish batches, then combine rounds. */ batching?: { batches: number; reduceRounds: number; layers: number } }[];
   createdAt: string; message: string; progress?: { stage: string; completed: number; total: number };
   liveMembers?: { stage: string; personaId: string; label: string; segment: string; age: number; repeat: number; weight?: number; order?: number; batch?: { phase: 'map' | 'combine'; done: number; total: number }; status: 'queued' | 'running' | 'completed' | 'failed'; answers?: Record<string, unknown>; model?: string; cacheHit?: boolean; reason?: string }[];
   usage?: Usage; reportUrl?: string;

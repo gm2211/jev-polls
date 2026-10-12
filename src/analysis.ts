@@ -198,7 +198,7 @@ export function compareRuns(runs: RunRecord[], stageId: string, questionId: stri
 function compatibleSummaries(firstStage: RunRecord['pipeline']['stages'][number], firstSummary: QuestionSummary, secondStage: RunRecord['pipeline']['stages'][number], secondSummary: QuestionSummary, questionId: string): boolean {
   if (firstSummary.type !== secondSummary.type) return false;
   const questionFrom = (stage: RunRecord['pipeline']['stages'][number]): Question | undefined => {
-    if (stage.kind === 'poll') return stage.questions[questionId];
+    if (stage.kind === 'poll' || stage.kind === 'choose') return stage.questions[questionId];
     return undefined;
   };
   const first = questionFrom(firstStage);
@@ -343,7 +343,7 @@ export function simulateVotes(run: RunRecord, stageId: string, questionId: strin
 
 function findQuestion(run: RunRecord, stageId: string, questionId: string): Question {
   const stage = run.pipeline.stages.find((candidate) => candidate.id === stageId);
-  if (stage?.kind === 'poll') {
+  if (stage?.kind === 'poll' || stage?.kind === 'choose') {
     const question = stage.questions[questionId];
     if (question) return question;
   }

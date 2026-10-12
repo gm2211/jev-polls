@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { Json, Pipeline, PollStage, Question, Stage, StageResult } from './types.js';
+import type { ChooseStage, Json, Pipeline, PollStage, Question, Stage, StageResult } from './types.js';
 
 export function stableStringify(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
@@ -47,7 +47,7 @@ export function resolveQuestion(stages: Stage[], stageId: string, questionId: st
   seen.add(key);
   const stage = stages.find((candidate) => candidate.id === stageId);
   if (!stage) return undefined;
-  if (stage.kind === 'poll') {
+  if (stage.kind === 'poll' || stage.kind === 'choose') {
     const question = stage.questions[questionId];
     if (question?.type !== 'choice' || !question.optionsFrom) return question;
     const source = resolveQuestion(stages, question.optionsFrom.stage, question.optionsFrom.question, seen);
@@ -69,7 +69,7 @@ export const CHOICE_WINNER_TOLERANCE = 0.011;
  * step's options ranked by share (ties keep the source's order), the first `top` of them; the rest ask as written.
  * `optionsFrom` is dropped, so the request matches a typed list with the same options.
  */
-export function resolveOptionsFrom(pipeline: Pipeline, stage: PollStage, stages: Record<string, StageResult>): Record<string, Question> {
+export function resolveOptionsFrom(pipeline: Pipeline, stage: PollStage | ChooseStage, stages: Record<string, StageResult>): Record<string, Question> {
   return Object.fromEntries(Object.entries(stage.questions).map(([id, question]) => {
     if (question.type !== 'choice' || !question.optionsFrom) return [id, question];
     const { optionsFrom: from, ...asked } = question;
