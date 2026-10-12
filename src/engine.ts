@@ -9,7 +9,7 @@ import { summarizeVotes } from './analysis.js';
 import { ProviderError, probabilitySumTolerance, scoreMeanTolerance, type ProviderResponseIssue } from './provider.js';
 import { validateClassifierAnswer } from './gliner-provider.js';
 import { inputSelectCompatible } from './schema.js';
-import { CHOICE_WINNER_TOLERANCE, errorMessage, hashValue, isFiniteProbability, resolveQuestion, seededRandom, stableStringify } from './engine-utils.js';
+import { CHOICE_WINNER_TOLERANCE, errorMessage, hashValue, isFiniteProbability, resolveOptionsFrom, resolveQuestion, seededRandom, stableStringify } from './engine-utils.js';
 import { buildPollState, fitsWithHeadroom, planBatching, requestSizeProblem } from './request-budget.js';
 import { respondentLookup, respondentProfile, respondentsSummary, type RespondentLookup } from './respondents.js';
 import { batchedBinding, chunk, describeBatching, COMBINE_GUIDE, mapInput, MAP_GUIDE, reduceInput, type Verdict } from './batching.js';
@@ -280,6 +280,11 @@ export async function runPipeline(pipeline: Pipeline, cohorts: Record<string, Co
     if (stage.kind === 'poll') {
       const cohort = pickCohort(stage.cohort, cohorts);
       if (!cohort) return { id: stage.id, kind: stage.kind, label: stage.label, status: 'failed', reason: `cohort '${stage.cohort}' was not provided`, dependsOn: stage.dependsOn, votes: [], summaries: {}, startedAt, finishedAt: new Date().toISOString() };
+      let questions: Record<string, Question>;
+      try { questions = resolveOptionsFrom(pipeline, stage, stages); }
+      catch (error) {
+        return { id: stage.id, kind: stage.kind, label: stage.label, status: 'failed', reason: errorMessage(error), dependsOn: stage.dependsOn, votes: [], summaries: {}, startedAt, finishedAt: new Date().toISOString() };
+      }
       const requestedSize = options.size ?? stage.size ?? eligiblePersonaCount(cohort);
       const repeats = options.repeats ?? stage.repeats ?? 1;
       if (!Number.isInteger(requestedSize) || requestedSize < 1 || !Number.isInteger(repeats) || repeats < 1) {
@@ -317,7 +322,7 @@ export async function runPipeline(pipeline: Pipeline, cohorts: Record<string, Co
       const handoff = stage.inputs ? resolveHandoff(pipeline, cohort, stage, eligible, stages, lookup, batched?.alias) : undefined;
       const otherInputs = handoff?.inputs ?? {};
       const profileBytes = responses ? Math.max(0, ...responses.map((record) => Buffer.byteLength(JSON.stringify((record as { respondent?: Json }).respondent ?? null), 'utf8'))) : 0;
-      const batchPlan = batched && responses ? planBatching(pipeline, cohort, stage, batched.alias, eligible, responses.length, otherInputs, { respondents: handoff?.respondents, profileBytes }) : undefined;
+      const batchPlan = batched && responses ? planBatching(pipeline, cohort, { ...stage, questions }, batched.alias, eligible, responses.length, otherInputs, { respondents: handoff?.respondents, profileBytes }) : undefined;
       const upstreamHandoff = stage.inputs === undefined ? upstream.map((item) => {
         const respondents = respondentsSummary(item.votes, Object.keys(item.summaries), lookup);
         return { stage: item.id, label: item.label, summaries: item.summaries, ...(respondents !== null ? { respondents } : {}) };
@@ -371,7 +376,7 @@ export async function runPipeline(pipeline: Pipeline, cohorts: Record<string, Co
               const state = buildPollState(pipeline, cohort, stage, job.persona, handoff
                 ? { inputs: handoff.inputs, respondents: handoff.respondents }
                 : { upstream: upstreamHandoff });
-              final = await evaluate({ model: options.model, seed: requestSeed, state, questions: questionsForSeed(stage.questions, requestSeed) });
+              final = await evaluate({ model: options.model, seed: requestSeed, state, questions: questionsForSeed(questions, requestSeed) });
             } else {
               const record = (key: string, batch: number, result: { evaluation: Evaluation; cacheHit: boolean }): void => {
                 const list = layerVotes.get(key) ?? [];
@@ -381,7 +386,7 @@ export async function runPipeline(pipeline: Pipeline, cohorts: Record<string, Co
               const ask = (suffix: string, value: Json, guide: string): Promise<{ evaluation: Evaluation; cacheHit: boolean }> => {
                 const seed = `${requestSeed}:${suffix}`;
                 const state = buildPollState(pipeline, cohort, stage, job.persona, { inputs: { ...otherInputs, [batched.alias]: value }, guide, respondents: handoff?.respondents });
-                return evaluate({ model: options.model, seed, state, questions: questionsForSeed(stage.questions, seed) });
+                return evaluate({ model: options.model, seed, state, questions: questionsForSeed(questions, seed) });
               };
               const total = responses!.length;
               if (chunks.length === 1) final = await ask('b1', mapInput(1, 1, total, chunks[0]!), MAP_GUIDE);
@@ -416,7 +421,7 @@ export async function runPipeline(pipeline: Pipeline, cohorts: Record<string, Co
       });
       await Promise.all(workers);
       votes.sort(compareVotes);
-      const summaries = failures.length ? {} : summarizeVotes(stage.questions, votes);
+      const summaries = failures.length ? {} : summarizeVotes(questions, votes);
       const status = failures.length ? 'failed' : 'completed';
       const reason = failures.length ? `${failures.length} of ${jobs.length} persona requests failed: ${failures.join(', ')}` : undefined;
       const layers: StageLayer[] | undefined = batchPlan && chunks.length > 1 ? batchLayers(batchPlan.layerRequests, layerVotes) : undefined;
@@ -650,6 +655,13 @@ function validateExecutionGraph(pipeline: Pipeline, order: Stage[]): void {
         if (!Number.isFinite(input.weight) || input.weight <= 0) throw new Error(`aggregate input '${reference}' must have positive weight`);
       }
       if (new Set(signatures).size > 1) throw new Error(`aggregate stage '${stage.id}' combines incompatible question types or options`);
+    }
+    if (stage.kind === 'poll') for (const question of Object.values(stage.questions)) {
+      if (question.type !== 'choice' || !question.optionsFrom) continue;
+      const from = question.optionsFrom;
+      requireDependency(from.stage, 'options source');
+      if (resolveQuestion(pipeline.stages, from.stage, from.question)?.type !== 'choice') throw new Error(`poll stage '${stage.id}' takes options from '${from.stage}.${from.question}', which is not a Choice question`);
+      if (from.top !== undefined && !(Number.isInteger(from.top) && from.top >= 2 && from.top <= 255)) throw new Error(`poll stage '${stage.id}' must keep 2–255 options from '${from.stage}.${from.question}'`);
     }
     if (stage.kind === 'poll' && stage.inputs !== undefined) {
       if (Object.keys(stage.inputs).length > 1000) throw new Error(`poll stage '${stage.id}' has too many input bindings`);

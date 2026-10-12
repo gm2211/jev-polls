@@ -210,3 +210,14 @@ behaviors:
     source:
       text: no html plain links please - small buttons instead, ideally with icons
       reference: jev-polls project thread, Giulio, 2026-10-11
+  - id: options-no-placeholder-rows
+    description: >-
+      An empty options list shows only the add row and "No options yet"; blank placeholder rows
+      ("Option 1", "Option 2") are not drawn, and blank rows never block review once two options
+      are named.
+    details: >-
+      Before 2026-10-12 a new Compare options step showed two empty "Option 1 / Option 2" rows with
+      delete icons above "No options yet".
+    source:
+      text: why 2 option placeholders
+      reference: jev-polls project chat, Giulio, 2026-10-12

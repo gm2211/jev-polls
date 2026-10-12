@@ -403,12 +403,17 @@ function validateStageDraft(value: unknown, path: string): void {
 }
 
 function validateQuestionDraft(value: unknown, path: string): void {
-  const q = object(value, path, ['type', 'label', 'instructions', 'criteria'], ['type', 'label', 'instructions']);
+  const q = object(value, path, ['type', 'label', 'instructions', 'criteria', 'optionsFrom'], ['type', 'label', 'instructions']);
   string(q.label, `${path}.label`); string(q.instructions, `${path}.instructions`);
   if (q.type === 'noul') {
     object(value, path, ['type', 'label', 'instructions'], ['type', 'label', 'instructions']);
   } else if (q.type === 'choice') {
-    const choice = object(value, path, ['type', 'label', 'instructions', 'criteria'], ['type', 'label', 'instructions', 'criteria']);
+    const choice = object(value, path, ['type', 'label', 'instructions', 'criteria', 'optionsFrom'], ['type', 'label', 'instructions', 'criteria']);
+    if (choice.optionsFrom !== undefined) {
+      const from = object(choice.optionsFrom, `${path}.optionsFrom`, ['stage', 'question', 'top'], ['stage', 'question']);
+      id(from.stage, `${path}.optionsFrom.stage`); id(from.question, `${path}.optionsFrom.question`);
+      if (from.top !== undefined && !(Number.isInteger(from.top) && (from.top as number) >= 2 && (from.top as number) <= 255)) throw new Error(`${path}.optionsFrom.top must be a whole number from 2 to 255`);
+    }
     const criteria = object(choice.criteria, `${path}.criteria`, undefined, []);
     if (Object.keys(criteria).length > 255) throw new Error(`${path}.criteria exceeds 255 entries`);
     for (const [key, item] of Object.entries(criteria)) {

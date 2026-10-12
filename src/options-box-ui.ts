@@ -24,7 +24,8 @@ function optionsBoxProblem(q,key){
 }
 /** One row per option, edited in place, then an add row. The count and any problem sit on one line underneath. What the step returns is shown with its output, not here. */
 function optionsBoxField(p,s,qid,q,action=''){
-  const key=optionsBoxKey(p,s,qid),rows=Object.entries(q.criteria),error=optionsBoxProblem(q,key),count=optionsBoxNamed(q).length;
+  // Blank placeholder rows stay out of sight: an empty list is just the add row, matching "No options yet".
+  const key=optionsBoxKey(p,s,qid),rows=Object.entries(q.criteria).filter(([k,value])=>optionsBoxFlat(optionName(k,value))||optionsBoxFlat(optionDescription(value))),error=optionsBoxProblem(q,key),count=optionsBoxNamed(q).length;
   const row=([k,value],i)=>{const name=optionName(k,value);return '<li class="options-row" data-option-key="'+attr(k)+'"><input data-option-field="label" value="'+attr(name)+'" placeholder="Option '+(i+1)+'" aria-label="Option '+(i+1)+' name" autocomplete="off" spellcheck="false"><input data-option-field="description" value="'+attr(optionsBoxFlat(optionDescription(value)))+'" title="'+attr(optionsBoxFlat(optionDescription(value)))+'" placeholder="Description (optional)" aria-label="Option '+(i+1)+' description" autocomplete="off"><button type="button" class="button small icon-button" data-act="setup-remove-option" data-key="'+attr(k)+'" aria-label="Remove '+attr(optionsBoxFlat(name)||'option '+(i+1))+'" title="Remove option" '+(rows.length<=2?'disabled':'')+'>'+icon('trash')+'</button></li>'};
   return '<div class="options-box" data-options-box><div class="options-box-head"><span id="optionsBoxLabel">Your options</span>'+action+'</div>'+
     '<ol class="options-list" aria-labelledby="optionsBoxLabel">'+rows.map(row).join('')+
