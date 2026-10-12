@@ -1,8 +1,17 @@
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+
+/** @byos/commands as a classic script: defines ByosCommands (ranking, keys, palette state, Ask flow) for the inline client. */
+const BYOS_COMMANDS = readFileSync(createRequire(import.meta.url).resolve('@byos/commands/classic.js'), 'utf8');
+
 /** Global command navigation and an in-context drafting inspector. */
-export const COMMAND_CLIENT = String.raw`
-const commandState={open:false,query:'',index:0,page:0,returnFocus:null,focus:null,draftProject:null,busy:false,error:'',answer:'',request:0,job:null,resultIds:null,material:'',filename:'',fileError:'',reading:false,readVersion:0};
+export const COMMAND_CLIENT = BYOS_COMMANDS + String.raw`
+const COMMAND_PAGE=6,COMMAND_ASK=ByosCommands.ASK_COMMAND_ID;
+const commandState={returnFocus:null,focus:null,draftProject:null,material:'',filename:'',fileError:'',reading:false,readVersion:0,
+  get open(){return cmdk.getState().open},get query(){const s=cmdk.getState();return s.mode==='pending'?s.pendingQuery||'':s.query},get busy(){return cmdk.getState().mode==='pending'},
+  get error(){return cmdk.getState().error||''},get answer(){return cmdk.getState().message||''},get index(){return cmdk.getState().active%COMMAND_PAGE},get page(){return Math.floor(cmdk.getState().active/COMMAND_PAGE)}};
 function commandStudyLabel(p){return p.description?.trim()||(typeof p.context?.decisionQuestion==='string'&&p.context.decisionQuestion.trim())||p.name||'Untitled study'}
-function commandEntries(){
+function commandRows(){
   if(!S.doc)return [];
   const rows=[{id:'projects',label:'All projects',detail:'Workspace',action:'projects'},{id:'new-project',label:'New project',detail:'Create research project',action:'new-project'},{id:'settings',label:'AI settings',detail:'Models and providers',action:'ai-open'}];
   if(project())rows.push({id:'studies',label:'Studies',detail:'Current project',action:'tab',tab:'studies'},{id:'new-cohort',label:'New cohort',detail:'Create a synthetic audience',action:'new-cohort'},{id:'project-settings',label:'Project settings',detail:'Name and research brief',action:'project-settings'},{id:'draft',label:'Describe a study',detail:'Create or change steps with natural language',action:'draft-panel-open'},{id:'cohorts',label:'Cohorts',detail:'Current project',action:'tab',tab:'cohorts'},{id:'runs',label:'Live runs and results',detail:'Current project',action:'tab',tab:'runs'});
@@ -20,16 +29,30 @@ function commandEntries(){
     }
     for(const run of S.snap?.runs||[])if(run.projectId===p.id)rows.push({id:'run:'+p.id+':'+run.id,label:(()=>{const owner=S.doc.pipelines.find(x=>x.id===run.pipelineId);return owner?commandStudyLabel(owner):(run.pipelineName||run.pipelineId||run.id)})(),detail:p.name+' · Run · '+run.status,search:run.id,project:p.id,run:run.id});
   }
-  const terms=commandState.query.toLocaleLowerCase().trim().split(/\s+/).filter(Boolean);
-  if(commandState.resultIds)return rows.filter(row=>commandState.resultIds.includes(row.id));
-  const score=row=>terms.reduce((n,term)=>n+(row.label.toLocaleLowerCase().includes(term)?3:row.detail.toLocaleLowerCase().includes(term)?1:0),0);
-  return rows.filter(row=>terms.every(term=>(row.label+' '+row.detail+' '+(row.search||'')).toLocaleLowerCase().includes(term))).sort((a,b)=>score(b)-score(a));
+  return rows;
 }
-function commandChoices(){const rows=commandEntries();if(commandState.query.trim()&&!rows.length)rows.push({id:'ask-ai',label:'Ask AI: '+commandState.query.trim(),detail:'Search, navigate, or draft something new'});return rows}
+function commandRow(row){return {id:row.id,title:row.label,group:'',detail:row.detail,keywords:row.search?[row.search]:undefined,run:()=>commandExecute(row.id)}}
+const cmdk=ByosCommands.createPaletteController({
+  registry:ByosCommands.createCommandRegistry([{id:'workspace',commands:()=>commandRows().map(commandRow)}]),
+  // Ask AI stays Jev's own footer button and no-match row, so the list shows destinations only.
+  ask:{label:'Ask AI',minQuery:Infinity,ask:commandAsk},
+  // Destinations render and move focus themselves, right after the palette closes.
+  schedule:run=>run(),
+  onError:error=>fail(error),
+});
+function commandById(){return new Map(commandRows().map(row=>[row.id,row]))}
+/** Destinations matching the query, or the ones an AI search chose. */
+function commandEntries(){
+  const s=cmdk.getState(),rows=commandById();
+  if(s.mode==='filtered')return s.items.map(item=>rows.get(item.id)).filter(Boolean);
+  return ByosCommands.rankCommands([...rows.values()].map(commandRow),s.query).map(item=>rows.get(item.id));
+}
+/** The palette's rows in order, or one Ask AI row when nothing matches the query. */
+function commandChoices(){const rows=commandById(),s=cmdk.getState(),choices=s.items.map(item=>rows.get(item.id)).filter(Boolean);if(s.mode==='search'&&s.query.trim()&&!choices.length)choices.push({id:COMMAND_ASK,label:'Ask AI: '+s.query.trim(),detail:'Search, navigate, or draft something new'});return choices}
 function commandResults(){
-  const rows=commandChoices(),size=6,pages=Math.max(1,Math.ceil(rows.length/size));commandState.page=Math.min(commandState.page,pages-1);
-  const page=rows.slice(commandState.page*size,(commandState.page+1)*size);commandState.index=Math.max(0,Math.min(commandState.index,page.length-1));
-  return '<div id="commandOptions" role="listbox" aria-label="Destinations">'+(page.length?page.map((row,i)=>'<button type="button" role="option" tabindex="-1" id="commandOption'+i+'" aria-selected="'+(i===commandState.index)+'" class="command-option" data-act="command-go" data-command-id="'+attr(row.id)+'" '+(row.id==='ask-ai'&&commandState.busy?'aria-disabled="true"':'')+'><span>'+esc(row.label)+'</span><small>'+esc(row.detail)+'</small></button>').join(''):'<p class="command-empty">No matching destinations. Describe what you need to ask AI.</p>')+'</div>'+commandFeedback()+'<div class="command-footer"><small>'+commandEntries().length+' matches · ↑ ↓ navigate · Enter selects</small>'+(commandState.query.trim()?'<button type="button" class="button small" data-act="command-ask" '+(commandState.busy?'disabled':'')+'>Ask AI <span aria-hidden="true">⇧ ↵</span></button>':'')+(pages>1?'<div class="row"><button class="button small" data-act="command-page" data-page="'+(commandState.page-1)+'" '+(!commandState.page?'disabled':'')+' aria-label="Previous destinations">←</button><span>'+(commandState.page+1)+' / '+pages+'</span><button class="button small" data-act="command-page" data-page="'+(commandState.page+1)+'" '+(commandState.page===pages-1?'disabled':'')+' aria-label="Next destinations">→</button></div>':'')+'</div>';
+  const rows=commandChoices(),size=COMMAND_PAGE,pages=Math.max(1,Math.ceil(rows.length/size));
+  const page=rows.slice(commandState.page*size,(commandState.page+1)*size);
+  return '<div id="commandOptions" role="listbox" aria-label="Destinations">'+(page.length?page.map((row,i)=>'<button type="button" role="option" tabindex="-1" id="commandOption'+i+'" aria-selected="'+(i===commandState.index)+'" class="command-option" data-act="command-go" data-command-id="'+attr(row.id)+'" '+(row.id===COMMAND_ASK&&commandState.busy?'aria-disabled="true"':'')+'><span>'+esc(row.label)+'</span><small>'+esc(row.detail)+'</small></button>').join(''):'<p class="command-empty">No matching destinations. Describe what you need to ask AI.</p>')+'</div>'+commandFeedback()+'<div class="command-footer"><small>'+commandEntries().length+' matches · ↑ ↓ navigate · Enter selects</small>'+(commandState.query.trim()?'<button type="button" class="button small" data-act="command-ask" '+(commandState.busy?'disabled':'')+'>Ask AI <span aria-hidden="true">⇧ ↵</span></button>':'')+(pages>1?'<div class="row"><button class="button small" data-act="command-page" data-page="'+(commandState.page-1)+'" '+(!commandState.page?'disabled':'')+' aria-label="Previous destinations">←</button><span>'+(commandState.page+1)+' / '+pages+'</span><button class="button small" data-act="command-page" data-page="'+(commandState.page+1)+'" '+(commandState.page===pages-1?'disabled':'')+' aria-label="Next destinations">→</button></div>':'')+'</div>';
 }
 function commandFeedback(){return (commandState.busy?'<p class="command-status" role="status">Working on your request…</p>':'')+(commandState.error?'<p class="command-status warning" role="alert">'+esc(commandState.error)+'</p>':'')+(commandState.answer?'<p class="command-status" role="status">'+esc(commandState.answer)+'</p>':'')}
 function commandPalette(){return commandState.open?'<div class="command-backdrop"><section class="command-palette" role="dialog" aria-modal="true" aria-label="Go anywhere"><div class="command-search"><label class="sr-only" for="commandSearch">Search workspace or ask AI</label><input id="commandSearch" role="combobox" aria-expanded="true" aria-controls="commandOptions" aria-autocomplete="list" autocomplete="off" placeholder="Search or ask AI to do something…" value="'+attr(commandState.query)+'"><button class="button small" data-act="command-close" aria-label="Close command navigation">Esc</button></div><div id="commandResults">'+commandResults()+'</div></section></div>':''}
@@ -54,16 +77,15 @@ function draftSidePanel(){
   return '<aside class="draft-side-panel" aria-labelledby="draftPanelTitle"><header><div><span class="section-kicker">'+esc(project()?.name||'Project')+'</span><h2 id="draftPanelTitle">Draft with assistant</h2></div><button type="button" class="button small" data-act="draft-panel-close" aria-label="Close drafting panel">'+icon('close')+'</button></header><div class="draft-panel-body">'+(review?'<div class="draft-panel-review">'+proposalReview(active)+'</div>':'')+'<form data-form="assistant"><label for="assistantPrompt">'+(review?'Refine your request':'What should this study do?')+'</label><textarea id="assistantPrompt" class="assistant-prompt" name="localPrompt" rows="5" '+(running?'disabled':'')+' placeholder="Ask gamers which name they prefer, then compare responses across age groups.">'+esc(S.localPrompt)+'</textarea><p class="subtle">Describe your audience, questions, and what happens next. Review changes before applying. Nothing runs automatically.</p>'+draftAttach(running)+'<div class="draft-panel-examples" '+(review?'hidden':'')+'><button type="button" class="button small" data-act="draft-example" data-prompt="Compare three product names across two synthetic audience cohorts. Ask for preference, then aggregate results by cohort.">Compare names</button><button type="button" class="button small" data-act="draft-example" data-prompt="Create a synthetic cohort and a study that evaluates a concept, then follows up with people who are interested.">Test a concept</button></div><div class="draft-panel-actions"><button class="button primary" type="button" data-act="assistant-generate" '+(!draftReady()||!S.localPrompt.trim()||S.remoteRevision!==null||running||S.localLoading||commandState.reading?'disabled':'')+'>'+(running?'Drafting…':'Draft study')+'</button>'+draftCancelButton(active)+'</div></form>'+(!draftReady()?'<div class="notice">Connect a drafting provider to create a proposal. <button type="button" class="button small" data-act="ai-open">AI settings</button></div>':'')+(S.localError?'<p class="warning" role="alert">'+esc(S.localError)+'</p>':'')+'<p class="subtle">Cohort members are synthetic. Include source facts and identify assumptions.</p></div></aside>';
 }
 function workspaceCommandUI(){return draftSidePanel()+commandPalette()}
-function commandRefreshResults(){const target=document.getElementById('commandResults');if(!target)return;target.innerHTML=commandResults();const input=document.getElementById('commandSearch');if(input){if(commandChoices().length)input.setAttribute('aria-activedescendant','commandOption'+commandState.index);else input.removeAttribute('aria-activedescendant')}}
+function commandRefreshResults(){const target=document.getElementById('commandResults');if(!target)return;cmdk.refresh();target.innerHTML=commandResults();const input=document.getElementById('commandSearch');if(input){if(commandChoices().length)input.setAttribute('aria-activedescendant','commandOption'+commandState.index);else input.removeAttribute('aria-activedescendant')}}
 function commandBeforeRender(){if(commandState.draftProject&&S.flowPanel===true)commandState.draftProject=null;const el=document.activeElement;commandState.searchFocus=el?.id==='commandSearch'?{start:el.selectionStart,end:el.selectionEnd}:null;commandState.draftFocus=el?.id==='assistantPrompt'?{start:el.selectionStart,end:el.selectionEnd,scroll:el.scrollTop}:null}
 function commandAfterRender(){root.classList.toggle('has-draft-panel',commandJobVisible());if(commandState.open){commandRefreshResults();const search=document.getElementById('commandSearch');search?.focus();if(search&&commandState.searchFocus)search.setSelectionRange?.(commandState.searchFocus.start,commandState.searchFocus.end)}commandState.searchFocus=null;if(commandState.focus){const selector=commandState.focus;commandState.focus=null;root.querySelector(selector)?.focus()}else if(!commandState.open&&commandState.draftFocus&&commandJobVisible()){const el=document.getElementById('assistantPrompt');if(el&&!el.disabled){el.focus();el.setSelectionRange?.(commandState.draftFocus.start,commandState.draftFocus.end);el.scrollTop=commandState.draftFocus.scroll}}commandState.draftFocus=null}
-function commandStop(){commandState.request++;commandState.busy=false;const job=commandState.job;commandState.job=null;if(job)void api('/api/agent/jobs/'+encodeURIComponent(job)+'/cancel','POST',{}).catch(()=>{})}
-function commandClose(){commandState.open=false;commandStop();render();const old=commandState.returnFocus;if(old?.isConnected)old.focus();else document.querySelector('[data-act=command-open]')?.focus()}
-function commandOpen(){if(!S.snap||S.loading||S.localStarting||document.querySelector('dialog[open]'))return;flushForms();commandState.returnFocus=document.activeElement;commandState.open=true;commandState.query='';commandState.resultIds=null;commandState.error='';commandState.answer='';commandState.index=0;commandState.page=0;commandState.focus='#commandSearch';render()}
+function commandClose(){cmdk.close();render();const old=commandState.returnFocus;if(old?.isConnected)old.focus();else document.querySelector('[data-act=command-open]')?.focus()}
+function commandOpen(){if(!S.snap||S.loading||S.localStarting||document.querySelector('dialog[open]'))return;flushForms();commandState.returnFocus=document.activeElement;cmdk.open();commandState.focus='#commandSearch';render()}
 function commandExecute(id){
-  if(id==='ask-ai'){void commandAskAI();return}
-  const row=commandEntries().find(x=>x.id===id);if(!row)return;
-  flushForms();commandState.open=false;commandStop();
+  if(id===COMMAND_ASK){void commandAskAI();return}
+  const row=commandRows().find(x=>x.id===id);if(!row)return;
+  flushForms();cmdk.close();
   if(row.project&&row.project!==S.projectId)selectProject(row.project);
   if(row.pipeline){S.tab='studies';S.pipelineId=row.pipeline;S.stageId=row.stage||pipeline()?.stages[0]?.id||null;S.sections.pipeline='flow';S.sections['flow-inspector']=pipeline()?.stages.find(s=>s.id===S.stageId)?.kind==='poll'?'question':'connections';S.flowCohortPick=false;S.plan=null;render()}
   else if(row.cohort){act(null,{dataset:{act:'open-cohort',id:row.cohort}});if(row.persona)act(null,{dataset:{act:'open-persona',id:row.persona}})}
@@ -76,46 +98,44 @@ function commandExecute(id){
   else render();
   if(!commandJobVisible())root.querySelector('h1')?.focus();
 }
-function commandInput(e){if(e.target.id!=='commandSearch')return false;commandStop();commandState.resultIds=null;commandState.error='';commandState.answer='';commandState.query=e.target.value;commandState.page=0;commandState.index=0;commandRefreshResults();return true}
-async function commandAskAI(){
-  if(commandState.busy||!commandState.query.trim())return;
-  commandStop();const request=commandState.request;commandState.error='';commandState.answer='';commandState.busy=true;commandRefreshResults();document.getElementById('commandSearch')?.focus();
+function commandInput(e){if(e.target.id!=='commandSearch')return false;cmdk.cancel();cmdk.setQuery(e.target.value);commandRefreshResults();return true}
+function commandAskAI(){const asked=cmdk.ask();commandRefreshResults();document.getElementById('commandSearch')?.focus();return asked.finally(commandRefreshResults)}
+/** The palette's Ask binding: Jev's command agent picks a destination, a list of them, or something to draft. */
+async function commandAsk(prompt,{signal}){
+  flushForms();
+  if(S.localLoading||S.chatgptLoading)throw Error('AI connection is still loading. Try again in a moment.');
+  if(!draftReady())throw Error('Connect a drafting provider and choose a model in AI settings to use AI commands.');
+  const projectId=S.projectId,revision=S.revision,documentVersion=JSON.stringify(S.doc);
+  let job=await api('/api/agent/commands','POST',{...(projectId?{projectId}:{}),engine:S.localEngine,...(S.localEngine==='chatgpt'?{model:S.chatgptModel}:S.byos?.model?.[S.localEngine]?{model:S.byos.model[S.localEngine]}:{}),prompt,revision,document:S.doc});
+  // Closing the palette, editing the question or choosing a destination stops the job.
+  const cancel=()=>{if(job.status==='running')void api('/api/agent/jobs/'+encodeURIComponent(job.id)+'/cancel','POST',{}).catch(()=>{})};
+  if(signal.aborted){cancel();throw Error('Stopped.')}
+  signal.addEventListener('abort',cancel,{once:true});
   try{
-    flushForms();
-    if(S.localLoading||S.chatgptLoading)throw Error('AI connection is still loading. Try again in a moment.');
-    if(!draftReady())throw Error('Connect a drafting provider and choose a model in AI settings to use AI commands.');
-    const projectId=S.projectId,revision=S.revision,documentVersion=JSON.stringify(S.doc),prompt=commandState.query.trim();
-    let job=await api('/api/agent/commands','POST',{...(projectId?{projectId}:{}),engine:S.localEngine,...(S.localEngine==='chatgpt'?{model:S.chatgptModel}:S.byos?.model?.[S.localEngine]?{model:S.byos.model[S.localEngine]}:{}),prompt,revision,document:S.doc});
-    if(request!==commandState.request){if(job.status==='running')void api('/api/agent/jobs/'+encodeURIComponent(job.id)+'/cancel','POST',{}).catch(()=>{});return}
-    commandState.job=job.status==='running'?job.id:null;
     while(job.status==='running'){
       await new Promise(resolve=>setTimeout(resolve,600));
-      if(request!==commandState.request)return;
+      if(signal.aborted)throw Error('Stopped.');
       job=await api('/api/agent/jobs/'+encodeURIComponent(job.id));
     }
-    commandState.job=null;
-    if(request!==commandState.request||!commandState.open)return;
-    if(S.projectId!==projectId||S.revision!==revision||JSON.stringify(S.doc)!==documentVersion)throw Error('Your workspace changed. Ask again using the current view.');
-    if(job.status!=='completed'||!job.commandResult)throw Error(job.message||'AI could not complete this request. Try again.');
-    const result=job.commandResult;
-    if(result.kind==='navigate'){
-      commandState.query='';commandState.resultIds=null;
-      if(!commandEntries().some(row=>row.id===result.destination))throw Error('That destination is no longer available. Search again.');
-      commandExecute(result.destination);
-    }else if(result.kind==='search'){
-      commandState.resultIds=result.destinations;commandState.page=0;commandState.index=0;commandState.answer=job.message||'Choose a matching destination.';
-    }else if(result.kind==='draft'){
-      commandState.open=false;
-      if(result.destination){commandState.query='';commandState.resultIds=null;const destination=commandEntries().find(row=>row.id===result.destination);if(!destination?.project||!result.destination.startsWith('project:'))throw Error('That project is no longer available.');if(destination.project!==S.projectId)selectProject(destination.project)}
-      if(result.target==='project'){selectProject(null);S.projectName=result.name||'';S.projectBrief=result.prompt;act(null,{dataset:{act:'new-project'}})}
-      else{
-        if(!project())throw Error('Open a project before creating a cohort or study.');
-        if(result.target==='cohort'){act(null,{dataset:{act:'new-cohort'}});S.cohortPrompt=result.prompt;render()}
-        else{S.localPrompt=result.prompt;commandAction('draft-panel-open',{dataset:{}})}
-      }
-    }
-  }catch(error){if(request===commandState.request){commandState.error=error instanceof Error?error.message:String(error);if(!commandState.open){commandState.open=true;render()}}}
-  finally{if(request===commandState.request){commandState.busy=false;commandRefreshResults()}}
+  }finally{signal.removeEventListener('abort',cancel)}
+  if(signal.aborted)throw Error('Stopped.');
+  if(S.projectId!==projectId||S.revision!==revision||JSON.stringify(S.doc)!==documentVersion)throw Error('Your workspace changed. Ask again using the current view.');
+  if(job.status!=='completed'||!job.commandResult)throw Error(job.message||'AI could not complete this request. Try again.');
+  const result=job.commandResult;
+  if(result.kind==='navigate'){
+    if(!commandRows().some(row=>row.id===result.destination))throw Error('That destination is no longer available. Search again.');
+    return {kind:'run',commandId:result.destination};
+  }
+  if(result.kind==='search')return {kind:'filter',commandIds:result.destinations,message:job.message||'Choose a matching destination.'};
+  let target=S.projectId;
+  if(result.destination){const destination=commandRows().find(row=>row.id===result.destination);if(!destination?.project||!result.destination.startsWith('project:'))throw Error('That project is no longer available.');target=destination.project}
+  if(result.target!=='project'&&!S.doc.projects.some(p=>p.id===target))throw Error('Open a project before creating a cohort or study.');
+  return {kind:'action',perform:()=>{
+    if(target!==S.projectId)selectProject(target);
+    if(result.target==='project'){selectProject(null);S.projectName=result.name||'';S.projectBrief=result.prompt;act(null,{dataset:{act:'new-project'}})}
+    else if(result.target==='cohort'){act(null,{dataset:{act:'new-cohort'}});S.cohortPrompt=result.prompt;render()}
+    else{S.localPrompt=result.prompt;commandAction('draft-panel-open',{dataset:{}})}
+  }};
 }
 async function commandApplyProposal(){
   const before=new Map(S.doc.pipelines.map(p=>[p.id,JSON.stringify(p)])),projectId=S.projectId;
@@ -132,7 +152,7 @@ function commandAction(a,el){
   if(a==='command-ask'){void commandAskAI();return true}
   if(a==='command-open'){commandOpen();return true}
   if(a==='command-close'){commandClose();return true}
-  if(a==='command-page'){commandState.page=Math.max(0,Number(el.dataset.page));commandState.index=0;commandRefreshResults();document.getElementById('commandSearch')?.focus();return true}
+  if(a==='command-page'){cmdk.setActive(Math.max(0,Number(el.dataset.page))*COMMAND_PAGE);commandRefreshResults();document.getElementById('commandSearch')?.focus();return true}
   if(a==='command-go'){commandExecute(el.dataset.commandId);return true}
   if(a==='draft-panel-open'){if(!project())throw Error('Open a project first.');commandState.draftProject=S.projectId;S.flowPanel=false;if(el.dataset.prompt&&!S.localPrompt)S.localPrompt=el.dataset.prompt;commandState.focus='#assistantPrompt';render();void loadLocalAgents();return true}
   if(a==='draft-panel-close'){commandState.draftProject=null;render();root.querySelector('[data-act=draft-panel-open]')?.focus();return true}
@@ -146,14 +166,15 @@ document.addEventListener('dragover',e=>{if(e.target.closest?.('.draft-drop'))e.
 document.addEventListener('drop',e=>{if(!e.target.closest?.('.draft-drop'))return;e.preventDefault();if(e.dataTransfer?.files?.length!==1){commandState.fileError='Drop one file at a time.';render();return}void draftAttachRead(e.dataTransfer.files[0])});
 document.addEventListener('keydown',e=>{
   if((e.metaKey||e.ctrlKey)&&!e.altKey&&e.key.toLowerCase()==='s'){e.preventDefault();if(S.dirty)act(null,{dataset:{act:'save'}});return}
-  if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==='k'){e.preventDefault();try{if(commandState.open)commandClose();else commandOpen()}catch(error){fail(error)}return}
+  if(ByosCommands.isPaletteShortcut(e)){e.preventDefault();try{if(commandState.open)commandClose();else commandOpen()}catch(error){fail(error)}return}
   if(!commandState.open){if(arenaEscape(e))return;if(e.key==='Escape'&&commandJobVisible()&&!document.querySelector('dialog[open]')){e.preventDefault();try{flushForms();commandAction('draft-panel-close',{dataset:{}})}catch(error){fail(error)}}return}
-  if(e.key==='Escape'){e.preventDefault();commandClose();return}
-  if(e.isComposing)return;
-  if(e.target.id==='commandSearch'&&['ArrowDown','ArrowUp','Enter','Home','End'].includes(e.key)){
-    e.preventDefault();const rows=commandChoices(),page=rows.slice(commandState.page*6,(commandState.page+1)*6);
-    if(e.key==='Enter'){if(e.shiftKey&&commandState.query.trim()){void commandAskAI();return}if(page[commandState.index])try{commandExecute(page[commandState.index].id)}catch(error){fail(error)}return}
-    const count=Math.max(1,rows.length),position=e.key==='Home'?0:e.key==='End'?count-1:(commandState.page*6+commandState.index+(e.key==='ArrowDown'?1:-1)+count)%count;commandState.page=Math.floor(position/6);commandState.index=position%6;commandRefreshResults();return;
+  const action=ByosCommands.paletteKeyAction(e,!commandState.query);
+  if(action==='close'){e.preventDefault();commandClose();return}
+  if(e.target.id==='commandSearch'&&action&&action!=='askFull'){
+    if(action==='run'){e.preventDefault();const row=commandChoices()[cmdk.getState().active];if(row)try{commandExecute(row.id)}catch(error){fail(error)}return}
+    if(action==='ask'){e.preventDefault();if(commandState.query.trim())void commandAskAI();return}
+    if(cmdk.handleKey(e)){e.preventDefault();commandRefreshResults()}
+    return;
   }
   if(e.key==='Tab'){const nodes=[...root.querySelectorAll('.command-palette input,.command-palette button:not([disabled]):not([tabindex="-1"])')];const first=nodes[0],last=nodes[nodes.length-1];if(!nodes.includes(document.activeElement)){e.preventDefault();first?.focus()}else if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus()}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus()}}
 });
