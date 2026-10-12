@@ -113,14 +113,15 @@ const PERSONAS_PER_BATCH = 25;
 const MIN_PERSONAS_PER_BATCH = 10;
 /** Fewest and most persona batches a job runs at once. */
 const MIN_CONCURRENT_BATCHES = 16;
-const MAX_CONCURRENT_BATCHES = 48;
+const MAX_CONCURRENT_BATCHES = 64;
 /** Memory of one Claude Code batch process, measured at about 240 MB. */
 const CLI_PROCESS_BYTES = 250 * 1024 * 1024;
 /**
  * Persona batches run at once. Writing speed per stream is fixed by the model (about 170 tokens/s on Sonnet), so streams
  * are what shorten a large audience: 48 Claude Code Sonnet streams at once kept that speed with no rate limit in a real
  * run. Each Claude Code batch is its own process (about 240 MB and 1.5 CPU-seconds to start), so the machine sets the
- * number: four per CPU core and half the memory, between sixteen and 48.
+ * number: four per CPU core and half the memory, between sixteen and 64. On an 18-core Mac with 48 at once, 1,000 people
+ * took 58 s, of which about 17 s was each batch writing 21 people; 64 at once writes about 16 each.
  * JEV_CONCURRENT_BATCHES overrides it, for benchmarks.
  */
 export function concurrentBatches(engine: LocalAgentEngine): number {
