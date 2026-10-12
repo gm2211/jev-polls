@@ -2,13 +2,14 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Script } from 'node:vm';
 import { GENERATION_MAP_CLIENT } from '../src/workspace-generation-map-ui.js';
+import { PERSONA_ATTRIBUTES_CLIENT } from '../src/persona-attributes.js';
 
 function harness() {
   const escape = (value: unknown) => String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('"', '&quot;');
   const calls: string[] = [];
   const context: any = { S: {}, esc: escape, icon: (name: string) => '<i>' + name + '</i>', seatPageSize: () => 240, pageItems: (items: unknown[], _key: string, limit: number) => ({ items: items.slice(0, limit), controls: items.length > limit ? '<nav class="pagination"></nav>' : '' }), attr: escape, render() {}, root: { querySelector: () => null }, calls,
     api: async (path: string) => { calls.push(path); return { personas: Array.from({ length: 4 }, (_, k) => ({ id: 'p' + k, label: 'Ada <Lovelace> ' + k, age: 30 + k, segment: k % 2 ? 'transit' : 'car', background: 'Drives to work.', attributes: { budget: 'low' } })) }; } };
-  new Script(GENERATION_MAP_CLIENT + ';globalThis.t={liveMap,liveMapView,liveMapSignature,liveMapFetch,liveMapAction,liveMapDetail}').runInNewContext(context);
+  new Script(PERSONA_ATTRIBUTES_CLIENT + GENERATION_MAP_CLIENT + ';globalThis.t={liveMap,liveMapView,liveMapSignature,liveMapFetch,liveMapAction,liveMapDetail}').runInNewContext(context);
   return context;
 }
 const segments = [{ id: 'car', label: 'Car commuters' }, { id: 'transit', label: 'Train riders' }];
@@ -49,7 +50,7 @@ test('checked batches are fetched once and selected seats show the escaped profi
   assert.deepEqual([...calls], ['/api/agent/jobs/job-1/members?batch=0']);
   t.liveMapAction('live-seat', { dataset: { key: '0:1' } });
   const detail = t.liveMapDetail(t.liveMapView(S.localJob));
-  assert.match(detail, /Ada &lt;Lovelace> 1/); assert.match(detail, /Age 31/); assert.match(detail, /budget/); assert.match(detail, /Train riders/);
+  assert.match(detail, /Ada &lt;Lovelace> 1/); assert.match(detail, /Age 31/); assert.match(detail, /<dt>Budget<\/dt><dd>low<\/dd>/); assert.match(detail, /Train riders/);
   const focus = t.liveMap(S.localJob);
   assert.match(focus, /class="live-map live-map-focus"/, 'a selected seat replaces the map with who sits there');
   assert.match(focus, /data-act="live-seat-close"/);

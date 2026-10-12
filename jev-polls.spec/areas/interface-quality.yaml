@@ -221,3 +221,16 @@ behaviors:
     source:
       text: why 2 option placeholders
       reference: jev-polls project chat, Giulio, 2026-10-12
+  - id: readable-attribute-values
+    description: >-
+      Persona attributes read as text, never raw JSON: a list of records is a compact table with
+      plain-word column headers, a single record is label/value rows, and keys are plain words
+      ("Top10Games" reads "Top 10 games", "costUsd" reads "Cost (USD)" with $5 or Free).
+    details: >-
+      Applies wherever attributes are shown read-only: the report's persona details, the live and
+      replay detail panel, the cohort and audience seat maps, and the persona replacement
+      comparison. The persona editor keeps its editable JSON field. Before 2026-10-12 the report
+      drew each record as a JSON string inside a pill chip.
+    source:
+      text: we can do better than raw json in report
+      reference: jev-polls project thread, Giulio, 2026-10-12
