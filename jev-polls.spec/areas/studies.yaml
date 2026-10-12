@@ -117,6 +117,16 @@ behaviors:
     source:
       text: should be able to click on canvas to create node with dropdown - look at railway.com or hex.com for inspiration
       reference: jev-polls project thread, 2026-10-09
+  - id: canvas-click-closes-panel
+    description: >-
+      While a step's side panel is open, clicking empty canvas closes the panel instead of opening
+      the add-step menu; with the panel closed, clicking empty canvas opens the menu as before.
+    details: >-
+      Only that click is consumed. Clicking a step card still selects that step, and dragging still
+      moves steps or pans the canvas. The Before you run panel closes the same way.
+    source:
+      text: when sidepane is open, clicking outside of it closes it (currently it opens the canvas menu if i click on canvas)
+      reference: jev-polls project thread, 2026-10-12
   - id: canvas-drag-connect
     description: >-
       Dragging from a step's output socket draws a live wire that follows the pointer; dropping it on
