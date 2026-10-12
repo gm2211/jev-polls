@@ -46,7 +46,8 @@ test('renders a one-page report: answer first, then results, people, and how the
   assert.match(html, /each person answered '\+r\+' times/);
   assert.match(html, /Repeats are not counted as extra people/);
   assert.match(html, /Ask the audience/);
-  assert.match(html, /runs only when a condition is met/);
+  assert.match(html, /Runs only if /);
+  assert.match(html, /runGraph.html\(\{pipeline,statuses,notes,audiences:cohortNames,mode:'full'/);
   assert.match(html, /Download run JSON/);
   assert.match(html, /application\/json/);
   assert.match(html, /https:\/\/example\.com\/study/);
@@ -180,3 +181,13 @@ test('the report shows what the run cost, in total and per step, with reused ans
   assert.equal(boot.cost.total.usd.toFixed(4), (2.5 * 0.039).toFixed(4));
   assert.deepEqual(boot.cost.steps.map((step: { id: string; requests: number; reused: number; status: string }) => [step.id, step.requests, step.reused, step.status]), [['concept', 40, 8, 'completed'], ['decision', 0, 0, 'skipped']]);
 });
+
+test('the Saw line lists finished steps a step follows when it has no explicit inputs', () => {
+  const run = fixture();
+  run.pipeline.stages.push({ id: 'follow', kind: 'poll', label: 'Follow-up', dependsOn: ['concept', 'decision'], cohort: 'listeners', questions: {} });
+  run.stages.follow = { ...run.stages.concept!, id: 'follow', label: 'Follow-up', dependsOn: ['concept', 'decision'] };
+  const html = renderReport(run);
+  assert.match(html, /upstream=stage\.inputs\?\[\]:\(stage\.dependsOn\?\?\[\]\)\.filter\(id=>stageResult\(id\)\?\.status==='completed'\)/);
+  assert.match(html, /'Results from '\+upstream\.map\(label\)/);
+});
+

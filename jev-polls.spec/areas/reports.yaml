@@ -46,12 +46,20 @@ behaviors:
       how many profiles answered out of how many, the age range, segment shares and the shares of
       any attribute the cohort has a generation target for (at most two), computed from the people
       who answered; whether the profiles were drafted by AI from a description or written by hand
-      and how many sources they cite; and which earlier steps' answers it saw, or "No earlier
+      and how many sources they cite; and which earlier steps' answers it saw (its inputs, else the results of every
+      finished step it follows), or "No earlier
       answers". Steps saved under the old "Final choice" or "Final result" default names read as
       Final answer. Decided 2026-10-12.
     source:
       text: prob should include more detail about cohorts
       reference: jev-polls project thread on the report's How this was made section, Giulio, 2026-10-12
+  - id: report-run-graph
+    description: >-
+      How this was made opens with the same step graph as the live view, with every input and output
+      field and its type and each step's status, above the step-by-step list.
+    source:
+      text: the detailed run view should show schema of inputs and outputs in pipeline graph, both in live preview and in report
+      reference: 2026-10-12 jev-polls project thread "run graph schema", Giulio
   - id: open-without-losing-edits
     description: Open report opens a separate tab so unsaved workspace edits stay intact.
   - id: consistent-style

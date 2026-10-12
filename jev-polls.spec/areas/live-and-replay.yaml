@@ -156,6 +156,21 @@ behaviors:
     description: >-
       On a phone the map scrolls inside its own box, the leaderboard stacks under it, and every
       control stays reachable without clipping; the top bar stays pinned.
+  - id: run-graph-schema
+    description: >-
+      Live voting and Voting replay show the study as a graph of its steps, left to right, each with
+      its status and what it reads and gives out; choosing a step shows its voting. Summary shows one
+      line per step (for example "Audience + 2 steps → Choice · 3"); Inputs & outputs lists every
+      field with its type and wires each output to the input that reads it.
+    details: >-
+      Types come from the study's own questions: Choice with its option count (or the step it takes
+      options from), Scale with its levels, Yes / no; combine and final-answer steps take the type of
+      the question they carry. Inputs name the audience, each earlier output and how it is read
+      (summary, top option, shares, every answer, in batches, weight), and the step's run condition.
+      Hovering a step or field gives the full field list. Summary is the default.
+    source:
+      text: the detailed run view should show schema of inputs and outputs in pipeline graph, both in live preview and in report
+      reference: 2026-10-12 jev-polls project thread "run graph schema", Giulio
   - id: resilient-polling
     description: Live status survives transient fetch errors with a visible reconnecting notice.
   - id: replay-without-models

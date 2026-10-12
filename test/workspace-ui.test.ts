@@ -3952,7 +3952,7 @@ test('drafting progress separates accepted from being written and describes each
   assert.equal(draftEstimate({ ...nearlyDone, estimate: { seconds: 1, basis: 'pace', at: new Date().toISOString() } }), 'Finishing…');
   assert.equal(draftEstimate({ ...nearlyDone, inFlightPersonas: 400, estimate: undefined }), 'Finishing…', 'all written: only the checks are left');
   assert.equal(draftEstimate({ ...nearlyDone, estimate: { seconds: 30, basis: 'pace', at: new Date(Date.now() - 28000).toISOString() } }), 'Finishing…', 'the estimate counts down between updates');
-  assert.match(draftEstimate({ ...nearlyDone, estimate: { seconds: 20, basis: 'pace', at: new Date().toISOString() } }), /^About 16–27 sec left$/);
+  assert.match(draftEstimate({ ...nearlyDone, estimate: { seconds: 20, basis: 'pace', at: new Date().toISOString() } }), /^About 1[56]–27 sec left$/, 'a slow test runner can tick the lower bound down a second');
   assert.equal(draftEstimate({ ...nearlyDone, completedPersonas: 1000, inFlightPersonas: 0 }), '', 'nothing left to estimate once all are checked');
 });
 
