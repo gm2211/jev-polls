@@ -527,6 +527,8 @@ test('a study keeps its seed across reviews, so a second run reuses every saved 
   assert.equal(second.plan.seed, 'study');
   assert.deepEqual(second.plan.stages.map((stage: { reuse: string; reused: number }) => [stage.reuse, stage.reused]), [['reused', 1], ['reused', 0]]);
   assert.equal(second.plan.newRequests, 0);
+  assert.deepEqual(first.plan.newCost, first.plan.cost, 'nothing saved: the new cost is the full estimate');
+  assert.ok(second.plan.cost.usd > 0); assert.equal(second.plan.newCost.usd, 0, 'saved answers cost nothing');
   assert.equal(calls, 1, 'an unchanged study sends no new requests'); assert.equal(second.job.usage?.cacheHits, 1);
   const forced = await run({ refresh: true });
   assert.equal(calls, 2, 'Re-run all steps asks again'); assert.equal(forced.job.usage?.cacheHits, 0);
