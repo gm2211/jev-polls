@@ -138,9 +138,11 @@ Importing a cohort saves an immutable content-addressed revision. Reuse it acros
 
 `aggregate` combines compatible question summaries with explicit stage weights. It supports Choice, Score and Noul; options or score levels must match. This composes judgments; it does not manufacture additional independent respondents.
 
+`choose` (shown as "Final choice") is one Jev request with no cohort. It reads every binding in `inputs` (any `select`, `responses` included) and answers its `questions` once for the study. When the inputs do not fit one request, it reads each `responses` input in slices, writes a verdict per slice, and combines the verdicts in as many rounds as needed; `batch` is rejected because the split is automatic. Inputs from skipped steps are left out. Prefer it over `aggregate` when you want one considered choice rather than a weighted merge.
+
 `decision` chooses the highest-probability option from a Choice summary while retaining that distribution and its uncertainty. It does not convert the distribution to 100% certainty.
 
-Every reference in an aggregate, decision or condition must be declared in `dependsOn`. Cycles and unknown references are rejected. This version supports arbitrary acyclic stage graphs. Feedback rounds are explicit new stages, which keeps execution, costs and evidence auditable.
+Every reference in an aggregate, choose, decision or condition must be declared in `dependsOn`. Cycles and unknown references are rejected. This version supports arbitrary acyclic stage graphs. Feedback rounds are explicit new stages, which keeps execution, costs and evidence auditable.
 
 Conditions use `all`, `any`, `not`, or a leaf with `stage`, `question`, `metric`, `op`, `value`. Choice metrics: `winner`, `margin`, `topProbability`. Score/Noul metric: `mean`. Numeric operators: `gt`, `gte`, `lt`, `lte`, `eq`, `ne`; winner permits `eq` or `ne`.
 
