@@ -13,6 +13,7 @@ import { predictReuse, runPipeline } from './engine.js';
 import { costOf } from './request-budget.js';
 import { renderReport } from './report.js';
 import { loadRun } from './run-record.js';
+import { stageOutcome, type StageOutcome } from './stage-outcome.js';
 import { writeJson, writeText } from './io.js';
 import { WorkspaceStore, workspacePlan, WorkspaceConflictError, validateWorkspaceDocument } from './workspace-store.js';
 import { renderWorkspace } from './workspace-ui.js';
@@ -34,7 +35,7 @@ const savedJobSchema = z.object({
   status: z.enum(['running', 'completed', 'failed']), createdAt: z.string().max(100), message: z.string().max(100_000),
   provider: evaluationProvider.optional(),
   seed: z.string().min(1).max(200).optional(),
-  stages: z.array(z.object({ id: safeId, label: z.string().max(100_000), kind: z.enum(['poll', 'aggregate', 'decision', 'choose']), dependsOn: z.array(safeId), status: z.enum(['pending', 'running', 'completed', 'skipped', 'failed']), reason: z.string().max(100_000).optional(), batching: z.object({ batches: z.number().int().positive(), reduceRounds: z.number().int().positive(), layers: z.number().int().nonnegative() }).strict().optional() }).strict()).optional(),
+  stages: z.array(z.object({ id: safeId, label: z.string().max(100_000), kind: z.enum(['poll', 'aggregate', 'decision', 'choose']), dependsOn: z.array(safeId), status: z.enum(['pending', 'running', 'completed', 'skipped', 'failed']), reason: z.string().max(100_000).optional(), batching: z.object({ batches: z.number().int().positive(), reduceRounds: z.number().int().positive(), layers: z.number().int().nonnegative() }).strict().optional(), outcome: z.custom<StageOutcome>((value) => typeof value === 'object' && value !== null).optional() }).strict()).optional(),
   progress: z.object({ stage: safeId, completed: z.number().int().nonnegative(), total: z.number().int().nonnegative() }).strict().optional(),
   liveMembers: z.array(z.object({ stage: safeId, personaId: safeId, label: z.string().max(100_000), segment: safeId, age: z.number().finite(), repeat: z.number().int().positive(), weight: z.number().finite().nonnegative().optional(), order: z.number().int().nonnegative().optional(), batch: z.object({ phase: z.enum(['map','combine']), done: z.number().int().nonnegative(), total: z.number().int().positive() }).strict().optional(), status: z.enum(['queued','running','completed','failed']), answers: z.record(z.string(), z.unknown()).optional(), model: z.string().optional(), cacheHit: z.boolean().optional(), reason: z.string().max(100_000).optional() }).strict()).optional(),
   usage: z.object({ inputTokens: z.number().finite().nonnegative(), outputTokens: z.number().finite().nonnegative(), requests: z.number().int().nonnegative(), cacheHits: z.number().int().nonnegative(), tokenUsage: z.literal('unreported').optional(), measuredInputTokens: z.number().int().nonnegative().optional() }).strict().optional(),
@@ -45,8 +46,8 @@ function initialRunStages(pipeline: Pipeline): NonNullable<WorkspaceRun['stages'
 }
 function recordedRunStages(pipeline: Pipeline, record: Awaited<ReturnType<typeof loadRun>>): NonNullable<WorkspaceRun['stages']> {
   return pipeline.stages.map(stage => {
-    const result = record.stages[stage.id];
-    return { id: stage.id, label: stage.label, kind: stage.kind, dependsOn: [...stage.dependsOn], status: result?.status ?? 'failed', ...(result?.reason ? { reason: result.reason } : {}), ...(result?.batching && result.batching.batches > 1 ? { batching: { batches: result.batching.batches, reduceRounds: result.batching.reduceRounds, layers: result.layers?.length ?? 0 } } : {}) };
+    const result = record.stages[stage.id], outcome = stageOutcome(record.pipeline, result, record.stages);
+    return { id: stage.id, label: stage.label, kind: stage.kind, dependsOn: [...stage.dependsOn], status: result?.status ?? 'failed', ...(result?.reason ? { reason: result.reason } : {}), ...(result?.batching && result.batching.batches > 1 ? { batching: { batches: result.batching.batches, reduceRounds: result.batching.reduceRounds, layers: result.layers?.length ?? 0 } } : {}), ...(outcome ? { outcome } : {}) };
   });
 }
 class HttpError extends Error { constructor(readonly status: number, readonly code: string, message: string) { super(message); } }
@@ -267,7 +268,8 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
       Object.assign(job, finished);
       runRecords.set(job.id, join(runDirectory, 'run.json'));
       const { liveMembers: _liveMembers, ...publicJob } = job;
-      options.emit?.({ event: 'workspace-run', ...publicJob });
+      // Progress lines stay free of answers; the run view reads each step's outcome from the run itself.
+      options.emit?.({ event: 'workspace-run', ...publicJob, ...(publicJob.stages ? { stages: publicJob.stages.map(({ outcome: _outcome, ...stage }) => stage) } : {}) });
     } catch (error) {
       job.status = 'failed'; job.message = error instanceof ProviderError ? error.message : 'Run could not complete. Check study configuration and the selected evaluation provider, then review and retry.';
       job.stages = job.stages?.map(stage => stage.status === 'running' ? { ...stage, status: 'failed', reason: job.message } : stage);
