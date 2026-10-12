@@ -82,7 +82,8 @@ function flowNodeTitle(p,s){
   const question=Object.values(s.questions||{})[0]?.label?.trim(),custom=s.label?.trim();
   if(s.kind!=='poll')return {title:custom||(s.kind==='aggregate'?'Combine answers':'Final result'),sub:s.kind==='aggregate'?'Weights the connected answers together':'Picks the leading option'};
   const asked=question&&!/^What should this (?:step|phase) decide\?$/.test(question)?question:'',more=Object.keys(s.questions||{}).length-1,named=custom&&!['First question','Next question','New question'].includes(custom)&&custom!==asked;
-  return named?{title:custom,sub:asked?asked+(more>0?' (+'+more+' more)':''):'Add the question'}:{title:asked||'Untitled question',sub:more>0?'+'+more+' more '+(more===1?'question':'questions'):''};
+  const q=Object.values(s.questions||{})[0],n=Object.keys(q?.criteria||{}).length,kind=q?.type==='choice'?(n?'Compare '+n+' options':'Compare options'):q?.type==='noul'?'Yes / no':q?.type==='score'?'Ordered scale':'';
+  return named?{title:custom,sub:asked?asked+(more>0?' (+'+more+' more)':''):'Add the question'}:{title:asked||'Untitled question',sub:more>0?'+'+more+' more '+(more===1?'question':'questions'):kind};
 }
 function flowOutputUsed(p,s,q){return p.stages.some(x=>x.id!==s.id&&flowInputs(p,x).some(([,input])=>input.stage===s.id&&(!input.question||input.question===q.id)))}
 /** Phones (700px and narrower) get a vertical list of full-width steps in run order instead of the graph canvas. */
@@ -105,7 +106,7 @@ function flowNodeInputs(p,s,list){
   const sources=[...new Set(reads.map(r=>r.n))].sort((a,b)=>a-b),first=reads[0];
   const attrs='data-act="flow-inputs" data-id="'+attr(s.id)+'"';
   if(list)return '<div class="flow-node-inputs flow-reads" role="group" aria-label="What this step reads">'+reads.map(r=>'<button type="button" class="flow-read" '+attrs+' data-flow-source="'+attr(r.source.id)+'" data-flow-question="'+attr(r.input.question||'')+'">'+icon('right')+'<span>Reads step '+r.n+' <small>'+esc(r.label)+'</small></span></button>').join('')+'</div>';
-  return '<div class="flow-node-inputs"><button '+attrs+' data-flow-source="'+attr(first.source.id)+'" data-flow-question="'+attr(first.input.question||'')+'" aria-label="Inputs: '+attr(flowReadsText(reads))+'" aria-describedby="flowWireTip">'+icon('right')+'<span>Uses '+(sources.length===1?'step ':'steps ')+sources.join(', ')+'</span></button></div>';
+  return '<span class="flow-node-inputs"><button '+attrs+' data-flow-source="'+attr(first.source.id)+'" data-flow-question="'+attr(first.input.question||'')+'" aria-label="Inputs: '+attr(flowReadsText(reads))+'" aria-describedby="flowWireTip" title="Uses '+(sources.length===1?'step ':'steps ')+sources.join(', ')+'">'+icon('right')+'<span>'+sources.join(', ')+'</span></button></span>';
 }
 function flowNode(p,s,list){
   const pool=poolForPhase(p,s),outputs=phaseOutput(p,s),status=flowReadiness(p,s),pending=S.flowSource?.pipelineId===p.id?S.flowSource:null;
@@ -114,13 +115,19 @@ function flowNode(p,s,list){
   const downstream=p.stages.some(x=>x.dependsOn.includes(s.id)),short=s.kind==='poll'&&flowSampleShort(p,s);
   const who=s.kind!=='poll'?'':pool?.personas.length?'<button class="flow-who" data-act="flow-cohort-map" data-id="'+attr(s.id)+'" aria-label="Explore '+attr(pool.name)+' ('+flowPlural(pool.personas.length,'member')+')" title="Explore the cohort"><span class="flow-host-dots" aria-hidden="true">'+pool.personas.slice(0,8).map(()=>'<i></i>').join('')+'</span><span class="flow-who-text"><strong>'+esc(pool.name)+'</strong><span>'+(short?'<span class="flow-sample-short">'+short.asks.toLocaleString('en-US')+' of '+flowPlural(short.have,'persona')+'</span>':flowPlural(s.size??pool.personas.length,'persona'))+'</span></span></button>':'';
   return '<article class="flow-node" data-flow-node="'+attr(s.id)+'" data-stage-index="'+p.stages.indexOf(s)+'" data-selected="'+(S.stageId===s.id)+'" data-targetable="'+!!targetable+'" aria-label="'+attr(stepTitle(p,s))+'">'+
-    '<div class="flow-node-header"><span class="flow-number">'+(p.stages.indexOf(s)+1)+'</span><span class="flow-kind">'+kind+'</span><span class="flow-status" data-ready="'+(status==='Ready')+'">'+esc(status)+'</span></div>'+
-    flowNodeInputs(p,s,list)+
-    '<button class="flow-select" data-act="flow-select" data-id="'+attr(s.id)+'" aria-pressed="'+(S.stageId===s.id)+'" aria-label="'+(targetable?'Connect to ':'Edit ')+attr(stepTitle(p,s))+'"><strong>'+esc(title)+'</strong>'+(sub?'<span>'+esc(sub)+'</span>':'')+'</button>'+
+    '<div class="flow-node-header"><span class="flow-number">'+(p.stages.indexOf(s)+1)+'</span><span class="flow-kind">'+kind+'</span>'+(list?'':flowNodeInputs(p,s,false))+'<span class="flow-status" data-ready="'+(status==='Ready')+'">'+esc(status)+'</span></div>'+
+    (list?flowNodeInputs(p,s,true):'')+
+    '<button class="flow-select" data-act="flow-select" data-id="'+attr(s.id)+'" aria-pressed="'+(S.stageId===s.id)+'" aria-label="'+(targetable?'Connect to ':'Edit ')+attr(stepTitle(p,s))+'"'+(list?'':' title="'+attr(sub?title+' · '+sub:title)+'"')+'><strong>'+esc(title)+'</strong>'+(sub||!list?'<span>'+esc(sub)+'</span>':'')+'</button>'+
     who+
     (targetable?'<button class="flow-destination" data-act="flow-connect" data-id="'+attr(s.id)+'" aria-label="Connect here: '+attr(stepTitle(p,s))+'">'+icon('plus')+' Connect here</button>':'')+
-    '<div class="flow-node-outputs">'+outputs.map(q=>{const used=flowOutputUsed(p,s,q)||(s.kind==='decision'&&!downstream),label=(outputs.length>1?(q.label||q.id)+' · ':'')+flowOutputLabel(p,s,q);return '<button class="flow-output" data-act="flow-output" data-id="'+attr(s.id)+'" data-question="'+attr(q.id)+'" data-used="'+used+'" aria-pressed="'+(pending?.stage===s.id&&pending?.question===q.id)+'" aria-label="Connect '+attr(flowOutputLabel(p,s,q))+' from '+attr(stepTitle(p,s))+'" title="'+(s.kind==='decision'&&!downstream?'The study\'s final answer. Drag it onto another step, or click to pass it on.':used?'Sent to a later step. Drag it onto another step to send it there too.':'Drag onto the step that should use it, or click then choose the step')+'"><span class="flow-output-text">'+(used?'':'<strong>Connect output '+icon('right')+'</strong>')+'<span>'+esc(label)+'</span></span><span class="flow-socket" aria-hidden="true"></span></button>'}).join('')+'</div>'+
-    (downstream||s.kind==='decision'?'':'<button class="flow-next" data-act="flow-add-menu" data-id="'+attr(s.id)+'" aria-label="Add after '+attr(stepTitle(p,s))+'">'+icon('plus')+'<span>Add next step</span></button>')+'</article>';
+    '<div class="flow-node-outputs">'+outputs.map(q=>{const used=flowOutputUsed(p,s,q)||(s.kind==='decision'&&!downstream),label=(outputs.length>1?(q.label||q.id)+' · ':'')+flowOutputLabel(p,s,q);return '<button class="flow-output" data-act="flow-output" data-id="'+attr(s.id)+'" data-question="'+attr(q.id)+'" data-used="'+used+'" aria-pressed="'+(pending?.stage===s.id&&pending?.question===q.id)+'" aria-label="Connect '+attr(flowOutputLabel(p,s,q))+' from '+attr(stepTitle(p,s))+'" title="'+(s.kind==='decision'&&!downstream?'The study\'s final answer. Drag it onto another step, or click to pass it on.':used?'Sent to a later step. Drag it onto another step to send it there too.':'Drag onto the step that should use it, or click then choose the step')+'"><span class="flow-output-text">'+(used?'<strong class="flow-output-sent">'+esc(flowOutputSentText(p,s,q,downstream))+'</strong>':'<strong>Connect output '+icon('right')+'</strong>')+'<span>'+esc(label)+'</span></span><span class="flow-socket" aria-hidden="true"></span></button>'}).join('')+'</div>'+
+    (s.kind==='decision'&&!downstream?'':'<button class="flow-next" data-act="flow-add-menu" data-id="'+attr(s.id)+'" aria-label="Add after '+attr(stepTitle(p,s))+'">'+icon('plus')+'<span>Add next step</span></button>')+'</article>';
+}
+/** Where a connected output goes, so a wired card keeps the same two-line output row as an unwired one. */
+function flowOutputSentText(p,s,q,downstream){
+  const to=p.stages.filter(x=>x.id!==s.id&&flowInputs(p,x).some(([,input])=>input.stage===s.id&&(!input.question||input.question===q.id))).map(x=>p.stages.indexOf(x)+1).sort((a,b)=>a-b);
+  if(!to.length)return s.kind==='decision'&&!downstream?'Final answer':'Connected';
+  return 'Sent to '+(to.length===1?'step ':'steps ')+to.join(', ');
 }
 function flowNewStage(p,kind,source){
   return kind==='aggregate'?{id:id(),kind:'aggregate',label:'Combined answers',inputs:[],outputQuestion:'combined',dependsOn:[]}:kind==='decision'?{id:id(),kind:'decision',label:'Final result',from:{stage:'',question:''},outputQuestion:'decision',dependsOn:[]}:{id:id(),kind:'poll',label:'New question',cohort:source?.kind==='poll'?source.cohort:Object.keys(p.cohorts)[0]||'',questions:{answer:{type:'choice',label:'',instructions:'Answer the question using your persona and the supplied context.',criteria:{option_a:'',option_b:''}}},inputs:{},dependsOn:[],repeats:1};
@@ -512,7 +519,7 @@ root.addEventListener('keydown',e=>{
   const scale=flowScaleApplied||1,left=v.scrollLeft+Math.max(0,v.clientWidth/2-160),top=v.scrollTop+24;
   flowOpenCreate(p,left/scale,top/scale,left,top);
 });
-const readsButton=e=>e.target?.closest?.('.flow-map .flow-node-inputs [data-act=flow-inputs]');
+const readsButton=e=>e.target?.closest?.('.flow-map .flow-node-header [data-act=flow-inputs]');
 root.addEventListener('focusin',e=>{const b=readsButton(e);if(b)flowShowReads(b)});
 root.addEventListener('focusout',e=>{if(readsButton(e))flowTipHide()});
 root.addEventListener('pointerover',e=>{const b=e.pointerType!=='touch'&&readsButton(e);if(b)flowShowReads(b)});
@@ -604,7 +611,13 @@ const FLOW_LIST_CSS = `
 .flow-list .flow-reads{display:grid;gap:0;padding:2px 12px}.flow-list .flow-read{min-height:40px;padding:6px 0;font-size:var(--text-md);color:var(--ink);align-items:center}.flow-list .flow-read+.flow-read{border-top:1px solid var(--line)}.flow-list .flow-read span{white-space:normal;overflow:visible}.flow-list .flow-read small{display:block;color:var(--muted);font-size:var(--text-sm)}.flow-list .flow-read .ui-icon{width:14px;height:14px}
 .flow-list .flow-who{min-height:48px}.flow-list .flow-who-text strong{font-size:var(--text-md)}.flow-list .flow-who-text>span{font-size:var(--text-sm)}
 .flow-list .flow-output{min-height:52px;padding:8px 12px;font-size:var(--text-md)}.flow-list .flow-output-text strong{font-size:var(--text-md)}.flow-list .flow-output .flow-output-text>span{font-size:var(--text-sm);white-space:normal;max-width:none;overflow:visible}
-.flow-list .flow-next{min-height:48px;font-size:var(--text-md)}.flow-list .flow-destination{min-height:44px;font-size:var(--text-md)}
+.flow-list .flow-next{min-height:48px;font-size:var(--text-md)}
+.flow-map .flow-node-header{flex-wrap:nowrap;min-width:0}.flow-map .flow-kind{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.flow-map .flow-status{white-space:nowrap;flex:none}
+.flow-map .flow-node-header .flow-node-inputs{display:inline-flex;flex:none;padding:0;background:none;border:0}.flow-map .flow-node-header .flow-node-inputs button{display:inline-flex;align-items:center;gap:3px;width:auto;min-height:20px;padding:1px 7px 1px 5px;border-radius:999px;background:var(--raised);color:var(--muted);font-size:var(--text-xs);font-variant-numeric:tabular-nums}.flow-map .flow-node-header .flow-node-inputs button:hover,.flow-map .flow-node-header .flow-node-inputs button:focus-visible{background:var(--selection);color:var(--blue)}
+.flow-map .flow-select strong{-webkit-line-clamp:1}.flow-map .flow-select span{-webkit-line-clamp:1;min-height:1.45em}
+.flow-output-text .flow-output-sent{font-weight:500;color:var(--muted)}
+.flow-map .flow-node[data-selected=true]{border:1px solid var(--blue);box-shadow:0 0 0 1px var(--blue)}.flow-map .flow-node[data-drop-target=true]{border:1px solid var(--blue);box-shadow:0 0 0 1px var(--blue),0 0 0 5px var(--selection)}
+.flow-list .flow-destination{min-height:44px;font-size:var(--text-md)}
 .flow-list .flow-action-bar{border:1px solid var(--line);border-radius:10px}
 .flow-list-view .flow-create-menu{position:fixed;z-index:20;left:12px;right:12px;top:auto;bottom:12px;width:auto;max-width:none}
 .flow-board:has(.flow-list-view){overflow:visible}.flow-board:has(.flow-list-view) .flow-hint{position:sticky;top:0;z-index:4;background:var(--surface);border-bottom:1px solid var(--line)}
