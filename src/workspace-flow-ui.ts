@@ -256,7 +256,9 @@ function flowAction(a,el){
   if(a==='flow-add-close'){S.flowAdd=null;render();return true}
   if(a==='flow-create'){
     const m=S.flowCreate;if(m?.pipelineId!==p.id||!FLOW_KINDS.some(k=>k.kind===el.dataset.kind))return true;
-    const stage=flowNewStage(p,el.dataset.kind,null);if(!flowListMode()){flowFreezeLayout(p);p.layout[stage.id]={x:Math.max(0,Math.round(m.x)),y:Math.max(0,Math.round(m.y))}}p.stages.push(stage);
+    const source=m.connect&&p.stages.find(s=>s.id===m.connect.stage);if(m.connect&&(!source||!flowKindAccepts(el.dataset.kind,m.connect)))return true;
+    const stage=flowNewStage(p,el.dataset.kind,source||null);if(!flowListMode()){flowFreezeLayout(p);p.layout[stage.id]={x:Math.max(0,Math.round(m.x)),y:Math.max(0,Math.round(m.y))}}p.stages.push(stage);
+    if(source)flowConnect(p,source.id,m.connect.question,stage.id);
     S.stageId=stage.id;S.flowPanel=true;S.flowAdd=null;S.flowSource=null;S.flowCreate=null;S.flowCohortPick=false;S.sections['flow-inspector']='question';delete S.sections['flow-inspector-error'];
     S.dirty=true;S.plan=null;render();return true;
   }
@@ -334,6 +336,9 @@ function drawFlowEdges(){
     const lines=[edge.label,'Step '+(p.stages.indexOf(edge.source)+1)+' to step '+(p.stages.indexOf(edge.target)+1)],show=e=>{root.querySelectorAll('.flow-wire[data-active]').forEach(w=>w.removeAttribute('data-active'));path.setAttribute('data-active','');flowTipShow(viewport,lines,{x:e.clientX,y:e.clientY})};
     hit.addEventListener('pointerenter',show);hit.addEventListener('pointermove',show);hit.addEventListener('pointerleave',flowTipHide);
   }
+  const m=S.flowCreate?.pipelineId===p.id?S.flowCreate:null,pendingOut=m?.connect&&[...map.querySelectorAll('[data-act=flow-output]')].find(n=>n.dataset.id===m.connect.stage&&n.dataset.question===m.connect.question);
+  if(pendingOut){const out=pendingOut.getBoundingClientRect(),node=pendingOut.closest('[data-flow-node]').getBoundingClientRect(),x1=node.right-box.left,y1=out.top+out.height/2-box.top,c=Math.max(48,Math.abs(m.x-x1)/2),path=document.createElementNS('http://www.w3.org/2000/svg','path');
+    path.setAttribute('d','M '+x1+' '+y1+' C '+(x1+c)+' '+y1+', '+(m.x-c)+' '+m.y+', '+m.x+' '+m.y);path.setAttribute('class','flow-wire flow-wire-pending');svg.append(path)}
   map.prepend(svg);const fitted=Math.max(.1,Math.min(1,(viewport.clientWidth-32)/box.width,(viewport.clientHeight-48)/box.height)),scale=flowDrag?.scale??(S.flowScale==='fit'?fitted:S.flowScale??fitted);flowScaleApplied=scale;map.style.transform='scale('+scale+')';space.style.width=Math.ceil(box.width*scale)+'px';space.style.height=Math.ceil(box.height*scale)+'px';
   if(S.flowScroll?.pipelineId===p.id){viewport.scrollLeft=S.flowScroll.left;viewport.scrollTop=S.flowScroll.top}
   flowPlaceMenu(viewport,space);return true;
@@ -346,17 +351,23 @@ const FLOW_KINDS=[
   {kind:'decision',label:'Final result',hint:'Select the leading option from a Choice',keys:'decision winner outcome',icon:'<path d="M6 21V4h11l-2 4 2 4H6"/>'},
 ];
 let flowDrag=null,flowSuppressClick=false,flowScaleApplied=1,flowFrame=0;
-function flowKindMatches(query){const q=String(query||'').trim().toLowerCase();return FLOW_KINDS.filter(k=>!q||(k.label+' '+k.hint+' '+k.keys).toLowerCase().includes(q))}
+/** Step kinds a dropped wire can feed: a Final result needs a Choice. */
+function flowKindAccepts(kind,connect){
+  if(!connect||kind!=='decision')return true;
+  const p=pipeline(),source=p?.stages.find(s=>s.id===connect.stage),q=source&&phaseOutput(p,source).find(x=>x.id===connect.question);
+  return q?.type==='choice';
+}
+function flowKindMatches(query,connect){const q=String(query||'').trim().toLowerCase();return FLOW_KINDS.filter(k=>flowKindAccepts(k.kind,connect)).filter(k=>!q||(k.label+' '+k.hint+' '+k.keys).toLowerCase().includes(q))}
 function flowCreateItems(m){
-  const items=flowKindMatches(m.query);m.index=Math.max(0,Math.min(m.index||0,items.length-1));
+  const items=flowKindMatches(m.query,m.connect);m.index=Math.max(0,Math.min(m.index||0,items.length-1));
   return items.length?items.map((k,i)=>'<button type="button" class="flow-create-item" role="option" id="flow-create-'+k.kind+'" data-act="flow-create" data-kind="'+k.kind+'" aria-selected="'+(i===m.index)+'"><span class="flow-create-kind" data-kind="'+k.kind+'"><svg class="ui-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">'+k.icon+'</svg></span><span class="flow-create-text"><strong>'+esc(k.label)+'</strong><small>'+esc(k.hint)+'</small></span></button>').join(''):'<p class="flow-create-empty">No matching step</p>';
 }
 function flowCreateMenu(p){
   const m=S.flowCreate?.pipelineId===p.id?S.flowCreate:null;if(!m)return '';
-  return '<div class="flow-create-menu" role="dialog" aria-label="Add a step"><input class="flow-create-search" type="text" role="combobox" aria-expanded="true" aria-controls="flowCreateList" aria-label="What would you like to add?" placeholder="What would you like to add?" autocomplete="off" spellcheck="false" value="'+attr(m.query||'')+'"><div class="flow-create-list" id="flowCreateList" role="listbox" aria-label="Step kinds">'+flowCreateItems(m)+'</div><p class="flow-create-foot"><kbd>↑</kbd><kbd>↓</kbd> to move · <kbd>Enter</kbd> to add · <kbd>Esc</kbd> to close</p></div>';
+  return '<div class="flow-create-menu" role="dialog" aria-label="'+(m.connect?'Add a step that uses this output':'Add a step')+'"><input class="flow-create-search" type="text" role="combobox" aria-expanded="true" aria-controls="flowCreateList" aria-label="What would you like to add?" placeholder="'+(m.connect?'Add a step that uses this output':'What would you like to add?')+'" autocomplete="off" spellcheck="false" value="'+attr(m.query||'')+'"><div class="flow-create-list" id="flowCreateList" role="listbox" aria-label="Step kinds">'+flowCreateItems(m)+'</div><p class="flow-create-foot"><kbd>↑</kbd><kbd>↓</kbd> to move · <kbd>Enter</kbd> to add · <kbd>Esc</kbd> to close</p></div>';
 }
-function flowOpenCreate(p,x,y,left,top){S.flowCreate={pipelineId:p.id,x,y,left,top,query:'',index:0,focus:true};S.flowAdd=null;render()}
-function flowCloseCreate(){if(!S.flowCreate)return;S.flowCreate=null;root.querySelector('.flow-create-menu')?.remove();root.querySelector('.flow-viewport')?.focus({preventScroll:true})}
+function flowOpenCreate(p,x,y,left,top,connect){S.flowCreate={pipelineId:p.id,x,y,left,top,query:'',index:0,focus:true,...(connect?{connect}:{})};S.flowAdd=null;render()}
+function flowCloseCreate(){if(!S.flowCreate)return;const wired=!!S.flowCreate.connect;S.flowCreate=null;root.querySelector('.flow-create-menu')?.remove();if(wired)root.querySelector('.flow-links .flow-wire-pending')?.remove();root.querySelector('.flow-viewport')?.focus({preventScroll:true})}
 function flowPlaceMenu(viewport,space,sheet){
   const menu=space.querySelector('.flow-create-menu'),m=S.flowCreate;if(!menu||!m)return;
   if(!sheet){const maxLeft=viewport.scrollLeft+viewport.clientWidth-menu.offsetWidth-24,maxTop=viewport.scrollTop+viewport.clientHeight-menu.offsetHeight-32;
@@ -366,7 +377,7 @@ function flowPlaceMenu(viewport,space,sheet){
   sync();
   input.addEventListener('input',e=>{e.stopPropagation();m.query=input.value;m.index=0;sync()});
   input.addEventListener('keydown',e=>{
-    const count=flowKindMatches(m.query).length;
+    const count=flowKindMatches(m.query,m.connect).length;
     if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();e.stopPropagation();if(count){m.index=(m.index+(e.key==='ArrowDown'?1:count-1))%count;sync()}}
     else if(e.key==='Enter'){e.preventDefault();e.stopPropagation();list.querySelector('[aria-selected=true]')?.click()}
     else if(e.key==='Escape'){e.preventDefault();e.stopPropagation();flowCloseCreate()}
@@ -416,7 +427,7 @@ function flowWireStart(d){
   return true;
 }
 function flowWireMove(d,e){
-  const v=d.viewport,box=v.getBoundingClientRect(),edge=36,step=14;
+  const v=d.viewport,box=v.getBoundingClientRect(),edge=36,step=14;d.last={x:e.clientX,y:e.clientY};
   if(e.clientX<box.left+edge)v.scrollLeft-=step;else if(e.clientX>box.right-edge)v.scrollLeft+=step;
   if(e.clientY<box.top+edge)v.scrollTop-=step;else if(e.clientY>box.bottom-edge)v.scrollTop+=step;
   const hit=document.elementFromPoint?.(e.clientX,e.clientY)?.closest?.('[data-flow-node]'),target=hit&&v.contains(hit)&&hit.dataset.dropOk==='true'?hit:null;
@@ -431,11 +442,20 @@ function flowWireMove(d,e){
 function flowWireEnd(d,cancelled){
   d.wire?.remove();d.viewport.classList.remove('flow-connecting');d.output.removeAttribute('data-wiring');
   d.viewport.querySelectorAll('[data-drop-ok],[data-drop-target]').forEach(n=>{n.removeAttribute('data-drop-ok');n.removeAttribute('data-drop-target')});
-  const id=d.target?.dataset.flowNode;if(cancelled||!id)return;
+  const id=d.target?.dataset.flowNode;if(cancelled)return;
+  if(!id){flowWireDropOnCanvas(d);return}
   try{flowConnect(d.p,d.stage,d.question,id)}catch(error){fail(error);return}
   if(S.reviewPanel){S.reviewPanel=false;S.plan=null}
   S.flowSource=null;S.stageId=id;if(S.flowPanel)S.sections['flow-inspector']='connections';S.dirty=true;S.plan=null;render();
   say('Connected to '+stepTitle(d.p,d.p.stages.find(s=>s.id===id))+'.');
+}
+/** A wire dropped on blank canvas opens the add-step menu there; the step picked is created at that spot and reads the output. */
+function flowWireDropOnCanvas(d){
+  const pt=d.last,v=d.viewport;if(!pt||!v.isConnected)return;
+  const hit=document.elementFromPoint?.(pt.x,pt.y);if(!hit||!v.contains(hit)||hit.closest('[data-flow-node],.round-panel,.flow-create-menu'))return;
+  const map=v.querySelector('.flow-map'),space=v.querySelector('.flow-space');if(!map||!space)return;
+  const mapBox=map.getBoundingClientRect(),spaceBox=space.getBoundingClientRect(),scale=flowScaleApplied||1;
+  S.flowSource=null;flowOpenCreate(d.p,(pt.x-mapBox.left)/scale,(pt.y-mapBox.top)/scale,pt.x-spaceBox.left,pt.y-spaceBox.top,{stage:d.stage,question:d.question});
 }
 function flowRedraw(){if(flowFrame)return;flowFrame=requestAnimationFrame(()=>{flowFrame=0;drawFlowEdges()})}
 function wireFlowCanvas(){
@@ -480,6 +500,7 @@ function flowPointerEnd(e,cancelled){
 }
 document.addEventListener('pointerup',e=>flowPointerEnd(e,false));
 document.addEventListener('pointercancel',e=>flowPointerEnd(e,true));
+window.addEventListener('blur',()=>{if(flowDrag)flowPointerEnd({pointerId:flowDrag.pointerId},true)});
 document.addEventListener('click',e=>{
   if(flowSuppressClick){flowSuppressClick=false;e.preventDefault();e.stopPropagation();return}
   if(S.flowCreate&&!e.target?.closest?.('.flow-create-menu'))flowCloseCreate();
@@ -563,7 +584,7 @@ const FLOW_BASE_CSS = `
 .flow-viewport.flow-connecting{user-select:none;-webkit-user-select:none}.flow-viewport.flow-connecting *{cursor:crosshair!important}
 .flow-connecting .flow-node:not([data-drop-ok]):not(:has([data-wiring])){opacity:.55}.flow-node[data-drop-ok=true]{border-style:dashed;border-color:var(--blue)}.flow-node[data-drop-target=true]{border:2px solid var(--blue);box-shadow:0 0 0 4px var(--selection)}
 .flow-output[data-wiring=true]{background:var(--selection)}.flow-output[data-wiring=true] .flow-socket{background:var(--blue)}
-.flow-drag-wire{position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none;z-index:60;overflow:visible}.flow-drag-wire path{fill:none;stroke:var(--blue);stroke-width:2;stroke-dasharray:6 5}.flow-drag-wire[data-snapped] path{stroke-dasharray:none;stroke-width:2.5}.flow-map.flow-free{display:block;padding:0}.flow-map.flow-free .flow-column{display:contents}.flow-map.flow-free .flow-node{position:absolute;margin:0}
+.flow-wire.flow-wire-pending{stroke:var(--blue);stroke-width:2;stroke-dasharray:6 5}.flow-drag-wire{position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none;z-index:60;overflow:visible}.flow-drag-wire path{fill:none;stroke:var(--blue);stroke-width:2;stroke-dasharray:6 5}.flow-drag-wire[data-snapped] path{stroke-dasharray:none;stroke-width:2.5}.flow-map.flow-free{display:block;padding:0}.flow-map.flow-free .flow-column{display:contents}.flow-map.flow-free .flow-node{position:absolute;margin:0}
 .flow-node-dragging{z-index:3;box-shadow:0 14px 30px rgba(15,35,55,.2)}.flow-node-dragging button{pointer-events:none}
 .flow-create-menu{position:absolute;z-index:6;width:300px;max-width:calc(100vw - 48px);display:grid;gap:2px;padding:6px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink);box-shadow:0 18px 40px rgba(15,35,55,.22);cursor:default}
 .flow-create-search{width:100%;border:0;border-bottom:1px solid var(--line);border-radius:0;padding:10px 10px 12px;margin-bottom:4px;font:inherit;font-size:var(--text-md);background:transparent;color:var(--ink);outline:none;box-shadow:none}
