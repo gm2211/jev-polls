@@ -4,10 +4,15 @@ function hostMapState(key){S.hostMaps??={};return S.hostMaps[key]??={page:0,sele
 function hostMapMember(c,key){return c?.personas?.find(person=>person.id===hostMapState(key).selectedId)||null}
 /* Seats per page in a seat map: as many full lines as fit its pane once measured, a screenful of small seats before that. */
 function seatPageSize(fit){return S.seatFits?.[fit]?.size||viewportPageSize(240,96)}
-/* Lines a seat map gets next: fewer when its pane overflows (excess>0), more when it is paged and a whole line of room is spare. */
-function seatFitLines(lines,excess,linePitch,paged,shrunk){
-  if(excess>0)return Math.max(2,lines-Math.ceil(excess/linePitch));
-  return !shrunk&&paged&&-excess>=linePitch?lines+Math.floor(-excess/linePitch):lines;
+/*
+ * The next line count for a seat map, as a search between the most lines known to fit (ok) and the fewest known to overflow
+ * (over): fewer when its pane overflows (excess>0), more when it is paged and a whole line of room is spare. Never below two.
+ */
+function seatFitLines(lines,excess,linePitch,paged,fit={}){
+  let ok=fit.ok||0,over=fit.over||Infinity;
+  if(excess>0){over=Math.min(over,lines);return {lines:Math.max(2,Math.min(lines-1,Math.max(ok,lines-Math.ceil(excess/linePitch)))),ok,over}}
+  ok=Math.max(ok,lines);
+  return {lines:paged&&-excess>=linePitch?Math.max(lines,Math.min(over-1,lines+Math.floor(-excess/linePitch))):lines,ok,over};
 }
 function seatPane(node){for(let el=node.parentElement;el&&el!==document.body;el=el.parentElement){const y=getComputedStyle(el).overflowY;if(y==='auto'||y==='scroll')return el}return null}
 /* How far the pane's content overflows it, or (negative) how much room is left below the content. Without a scrolling pane, the map alone must fit the window. */
@@ -20,14 +25,14 @@ function seatPaneExcess(pane,map){
 let seatFitDepth=0;
 /* After each render, sizes every seat map's pages to what its pane shows without scrolling, so paging and scrolling never combine. */
 function fitSeatMaps(){
-  if(typeof document==='undefined'||seatFitDepth>3)return;
+  if(typeof document==='undefined'||seatFitDepth>5)return;
   for(const map of root.querySelectorAll('.live-map[data-fit]')){
     const seats=map.querySelector('.live-map-seats'),seat=map.querySelector('.live-seat');if(!seats||!seat)continue;
     const key=map.dataset.fit,pane=seatPane(map),gap=parseFloat(getComputedStyle(seats).columnGap)||4,perLine=Math.max(1,Math.floor((seats.clientWidth+gap)/(seat.offsetWidth+gap))),linePitch=seat.offsetHeight+gap;
     const box=(pane?pane.clientWidth+'x'+pane.clientHeight:innerWidth+'x'+innerHeight)+':'+perLine,size=seatPageSize(key);S.seatFits??={};
-    const fit=S.seatFits[key]?.box===box?S.seatFits[key]:{box,shrunk:false},excess=seatPaneExcess(pane,map);
-    const lines=seatFitLines(Math.ceil(size/perLine),excess,linePitch,!!map.querySelector('.pagination'),fit.shrunk);
-    S.seatFits[key]={box,shrunk:fit.shrunk||excess>0,size:perLine*lines};
+    // Segment headers take room too, so a guess can overshoot; the search narrows between sizes seen to fit and to overflow at this pane size.
+    const fit=S.seatFits[key]?.box===box?S.seatFits[key]:{},next=seatFitLines(Math.ceil(size/perLine),seatPaneExcess(pane,map),linePitch,!!map.querySelector('.pagination'),fit),lines=next.lines;
+    S.seatFits[key]={box,size:perLine*lines,ok:next.ok,over:next.over};
     if(perLine*lines!==size){seatFitDepth++;try{render()}finally{seatFitDepth--}return}
   }
 }
