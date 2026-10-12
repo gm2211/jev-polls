@@ -419,7 +419,8 @@ function flowCreateMenu(p){
   const m=S.flowCreate?.pipelineId===p.id?S.flowCreate:null;if(!m)return '';
   return '<div class="flow-create-menu" role="dialog" aria-label="'+(m.connect?'Add a step that uses this output':'Add a step')+'"><input class="flow-create-search" type="text" role="combobox" aria-expanded="true" aria-controls="flowCreateList" aria-label="What would you like to add?" placeholder="'+(m.connect?'Add a step that uses this output':'What would you like to add?')+'" autocomplete="off" spellcheck="false" value="'+attr(m.query||'')+'"><div class="flow-create-list" id="flowCreateList" role="listbox" aria-label="Step kinds">'+flowCreateItems(m)+'</div><p class="flow-create-foot"><kbd>↑</kbd><kbd>↓</kbd> to move · <kbd>Enter</kbd> to add · <kbd>Esc</kbd> to close</p></div>';
 }
-function flowOpenCreate(p,x,y,left,top,connect){S.flowCreate={pipelineId:p.id,x,y,left,top,query:'',index:0,focus:true,...(connect?{connect}:{})};S.flowAdd=null;render()}
+/** The add-step menu never opens beneath the step panel: opening it from the Add step button, Enter, or a dropped wire closes the panel first. */
+function flowOpenCreate(p,x,y,left,top,connect){if(S.reviewPanel){S.reviewPanel=false;S.plan=null}S.flowPanel=false;S.flowCreate={pipelineId:p.id,x,y,left,top,query:'',index:0,focus:true,...(connect?{connect}:{})};S.flowAdd=null;render()}
 function flowCloseCreate(){if(!S.flowCreate)return;const wired=!!S.flowCreate.connect;S.flowCreate=null;root.querySelector('.flow-create-menu')?.remove();if(wired)root.querySelector('.flow-links .flow-wire-pending')?.remove();root.querySelector('.flow-viewport')?.focus({preventScroll:true})}
 function flowPlaceMenu(viewport,space,sheet){
   const menu=space.querySelector('.flow-create-menu'),m=S.flowCreate;if(!menu||!m)return;
