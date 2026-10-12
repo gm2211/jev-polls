@@ -359,7 +359,11 @@ behaviors:
       shows the same seat map instead of three persona cards a page ("another mix - can we avoid
       scrolling?"), with its explanation and assumptions in an About this draft disclosure. On wide
       screens the step panel rises to just below the top bar ("maybe we can make the side pane
-      taller").
+      taller"). Changed 2026-10-12 after Giulio said "position of buttons is weird, give me a few
+      alternative layouts": of three mocked layouts, option A was built (recommended; his pick is
+      pending). While a generated audience is reviewed in a step, Discard and Choose saved sit on the
+      left of the panel's pinned action bar, where Back and Done are on other tabs, and Use this
+      audience sits on the right.
     source:
       text: >-
         it would also be cool to get a "host map" mini-view that gets populated with personas as they

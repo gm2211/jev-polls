@@ -58,14 +58,19 @@ test('pipeline member selection replaces map with focused detail and returns wit
   assert.match(api.flowCohortMap(pipeline,stage),/53 synthetic members/);
 });
 
-test('seat map pages shrink until the pane stops scrolling and grow back only while room for a whole line is spare', () => {
+test('seat map pages shrink until the pane stops scrolling and grow while a whole line of room is spare, never past a size seen to overflow', () => {
   const api=harness();
-  assert.equal(api.seatFitLines(10,45,18,true,false),7,'45px of overflow drops three 18px lines');
-  assert.equal(api.seatFitLines(3,500,18,true,false),2,'never fewer than two lines');
-  assert.equal(api.seatFitLines(4,-40,18,true,false),6,'40px of room adds two lines');
-  assert.equal(api.seatFitLines(4,-40,18,false,false),4,'a map on one page has nothing to grow into');
-  assert.equal(api.seatFitLines(4,-40,18,true,true),4,'after shrinking for this pane size it does not grow again, so it cannot oscillate');
-  assert.equal(api.seatFitLines(4,-10,18,true,false),4,'less than a line of room changes nothing');
+  const lines=(...args:any[])=>api.seatFitLines(...args).lines;
+  assert.equal(lines(10,45,18,true),7,'45px of overflow drops three 18px lines');
+  assert.equal(lines(3,500,18,true),2,'never fewer than two lines');
+  assert.equal(lines(4,-40,18,true),6,'40px of room adds two lines');
+  assert.equal(lines(4,-40,18,false),4,'a map on one page has nothing to grow into');
+  assert.equal(lines(4,-10,18,true),4,'less than a line of room changes nothing');
+  assert.equal(lines(4,-90,18,true,{over:6}),5,'never grows back to a size seen to overflow');
+  assert.equal(lines(8,100,18,true,{ok:6}),6,'never shrinks below a size seen to fit');
+  let fit:any={},n=12;const excessAt=(k:number)=>(k-7)*18+(k>5?20:0);
+  for(let pass=0;pass<6;pass++){const next=api.seatFitLines(n,excessAt(n),18,true,fit);fit=next;n=next.lines}
+  assert.equal(n,5,'converges on the most lines that fit even when an extra header makes the first guess overshoot');
   assert.equal(api.seatPageSize('host:x'),240,'a screenful before the pane is measured');
   api.S.seatFits={'host:x':{size:96}};
   assert.equal(api.seatPageSize('host:x'),96);
