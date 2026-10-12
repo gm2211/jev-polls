@@ -167,3 +167,13 @@ test('steps saved with the old Final choice name read as Final answer', () => {
   assert.match(html, /\['Final choice','Final result'\]\.includes\(stage\.label\)\?'Final answer'/);
   assert.match(html, /KIND\[stage\.kind\]\?\?'Step'/);
 });
+
+test('the Saw line lists finished steps a step follows when it has no explicit inputs', () => {
+  const run = fixture();
+  run.pipeline.stages.push({ id: 'follow', kind: 'poll', label: 'Follow-up', dependsOn: ['concept', 'decision'], cohort: 'listeners', questions: {} });
+  run.stages.follow = { ...run.stages.concept!, id: 'follow', label: 'Follow-up', dependsOn: ['concept', 'decision'] };
+  const html = renderReport(run);
+  assert.match(html, /upstream=stage\.inputs\?\[\]:\(stage\.dependsOn\?\?\[\]\)\.filter\(id=>stageResult\(id\)\?\.status==='completed'\)/);
+  assert.match(html, /'Results from '\+upstream\.map\(label\)/);
+});
+

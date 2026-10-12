@@ -386,8 +386,10 @@ ${RUN_GRAPH_CSS}
       const rows=el('dl','audience-facts');const add=(label,value)=>{if(!value)return;const row=el('div');row.append(el('dt','',label),el('dd','',value));rows.append(row);};
       if(a.segments.length>1)add('Segments',shares(a.segments));a.breakdowns.forEach(b=>add(b.label,shares(b.buckets)));
       add('Made',a.origin+(a.sources?', citing '+plural(a.sources,'source'):', no sources cited')+'.');
-      const inputs=Object.values(stage.inputs??{});
-      add('Saw',inputs.length?'Answers from '+inputs.map(input=>(stageDef(input.stage)?nameOf(stageDef(input.stage)):input.stage)+' ('+(SELECT[input.select??'summary']??input.select)+')').join(' and ')+'.':'No earlier answers.');
+      // A step with explicit inputs reads exactly those; without them it reads the results of every finished step it follows.
+      const label=id=>stageDef(id)?nameOf(stageDef(id)):id;
+      const inputs=Object.values(stage.inputs??{}),upstream=stage.inputs?[]:(stage.dependsOn??[]).filter(id=>stageResult(id)?.status==='completed');
+      add('Saw',inputs.length?'Answers from '+inputs.map(input=>label(input.stage)+' ('+(SELECT[input.select??'summary']??input.select)+')').join(' and ')+'.':upstream.length?'Results from '+upstream.map(label).join(' and ')+'.':'No earlier answers.');
       box.append(rows);return box;
     }
     function renderMethod(){
