@@ -87,8 +87,15 @@ test('a finished run is a voting replay and never leaks answers that have not be
 test('detail shows the full answer, the model and the synthetic-profile note', () => {
   const html = view.html(input({ selectedKey: 'poll:ada:1', selected: members[0] }));
   assert.match(html, /<h3>&lt;Ada&gt;<\/h3>/);
-  assert.match(html, /Selected: Alpha &lt;b&gt;/);
-  assert.match(html, /80%/);
+  assert.match(html, /Picked <b>Alpha &lt;b&gt;<\/b>/);
+  assert.match(html, /80\.0%/);
+  assert.match(html, /data-act="live-deselect">Back to ranking/);
+  assert.match(html, /does not return written reasoning/);
+  const profile = view.detailHtml(members[0], { question: questions[0], questions, segmentLabel: 'Board', persona: { background: 'Runs a <shop>', attributes: { currentGames: ['Doom', 'Halo'], hoursPerDay: 1.5 } } });
+  assert.match(profile, /Who they are/);
+  assert.match(profile, /Runs a &lt;shop&gt;/);
+  assert.match(profile, /<dt>Current games<\/dt><dd>Doom, Halo<\/dd>/);
+  assert.match(profile, /<dt>Hours per day<\/dt><dd>1\.5<\/dd>/);
   assert.match(html, /Model: jev-1/);
   assert.match(html, /Synthetic profile; model output is not observed human behavior/);
   assert.match(html, /aria-pressed="true"/);

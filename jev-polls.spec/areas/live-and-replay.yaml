@@ -70,7 +70,11 @@ behaviors:
       mean or yes-probability. Colour by switches Status, Top pick and Confidence. Group by offers
       Segment, Age, every categorical attribute the cohort has (arrays group by their one item, or
       Several) and None. Hovering shows who they are, their segment, status and top pick with its
-      probability; clicking opens the full answer and the synthetic-profile note. The hover tooltip
+      probability; clicking opens the full answer and the synthetic-profile note at the top of the side panel,
+      in place of the leaderboard until Back to ranking: every option's share to one decimal, highest
+      first and in its map colour, the stated confidence, the model, a note that the model returns no
+      written reasoning, and who the persona is (background and attributes as labelled fields).
+      Added 2026-10-12 after Giulio asked to see the full output of a selected vote. The hover tooltip
       belongs to the pointer or to keyboard focus only: it is hidden on click, when the pointer
       leaves the map, on scroll, on Esc, on blur and when the selected member changes, and focus
       that came from a click never brings it back; the detail stays in the side panel. Tiles are
@@ -88,9 +92,10 @@ behaviors:
       far, highlights the leader and animates smoothly, with a brief flash, when ranks change; it
       doubles as the colour legend.
     details: >-
-      Option colours are fourteen per theme, searched to stay apart for a deuteranope (and in
-      normal vision); options from the eighth on also carry a stripe or dot pattern as a second
-      cue. 
+      Option colours are fourteen muted colours per theme (OKLCH chroma at most 0.10, the dark set
+      the same hues 0.1 lighter), searched to stay apart for a deuteranope; options from the eighth
+      on also carry a stripe or dot pattern as a second cue. Muted on 2026-10-12 after Giulio said
+      "colors too saturated".
       The share is the report's own measure (weighted mean of answer probabilities), so the final
       leaderboard equals the report. Runs saved before weights were kept count members equally and
       say so. Score questions show the level distribution and mean; yes/no questions show likelihood

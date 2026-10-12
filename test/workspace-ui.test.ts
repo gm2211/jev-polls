@@ -3105,7 +3105,7 @@ test('voting replay reveals saved members without inference and stops at navigat
   act(null,{dataset:{act:'arena-step'}});
   assert.match(browser.element('app').innerHTML,/1 of 26 members revealed/);
   assert.equal(S.liveMemberKey,'poll:p25:1','finishing order, not saved order, decides who is revealed first');
-  assert.match(browser.element('app').innerHTML,/Selected: saved-25/);
+  assert.match(browser.element('app').innerHTML,/Picked <b>saved-25<\/b>/);
   for(let i=0;i<24;i++)act(null,{dataset:{act:'arena-step'}});
   assert.match(browser.element('app').innerHTML,/25 of 26 members revealed/);
   act(null,{dataset:{act:'arena-play'}});

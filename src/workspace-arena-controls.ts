@@ -69,7 +69,7 @@ function arenaInput(run,withLayout=true){
   const inline=!!liveStudyRun(),back=inline?{backAct:'live-back',backLabel:'Back to study'}:study?{backAct:'run-open-study',backLabel:'Back to study',backId:study.id}:{backAct:'live-close',backLabel:'Back to runs'};
   const news=question?.type==='choice'?arenaNews(run,lvm.commentary(members,question,segmentLabels),live):[];
   const tops=!live&&!replayOn&&question?.type==='choice'?lvm.segmentTops(members,question,segmentLabels):[],results=tops.length||board.evaluated?{summary:lvm.resultSummary(board,tops),segments:tops}:null;
-  return {full:lvFull(),studyTitle:study?studyQuestion(study):runTitle(run),...back,news,results,runId:run.id,status:run.status,message:run.message,reportUrl:run.reportUrl,title:stageMeta?.label||pstage?.label||stageId||'Voting',stageId,stages:(run.stages||[]).map(s=>({id:s.id,label:s.label||s.id,status:s.status||'',kind:s.kind||'',dependsOn:s.dependsOn||[]})),members,groups,layout,segmentLabels,questions,question,colorBy:ui.colorBy,groupBy,groupOptions,zoom:ui.zoom,selectedKey:S.liveMemberKey,selected,selectedHidden:!!(replayOn&&selected&&all.some(m=>lvm.memberKey(m)===S.liveMemberKey&&(m.status==='completed'||m.status==='failed'))&&!revealedKeys(all,cursor).has(S.liveMemberKey)),tabKey:keyed.has(S.liveMemberKey)?S.liveMemberKey:groups[0]?.keys[0]||'',board,stats:{...stats,...arenaRateText(run,stageId,stats,live)},replay:replayOn?{cursor,total,playing:R.playing,speed:R.speed,ordered:all.some(m=>m.order!==undefined)}:null,emptyReason:[stageMeta?.kind?stageMeta.kind+' step · ':'',stageMeta?.status||'No member evaluations',stageMeta?.reason?' · '+stageMeta.reason:''].join('')+' · No member evaluations in this step.'};
+  return {full:lvFull(),studyTitle:study?studyQuestion(study):runTitle(run),...back,news,results,runId:run.id,status:run.status,message:run.message,reportUrl:run.reportUrl,title:stageMeta?.label||pstage?.label||stageId||'Voting',stageId,stages:(run.stages||[]).map(s=>({id:s.id,label:s.label||s.id,status:s.status||'',kind:s.kind||'',dependsOn:s.dependsOn||[]})),members,groups,layout,segmentLabels,questions,question,colorBy:ui.colorBy,groupBy,groupOptions,zoom:ui.zoom,selectedKey:S.liveMemberKey,selected,selectedPersona:selected?lookup(selected):undefined,selectedHidden:!!(replayOn&&selected&&all.some(m=>lvm.memberKey(m)===S.liveMemberKey&&(m.status==='completed'||m.status==='failed'))&&!revealedKeys(all,cursor).has(S.liveMemberKey)),tabKey:keyed.has(S.liveMemberKey)?S.liveMemberKey:groups[0]?.keys[0]||'',board,stats:{...stats,...arenaRateText(run,stageId,stats,live)},replay:replayOn?{cursor,total,playing:R.playing,speed:R.speed,ordered:all.some(m=>m.order!==undefined)}:null,emptyReason:[stageMeta?.kind?stageMeta.kind+' step · ':'',stageMeta?.status||'No member evaluations',stageMeta?.reason?' · '+stageMeta.reason:''].join('')+' · No member evaluations in this step.'};
 }
 function revealedKeys(all,cursor){return new Set(lvm.replayOrder(all).slice(0,Math.floor(cursor)).map(lvm.memberKey))}
 /** Newest first, each line stamped: the clock time this view first saw it while live, or its place in the vote count otherwise. */
@@ -202,7 +202,7 @@ function arenaPlaceRows(board){
     li.dataset.rank=String(slot.rank);
   }
 }
-function arenaDetail(ctx){const member=ctx.selected;A.refs.detail.dataset.has=String(!!member);A.refs.detail.innerHTML=lvv.detailHtml(member,{question:ctx.question,questions:ctx.questions,segmentLabel:member?ctx.segmentLabels[member.segment]||member.segment:'',hidden:ctx.selectedHidden})}
+function arenaDetail(ctx){const member=ctx.selected;A.refs.detail.dataset.has=String(!!member);A.refs.detail.innerHTML=lvv.detailHtml(member,{question:ctx.question,questions:ctx.questions,segmentLabel:member?ctx.segmentLabels[member.segment]||member.segment:'',hidden:ctx.selectedHidden,persona:ctx.selectedPersona})}
 
 // ---- selection, tooltip, keyboard --------------------------------------------------------------------------
 function arenaTabStop(key){if(A.tabKey===key)return;A.byKey.get(A.tabKey)?.setAttribute('tabindex','-1');A.tabKey=key;A.byKey.get(key)?.setAttribute('tabindex','0')}
@@ -245,6 +245,7 @@ function arenaTick(){
   if(R.playing)R.timer=setTimeout(arenaTick,80);
 }
 function arenaAction(action,element){
+  if(action==='live-deselect'){if(A.el)arenaSelect('');else{S.liveMemberKey='';render()}return true}
   if(action==='live-member'){
     if(R.playing)arenaStop();
     if(A.el&&A.byKey.has(element.dataset.key)){arenaSelect(element.dataset.key);return true}
