@@ -213,7 +213,10 @@ const DEFAULT_SYNTHETIC_FIELDS = ['label', 'age', 'background', 'attributes'];
 /** Fills the fields a persona batch leaves to the app. Fields the reply did write are kept and checked as usual. */
 function withPersonaDefaults(persona: unknown, index: number): unknown {
   if (!persona || typeof persona !== 'object' || Array.isArray(persona)) return persona;
-  return { id: `persona-${index + 1}`, weight: 1, sourceIds: [], syntheticFields: DEFAULT_SYNTHETIC_FIELDS, ...persona };
+  const { age } = persona as { age?: unknown };
+  // A real batch on a Mac wrote "34" for an age in four of 48 batches; each cost a whole retry.
+  const numericAge = typeof age === 'string' && /^\s*\d+(\.\d+)?\s*$/.test(age) ? { age: Number(age) } : {};
+  return { id: `persona-${index + 1}`, weight: 1, sourceIds: [], syntheticFields: DEFAULT_SYNTHETIC_FIELDS, ...persona, ...numericAge };
 }
 /**
  * Claude Code and API engines return a persona batch as real JSON under personas. Inside the documentJson string every
@@ -227,11 +230,15 @@ const PERSONA_COLUMNS = new Set(['label', 'segment', 'age', 'background', 'sourc
  * measured on the same 21-person Sonnet batch, 2,634 written tokens against 3,921 for objects. Columns named
  * attributes.<name> (or any name that is not a persona field) become attributes; position is only for counting.
  */
-export function personasFromTable(table: { fields?: unknown; rows?: unknown }): unknown[] | string {
+export function personasFromTable(table: { fields?: unknown; rows?: unknown }, skipBadRows = false): unknown[] | string {
   const { fields, rows } = table;
   if (!Array.isArray(fields) || !fields.every(field => typeof field === 'string' && field.trim()) || !Array.isArray(rows)) return 'the reply is not a persona table with fields and rows';
-  for (const [index, row] of rows.entries()) if (!Array.isArray(row) || row.length !== fields.length) return `row ${index + 1} has ${Array.isArray(row) ? row.length : 'no'} values for ${fields.length} fields`;
-  return (rows as unknown[][]).map(row => {
+  // With skipBadRows, a row with the wrong number of values is left out, so the batch is topped up instead of written again.
+  const fits = (row: unknown) => Array.isArray(row) && row.length === fields.length;
+  const bad = rows.findIndex(row => !fits(row));
+  if (bad >= 0 && !skipBadRows) return `row ${bad + 1} has ${Array.isArray(rows[bad]) ? (rows[bad] as unknown[]).length : 'no'} values for ${fields.length} fields`;
+  const good = rows.filter(fits);
+  return (good as unknown[][]).map(row => {
     const persona: Record<string, unknown> = {}; const attributes: Record<string, unknown> = {};
     (fields as string[]).forEach((raw, column) => {
       const field = raw.trim();
@@ -595,11 +602,27 @@ const cohortMetadataSchema = cohortSchema.omit({ personas: true, generationPromp
  * Checks the setup reply of a cohort written in several batches: the cohort details alone, with no personas or an empty list.
  * Returns the details every persona batch builds on.
  */
+/**
+ * Rounds age bucket bounds to whole years within 18 to 121 (max exclusive), in place. A real setup reply on a Mac gave an
+ * open-ended top age bucket a bound outside that range, failed its check, and cost a 25 s retry every persona waited for.
+ */
+function tidyAgeBuckets(targets: unknown): void {
+  if (!Array.isArray(targets)) return;
+  for (const target of targets) {
+    if (!target || typeof target !== 'object' || (target as { field?: unknown }).field !== 'age' || !Array.isArray((target as { buckets?: unknown }).buckets)) continue;
+    for (const bucket of (target as { buckets: unknown[] }).buckets) {
+      if (!bucket || typeof bucket !== 'object') continue;
+      const bounds = bucket as { min?: unknown; max?: unknown };
+      for (const key of ['min', 'max'] as const) if (typeof bounds[key] === 'number' && Number.isFinite(bounds[key])) bounds[key] = Math.min(121, Math.max(18, Math.round(bounds[key] as number)));
+    }
+  }
+}
 export function checkCohortSetup(documentJson: string, id: string): Record<string, unknown> {
   const raw = parseBatchJson(documentJson);
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new BatchRejected('the reply is not a cohort object', excerptOf(documentJson));
   // Personas written here anyway are dropped: the batches write every persona.
   const { personas: _personas, generationPrompt: _prompt, ...details } = raw as Record<string, unknown>;
+  tidyAgeBuckets(details.distributionTargets);
   const parsed = cohortMetadataSchema.safeParse(details);
   if (!parsed.success) throw new BatchRejected(zodReason(parsed.error), excerptOf(documentJson));
   if (parsed.data.id !== id) throw new BatchRejected(`the cohort id is “${parsed.data.id}”, not “${id}”`, excerptOf(documentJson));
@@ -613,7 +636,7 @@ export function checkCohortSetup(documentJson: string, id: string): Record<strin
  */
 export function checkPersonaBatch(documentJson: string, expected: { id: string; size: number; metadata: Record<string, unknown> }, partial = false): Cohort {
   const raw = parseBatchJson(documentJson);
-  const table = raw && typeof raw === 'object' && !Array.isArray(raw) && 'rows' in raw ? personasFromTable(raw as { fields?: unknown; rows?: unknown }) : undefined;
+  const table = raw && typeof raw === 'object' && !Array.isArray(raw) && 'rows' in raw ? personasFromTable(raw as { fields?: unknown; rows?: unknown }, partial) : undefined;
   if (typeof table === 'string') throw new BatchRejected(table, excerptOf(documentJson));
   let personas = table ?? (Array.isArray(raw) ? raw : raw && typeof raw === 'object' && Array.isArray((raw as { personas?: unknown }).personas) ? (raw as { personas: unknown[] }).personas : undefined);
   if (!personas) throw new BatchRejected('the reply is not a list of personas', excerptOf(documentJson));
@@ -621,11 +644,18 @@ export function checkPersonaBatch(documentJson: string, expected: { id: string; 
   if (personas.length !== expected.size && !(partial && personas.length)) throw new BatchRejected(miscount, excerptOf(documentJson));
   // With partial, extra people are dropped and a short reply's people are checked and handed back for a top-up.
   if (personas.length > expected.size) personas = personas.slice(0, expected.size);
-  const parsed = cohortSchema.safeParse({ ...expected.metadata, id: expected.id, personas: personas.map(withPersonaDefaults) });
+  const parse = (list: unknown[]) => cohortSchema.safeParse({ ...expected.metadata, id: expected.id, personas: list.map(withPersonaDefaults) });
+  let parsed = parse(personas);
+  // With partial, people that fail the persona format are left out and written again in the top-up, instead of the whole batch.
+  if (!parsed.success && partial) {
+    const failing = new Set(parsed.error.issues.map(issue => issue.path[0] === 'personas' && typeof issue.path[1] === 'number' ? issue.path[1] : -1));
+    const valid = personas.filter((_, index) => !failing.has(index));
+    if (!failing.has(-1) && valid.length) { const retried = parse(valid); if (retried.success) { parsed = retried; personas = valid; } }
+  }
   if (!parsed.success) throw new BatchRejected(zodReason(parsed.error), excerptOf(documentJson));
   const candidate = parsed.data as Cohort;
   checkPersonaReferences(candidate, excerptOf(documentJson));
-  if (candidate.personas.length < expected.size) throw new ShortBatch(miscount, candidate.personas, excerptOf(documentJson));
+  if (candidate.personas.length < expected.size) throw new ShortBatch(`it returned ${candidate.personas.length} ${candidate.personas.length === 1 ? 'persona' : 'personas'} where this batch needs exactly ${expected.size}`, candidate.personas, excerptOf(documentJson));
   return candidate;
 }
 /** A persona batch whose people all passed but were too few: they are kept and only the missing ones are requested again. */
@@ -1431,7 +1461,7 @@ export class LocalAgentService {
       const requestData = dataFor(offset, batchSize);
       const cohortGuidance = guidance.replace('documentJson is a string containing the COMPLETE workspace document;', 'documentJson is a string containing the COMPLETE target cohort object;');
       const quotas = 'Obey each distributionAssignments slot in the exact returned persona order. Numeric buckets include min and exclude max; categorical buckets require the exact value. Targets control unweighted synthetic persona counts, never study weights. Do not approximate quotas or invent missing evidence. No unrelated workspace data is provided or needed.';
-      const personasPrompt = (first: number, count: number) => `${personaPromptHead(input.engine)} Write batch ${batchIndex + 1} of ${batches} of the personas of cohort ${request.id}, covering final positions ${first + 1}–${first + count} of ${request.size}. ${nativePersonas(input.engine) ? `Return the personas as a table, and nothing else: no cohort object and no cohort details. fields names the columns once: position, label, segment, age, background, then attributes.<name> for each attribute (and sourceIds only when a persona cites a source). rows holds exactly ${count} arrays, one per persona, each with one value per field in that order, starting with its final position (${first + 1} to ${first + count}); values follow the persona schema.` : `Return documentJson as a JSON array of exactly ${count} persona objects matching the persona schema, and nothing else: no cohort object and no cohort details.`}${kept.length ? ` Your previous reply for this batch had ${kept.length} of its ${batchSize} people, which are kept; write only the remaining ${count}, different from them.` : ''} Write only the fields in the persona schema; the app adds ids, weights and synthetic-field labels. The cohort details (cohortMetadata) are already set and are not yours to change: give each persona one of its segment ids, and add sourceIds only to cite its source ids. Keep every persona an adult and question-independent. Other batches are written at the same time, so make every person in this batch distinct, from each other and from the listed recent examples, while remaining plausible for the same population.${segmentPlan.length ? ' Give this batch exactly the segment mix in segmentMix (segment id: number of personas), which keeps the whole cohort in proportion to the segment weights.' : ''} ${quotas}\n\nPersona schema:\n${JSON.stringify(personaJsonSchema)}\n\nRequest data:\n${JSON.stringify(dataFor(first, count))}`;
+      const personasPrompt = (first: number, count: number) => `${personaPromptHead(input.engine)} Write batch ${batchIndex + 1} of ${batches} of the personas of cohort ${request.id}, covering final positions ${first + 1}–${first + count} of ${request.size}. ${nativePersonas(input.engine) ? `Return the personas as a table, and nothing else: no cohort object and no cohort details. fields names the columns once: position, label, segment, age, background, then attributes.<name> for each attribute (and sourceIds only when a persona cites a source). rows holds exactly ${count} arrays, one per persona, each with one value per field in that order, starting with its final position (${first + 1} to ${first + count}); values follow the persona schema, with age as a number.` : `Return documentJson as a JSON array of exactly ${count} persona objects matching the persona schema, and nothing else: no cohort object and no cohort details.`}${kept.length ? ` Your previous reply for this batch had ${kept.length} of its ${batchSize} people, which are kept; write only the remaining ${count}, different from them.` : ''} Write only the fields in the persona schema; the app adds ids, weights and synthetic-field labels. The cohort details (cohortMetadata) are already set and are not yours to change: give each persona one of its segment ids, and add sourceIds only to cite its source ids. Keep every persona an adult and question-independent. Other batches are written at the same time, so make every person in this batch distinct, from each other and from the listed recent examples, while remaining plausible for the same population.${segmentPlan.length ? ' Give this batch exactly the segment mix in segmentMix (segment id: number of personas), which keeps the whole cohort in proportion to the segment weights.' : ''} ${quotas}\n\nPersona schema:\n${JSON.stringify(personaJsonSchema)}\n\nRequest data:\n${JSON.stringify(dataFor(first, count))}`;
       let prompt = personasOnly
         ? personasPrompt(offset, batchSize)
         : `${cohortGuidance} Prepare one bounded batch for cohort ${request.id}. Return documentJson as one cohort object matching the cohort schema, not a workspace. This is batch ${batchIndex + 1} of ${batches}, covering final positions ${offset + 1}–${offset + batchSize} of ${request.size}; return exactly ${batchSize} new personas. Keep every persona an adult and question-independent. Make this batch distinct from the listed recent examples while remaining plausible for the same population. ${original ? 'Copy originalCohortMetadata exactly, preserving sources, assumptions, segments, weights, weight provenance and distributionTargets.' : 'This batch establishes cohort metadata, sources, assumptions, segments and weights.'} Add only new personas. Include at least one persona for every positive-weight segment in the final complete cohort. ${quotas}\n\nCohort schema:\n${JSON.stringify(jsonSchema('cohort'))}\n\nRequest data:\n${JSON.stringify(requestData)}`;
