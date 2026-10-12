@@ -1,4 +1,5 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { resolveHandOffs } from './hand-off.js';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type {
@@ -246,6 +247,7 @@ async function saveCached(cacheDir: string, key: string, request: EvaluationRequ
 }
 
 export async function runPipeline(pipeline: Pipeline, cohorts: Record<string, Cohort>, options: RunOptions): Promise<RunRecord> {
+  pipeline = resolveHandOffs(pipeline, cohorts).pipeline;
   const order = stageOrder(pipeline.stages);
   validateExecutionGraph(pipeline, order);
   for (const [key, value] of Object.entries(cohorts)) {

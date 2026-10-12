@@ -120,6 +120,11 @@ function sourceStats(pipeline: Pipeline, cohorts: Record<string, Cohort>, stageI
   return { votes: parts.reduce((sum, p) => sum + p.votes, 0), segments: [...new Set(parts.flatMap((p) => p.segments))], repeats: Math.max(1, ...parts.map((p) => p.repeats)) };
 }
 
+/** Answers a step produces when it runs in full: respondents times repeats, summed through combine and decision steps. */
+export function sourceAnswerCount(pipeline: Pipeline, cohorts: Record<string, Cohort>, stageId: string): number {
+  return sourceStats(pipeline, cohorts, stageId).votes;
+}
+
 const LONG_NUMBER = 0.1234567890123456;
 const LONG_ID = 'x'.repeat(36);
 
