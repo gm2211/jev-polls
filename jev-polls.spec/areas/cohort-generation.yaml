@@ -287,6 +287,23 @@ behaviors:
       text: >-
         I would expect this to show up in cohorts at least once generated, and probably as draft as
         soon as I hit "generate"
+  - id: live-seat-map
+    description: >-
+      While an audience of up to 1,000 people is generated, the progress panel shows a Who answers
+      seat map: one seat per persona, grouped and coloured by segment once the audience plan is set.
+      Seats not yet written are placeholders that show their group's state (waiting, getting ready,
+      being written, being checked, being rewritten), and a seat fills in when its group is checked
+      and saved. Selecting a seat inspects it: a checked persona shows its profile; a placeholder says
+      where it is in the queue. Only checked personas are ever shown as profiles.
+    details: >-
+      Added 2026-10-12 as option A (seat chart) of four designs offered in the project thread. Groups
+      are planned as a mix of segments, so a checked persona takes a seat planned for its own segment.
+      Larger audiences show the progress readout without the map.
+    source:
+      text: >-
+        it would also be cool to get a "host map" mini-view that gets populated with personas as they
+        load that I can inspect as they get generated (also with some sort of placeholders for the
+        missing ones and simple animation) - give me a few designs I can choose from
       reference: 2026-10-12 jev-polls project thread, Giulio
   - id: cancel-generation
     description: Cancel generation stops the job and leaves the workspace unchanged.

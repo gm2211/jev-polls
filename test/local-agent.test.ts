@@ -1122,6 +1122,38 @@ test('persona order and IDs follow position even when batches finish out of orde
   personas.forEach((persona, index) => { assert.equal(persona.id, `persona-${String(index + 1).padStart(5, '0')}`); assert.equal(persona.label, `Persona ${index + 1}`); });
 });
 
+test('a generating audience publishes where each persona will sit and serves checked batches as they are accepted', async t => {
+  let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; }); t.after(() => release());
+  const { client } = countingDraft({ hold: batch => batch === 1 ? undefined : gate });
+  const service = new LocalAgentService({ chatgpt: client }); t.after(() => service.close());
+  const job = service.start(batchRequest(60));
+  await waitFor(() => (service.get(job.id)?.progress?.audienceMap?.acceptedBatches.length ?? 0) > 0);
+  const map = service.get(job.id)!.progress!.audienceMap!;
+  assert.deepEqual(map.acceptedBatches, [0]);
+  assert.equal(map.batchSizes.reduce((sum, size) => sum + size, 0), 60);
+  assert.ok(map.segments.length > 0);
+  assert.equal(map.plan?.length, 60, 'every position has a segment before it is written');
+  assert.ok([...map.plan!].every(digit => parseInt(digit, 36) < map.segments.length));
+  const first = service.members(job.id, 0)!;
+  assert.equal(first.length, map.batchSizes[0]);
+  assert.equal(first[0]!.id, 'persona-00001');
+  assert.equal(service.members(job.id, 1), undefined, 'unchecked batches are never served');
+  first[0]!.label = 'changed';
+  assert.notEqual(service.members(job.id, 0)![0]!.label, 'changed', 'callers get copies');
+  release();
+  const done = await terminal(service, job);
+  assert.equal(done.status, 'completed');
+  assert.equal(done.progress?.audienceMap?.acceptedBatches.length, map.batchSizes.length);
+});
+
+test('audiences over the seat map limit publish no seat map', async t => {
+  const { client } = countingDraft();
+  const service = new LocalAgentService({ chatgpt: client }); t.after(() => service.close());
+  const done = await terminal(service, service.start(batchRequest(1001)));
+  assert.equal(done.status, 'completed');
+  assert.equal(done.progress?.audienceMap, undefined);
+});
+
 test('a batch that fails once is retried with the same inputs and the job still succeeds', async t => {
   const prompts: string[] = [];
   const { state, client } = countingDraft({ fail: (batch, attempt) => batch === 3 && attempt === 1 });

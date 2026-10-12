@@ -44,7 +44,14 @@ export interface LocalAgentProgress {
   /** Rough finish time from streaming speed. Present only before two batches have completed; later the batch timings give the estimate. */
   estimate?: { seconds: number; basis: 'streaming'; at: string };
   validation?: { scope: 'batch' | 'final' | 'persona' | 'workspace'; status: 'checking' | 'passed'; checks: string[]; checkedPersonas: number };
+  /** The audience's shape for the live seat map. Personas of accepted batches are read from the job's members route. */
+  audienceMap?: AudienceMap;
 }
+/**
+ * Where every persona of a generating audience will sit. `plan` holds one base-36 segment index per position, present only when
+ * segments are assigned before writing starts; batches cover consecutive positions in `batchSizes` order.
+ */
+export interface AudienceMap { segments: Array<{ id: string; label: string }>; plan?: string; batchSizes: number[]; acceptedBatches: number[] }
 /** A step an audience will be assigned to once it is generated and accepted. */
 export type BatchState = 'connecting' | 'thinking' | 'writing' | 'checking' | 'retrying' | 'waiting' | 'accepted';
 /** Why the AI could not be reached: a transport, rate-limit or overload class error that waiting can clear. */
@@ -164,6 +171,8 @@ export function segmentSequence(segments: { id: string; weight: number }[], size
     return positive[best]!.id;
   });
 }
+/** Audiences up to this size get a live seat map; larger ones keep their progress polls small. */
+export const MAX_MAPPED_AUDIENCE = 1000;
 /** A failed batch is retried this many more times before the whole generation fails. */
 const BATCH_RETRIES = 2;
 /** Waits before the retry of a batch that failed because the AI was rate-limited, overloaded or unreachable, by how many such failures the batch has had. */
@@ -545,7 +554,7 @@ const checkpointSchema = z.object({
 }).passthrough();
 const keptPersonas = (checkpoint: CohortCheckpoint) => Object.values(checkpoint.batches).reduce((sum, personas) => sum + personas.length, 0);
 interface StreamedBatch { personas: number; chars: number; tokens?: number; thinking?: boolean }
-interface Entry { public: LocalAgentJob; work?: Promise<void>; aborts: Set<() => void>; slots: Map<number, ProviderSlot>; streamed: Map<number, StreamedBatch>; cancelled: boolean; settled: boolean; command?: boolean; describeBatches?: () => { batchDetails: BatchDetail[]; inFlightPersonas: number; estimate?: LocalAgentProgress['estimate'] }; disposition?: 'applied' | 'discarded'; checkpoint?: CohortCheckpoint; checkpointWrite?: Promise<void>; warm?: WarmProcess[] }
+interface Entry { public: LocalAgentJob; work?: Promise<void>; aborts: Set<() => void>; slots: Map<number, ProviderSlot>; streamed: Map<number, StreamedBatch>; cancelled: boolean; settled: boolean; command?: boolean; describeBatches?: () => { batchDetails: BatchDetail[]; inFlightPersonas: number; estimate?: LocalAgentProgress['estimate'] }; acceptedBatch?: (batch: number) => Persona[] | undefined; disposition?: 'applied' | 'discarded'; checkpoint?: CohortCheckpoint; checkpointWrite?: Promise<void>; warm?: WarmProcess[] }
 class DraftFailure extends Error {}
 /** The AI call itself failed or returned something unreadable; `reason` names what, `excerpt` is the start of the offending output. */
 class RequestFailure extends DraftFailure { constructor(message: string, readonly reason: string, readonly excerpt = '', readonly cause?: BackoffCause) { super(message); } }
@@ -956,6 +965,8 @@ export class LocalAgentService {
     return structuredClone(job);
   }
 
+  /** Checked personas of one accepted batch of a running or finished audience job, with their final IDs. */
+  members(id: string, batch: number): Persona[] | undefined { const personas = this.jobs.get(id)?.acceptedBatch?.(batch); return personas ? structuredClone(personas) : undefined; }
   get(id: string): LocalAgentJob | undefined { const entry = this.jobs.get(id); return entry ? structuredClone({ ...entry.public, ...(entry.disposition ? { settled: entry.disposition } : {}) }) : undefined; }
   /**
    * Drafting jobs a reloaded or new browser tab can reattach to: every running job for the project,
@@ -1360,8 +1371,17 @@ export class LocalAgentService {
     const originalPlaceholderBytes = original ? Buffer.byteLength(JSON.stringify({ ...original, personas: [] })) : 0;
     const unchangedBytes = Buffer.byteLength(JSON.stringify(baseDocument)) - originalPlaceholderBytes + (original ? 0 : (baseDocument.cohorts.length ? 1 : 0));
     const batchSizeOf = (batchIndex: number) => sizes[batchIndex]!;
+    entry.acceptedBatch = batch => results[batch];
     // Set once the cohort details are known: the segment each position should get, unless a saved target already assigns segments.
     let segmentPlan: string[] = [];
+    const audienceMap = (): AudienceMap => {
+      const segments = metadata ? (metadata.segments as Cohort['segments']).map(({ id, label }) => ({ id, label })) : [];
+      const position = new Map(segments.map((segment, index) => [segment.id, index]));
+      const plan = segmentPlan.length === request.size && segments.length <= 36 && segmentPlan.every(id => position.has(id)) ? segmentPlan.map(id => position.get(id)!.toString(36)).join('') : undefined;
+      const acceptedBatches: number[] = [];
+      for (let index = 0; index < batches; index++) if (results[index]) acceptedBatches.push(index);
+      return { segments, ...(plan ? { plan } : {}), batchSizes: sizes, acceptedBatches };
+    };
     // A continued job starts from the checked personas its previous run kept, by batch, with their final IDs.
     const checkpoint = entry.checkpoint;
     if (checkpoint?.metadata) {
@@ -1549,6 +1569,7 @@ export class LocalAgentService {
             batchDurationsMs: [...(entry.public.progress?.batchDurationsMs ?? []), durationMs].slice(-MAX_BATCH_TIMINGS),
             completedBatchSizes: [...(entry.public.progress?.completedBatchSizes ?? []), batchSize].slice(-MAX_BATCH_TIMINGS),
             latestAccepted: recent.slice(-3).map(({ id, label, age, segment }) => ({ id, label, age, segment })), validation, lastBatchChecks: [...validation.checks],
+            ...(request.size <= MAX_MAPPED_AUDIENCE ? { audienceMap: audienceMap() } : {}),
           };
           if (running.size) publishRunning(done);
           else this.updateProgress(entry, 'validating', `Checked batch ${batchIndex + 1} of ${batches} (${acceptedPersonas}/${request.size} personas)…`, { ...done, activeBatches: [], retries, retry: undefined, batchLimit: batchLimit(), ...describe() });
@@ -1621,6 +1642,7 @@ export class LocalAgentService {
       if (entry.checkpoint && !entry.checkpoint.metadata) { entry.checkpoint.metadata = metadata; entry.checkpoint.explanation = firstExplanation; void this.saveCheckpoint(entry); }
       emptyGeneratedBytes = Buffer.byteLength(JSON.stringify({ ...metadata, generationPrompt: input.prompt, personas: [] }));
       if (!targets.some(target => target.field === 'segment')) segmentPlan = segmentSequence(metadata.segments as Cohort['segments'], request.size);
+      if (request.size <= MAX_MAPPED_AUDIENCE) this.updateProgress(entry, 'generating', entry.public.message, { audienceMap: audienceMap() });
     }
     let failure: { error: unknown } | undefined;
     const worker = async () => {
