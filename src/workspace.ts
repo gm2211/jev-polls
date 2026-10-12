@@ -475,7 +475,7 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
       plans.set(planToken, { pipelineId: input.pipelineId, revision: saved.revision, provider: input.provider, expires: Date.now() + 15 * 60_000 });
       const warnings = [...project.warnings];
       if (input.provider === 'gliner') warnings.push('GLiNER is a local English classifier. Its normalized label scores are not calibrated human response probabilities; persona simulation quality has not been established. Inputs above 512 combined text and question tokens are rejected.');
-      const plan: WorkspacePlan = { projectId: project.projectId, pipelineId: input.pipelineId, provider: input.provider, revision: saved.revision, planToken, model: input.provider === 'gliner' ? GLINER_MODEL : MODEL, maxRequests: project.maxRequests, warnings, stages: project.stages };
+      const plan: WorkspacePlan = { projectId: project.projectId, pipelineId: input.pipelineId, provider: input.provider, revision: saved.revision, planToken, model: input.provider === 'gliner' ? GLINER_MODEL : MODEL, maxRequests: project.maxRequests, ...(project.cost ? { cost: project.cost } : {}), warnings, stages: project.stages };
       send(response, 200, plan); return;
     }
     if (method === 'POST' && pathname === '/api/run') {

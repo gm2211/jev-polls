@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Cohort, Evaluation, EvaluationRequest, Persona, Pipeline, PollInputBinding, PollStage, Provider } from '../src/types.js';
 import { runPipeline } from '../src/engine.js';
-import { estimateRequestTokens, estimateVoteRecordTokens, enforceBudgets, estimateBudgets, estimateTokens, JEV_STATE_AND_QUESTION_LIMIT } from '../src/request-budget.js';
+import { estimateRequestTokens, estimateVoteRecordTokens, enforceBudgets, estimateBudgets, estimateTokens, estimateStageUsage, JEV_STATE_AND_QUESTION_LIMIT, JEV_USD_PER_MILLION_TOKENS } from '../src/request-budget.js';
 import { emptyWorkspaceDocument, workspacePlan } from '../src/workspace-store.js';
 
 function persona(id: string, background = 'Lives in a small town.'): Persona {
@@ -91,6 +91,19 @@ test('workspace plan carries per-step estimates and rejects over-limit steps', (
   const huge = { ...doc, cohorts: [cohort(2, 'long story. '.repeat(8_200))] };
   assert.throws(() => workspacePlan(huge, 'flow'), /Step "First look" is too large for Jev/);
   assert.doesNotThrow(() => workspacePlan(huge, 'flow', 'gliner'));
+});
+
+test('workspace plan estimates the TypeSafe bill from request sizes and respondents', () => {
+  const doc = (count: number) => ({ ...emptyWorkspaceDocument(), cohorts: [cohort(count)], pipelines: [study({ earlier: { stage: 'first', question: 'pick', select: 'summary' } })], projects: [{ id: 'proj', name: 'P', description: '', cohortIds: ['crowd'], pipelineIds: ['flow'] }] });
+  const ten = workspacePlan(doc(10), 'flow'), hundred = workspacePlan(doc(100), 'flow');
+  const first = ten.stages[0]!;
+  assert.deepEqual(first.usage, estimateStageUsage(first.budget!, 10));
+  assert.ok(first.usage!.inputTokens > 10 * first.budget!.meanRequestTokens, 'billed input is above the bytes/3 estimate');
+  const cost = ten.cost!;
+  assert.equal(cost.inputTokens, ten.stages.reduce((sum, stage) => sum + (stage.usage?.inputTokens ?? 0), 0));
+  assert.equal(cost.usd, ((cost.inputTokens + cost.outputTokens) / 1_000_000) * JEV_USD_PER_MILLION_TOKENS);
+  assert.ok(hundred.cost!.usd > 9 * cost.usd && hundred.cost!.usd < 11 * cost.usd, 'cost scales with respondents');
+  assert.equal(workspacePlan(doc(10), 'flow', 'gliner').cost, undefined);
 });
 
 test('the engine refuses to send an over-limit request and fails that respondent', async () => {
