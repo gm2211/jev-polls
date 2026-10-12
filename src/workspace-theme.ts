@@ -71,7 +71,7 @@ body{font-family:var(--body);background:var(--paper)}
 ${TEXT_SELECTION_CSS}
 .topbar{height:56px;padding:0 24px;background:var(--surface);border-bottom:1px solid var(--line)}
 .wordmark{font-family:var(--brand);font-size:var(--text-xl);letter-spacing:-.04em;gap:12px}.wordmark i{font-family:var(--body);font-size:var(--text-sm);letter-spacing:.02em}
-.glyph{width:28px;height:28px;border-radius:var(--radius-control);background:var(--ink);color:var(--paper);font:600 var(--text-xl) var(--brand)}
+.glyph{width:28px;height:28px;background:none}.glyph svg{display:block;width:100%;height:100%}
 .topbar-tools{display:flex;align-items:center;gap:8px;min-width:0}
 .theme-toggle{min-height:var(--button-height);flex-shrink:0;gap:6px;min-width:80px}
 .theme-track{display:flex;align-items:center;width:26px;height:16px;padding:2px;background:var(--muted);border-radius:999px}.theme-track>span{flex:none;width:12px;height:12px;border-radius:50%;background:var(--surface)}

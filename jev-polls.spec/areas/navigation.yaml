@@ -16,6 +16,20 @@ behaviors:
     source:
       text: "fix everything (from the UI audit: three clicks in, Back leaves the site)"
       reference: jev-polls project thread "UI audit in headless browser", Giulio, 2026-10-10
+  - id: browser-tab
+    description: >-
+      The browser tab shows the Jev poll-results icon and a title that leads with the open page
+      (project, study, cohort, persona, Runs, Settings, or Projects) and ends with "Jev", so the
+      useful part survives truncation.
+    details: >-
+      Names longer than 40 characters are clipped at a word with an ellipsis. A leading "• " marks
+      unsaved changes, and a running study adds its percent complete in front. The same mark replaces
+      the "J" square in the wordmark. Saved reports use "<study> · Report · Jev" and the same icon.
+      Proposal (2026-10-12): the icon design and title format were chosen by Claude under the
+      project's standing authorization.
+    source:
+      text: let's find a better icon and way of showing tab
+      reference: jev-polls project thread "Better tab icon and title", Giulio, 2026-10-12
   - id: reload-keeps-view
     description: >-
       Reloading the page reopens the same project and tab, plus the open study and step, cohort and

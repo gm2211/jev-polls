@@ -29,6 +29,8 @@ export interface LocalAgentProgress {
   /** Timings of accepted batches only, including generation and batch checks. */
   batchDurationsMs?: number[]; completedBatchSizes?: number[]; lastBatchChecks?: string[];
   latestAccepted?: Array<Pick<Persona, 'id' | 'label' | 'age' | 'segment'>>;
+  /** What the setup call has decided so far, read from its streamed reply: the audience name, its groups as they are written, and whether it has moved on to its assumptions. */
+  plan?: SetupPlan;
   /** Batch numbers being generated right now, and the most batches the job runs at once. */
   activeBatches?: number[]; maxConcurrentBatches?: number;
   /** Failed batch attempts so far, and the batch currently being tried again. */
@@ -285,6 +287,33 @@ const WARM_PRIORITY = 10;
 interface WarmProcess { child: ChildProcessWithoutNullStreams; directory: string; head: string; args: string[] }
 /** Provider slot of the cohort setup call; batch slots are their indexes. */
 const SETUP_SLOT = -1;
+export interface SetupPlan { name?: string; groups: { label: string; weight?: number }[]; sources: number; stage: 'naming' | 'groups' | 'assumptions' }
+const PLAN_TEXT_LIMIT = 200_000;
+const PLAN_KEY = (key: string) => new RegExp(`\\\\*"${key}\\\\*"\\s*:`);
+const PLAN_VALUES = /\\*"(name|label|weight|title)\\*"\s*:\s*(?:\\*"((?:[^"\\]|\\+[^"\\])*?)\\*"\s*[,}\]]|(-?\d+(?:\.\d+)?)\s*[,}])/g;
+const planText = (value: string) => value.replace(/\\+u([0-9a-fA-F]{4})/g, (_, hex: string) => String.fromCharCode(parseInt(hex, 16))).replace(/\\+(.)/g, '$1').trim().slice(0, 80);
+/**
+ * Reads the audience plan from the partial reply of the setup call, which streams the cohort as an escaped JSON string:
+ * the name, each group's label and weight in the order written, and how many sources it cites. Incomplete values are skipped
+ * until their closing quote arrives. It reports only what the reply already says; the finished reply is still checked in full.
+ */
+export function readSetupPlan(text: string): SetupPlan | undefined {
+  const segments = text.search(PLAN_KEY('segments'));
+  const after = segments < 0 ? -1 : segments + 1;
+  const ends = ['personas', 'assumptions', 'distributionTargets'].map(key => { const at = after < 0 ? -1 : text.slice(after).search(PLAN_KEY(key)); return at < 0 ? -1 : after + at; }).filter(at => at >= 0);
+  const segmentsEnd = ends.length ? Math.min(...ends) : text.length;
+  const plan: SetupPlan = { groups: [], sources: 0, stage: segments < 0 ? 'naming' : ends.length ? 'assumptions' : 'groups' };
+  for (const match of text.matchAll(PLAN_VALUES)) {
+    const [, key, quoted, number] = match; const at = match.index;
+    if (key === 'title') plan.sources++;
+    else if (key === 'name' && plan.name === undefined && (segments < 0 || at < segments) && quoted) plan.name = planText(quoted);
+    else if (segments >= 0 && at > segments && at < segmentsEnd) {
+      if (key === 'label' && quoted && plan.groups.length < 50) plan.groups.push({ label: planText(quoted) });
+      else if (key === 'weight' && number !== undefined) { const group = plan.groups.at(-1); if (group && group.weight === undefined && Number.isFinite(Number(number))) group.weight = Number(number); }
+    }
+  }
+  return plan.name || plan.groups.length || plan.stage !== 'naming' ? plan : undefined;
+}
 interface ProviderProgress { phase: 'starting' | 'generating' | 'receiving'; outputChars: number; outputTokens?: number; streamedPersonas?: number; /** The model is reasoning before it writes; its reasoning is never counted as output. */ thinking?: boolean }
 /** A persona object carries a background key and a persona table row starts with its position number; the CLI envelope escapes quotes, so they may be preceded by backslashes. */
 const PERSONA_KEY = /\\*"background\\*"\s*:|\[\s*\d+\s*,\s*\\*"/g;
@@ -976,7 +1005,7 @@ export class LocalAgentService {
     }
   }
 
-  private recordActivity(entry: Entry, activity: ProviderProgress, outputSource: 'response' | 'cli-stdout', slot = 0): void {
+  private recordActivity(entry: Entry, activity: ProviderProgress, outputSource: 'response' | 'cli-stdout', slot = 0, setupText?: string): void {
     if (entry.cancelled || entry.public.status !== 'running' || entry.public.progress?.phase !== 'generating') return;
     if (!['starting', 'generating', 'receiving'].includes(activity.phase) || !Number.isSafeInteger(activity.outputChars) || activity.outputChars < 0) return;
     const current = entry.slots.get(slot) ?? { chars: 0 };
@@ -985,7 +1014,8 @@ export class LocalAgentService {
     const seen = entry.streamed.get(slot) ?? { personas: 0, chars: 0 };
     const personas = activity.streamedPersonas;
     entry.streamed.set(slot, { personas: Math.max(seen.personas, personas !== undefined && Number.isSafeInteger(personas) && personas >= 0 ? personas : 0), chars: Math.max(seen.chars, activity.outputChars), ...(activity.thinking || seen.thinking ? { thinking: true } : {}), ...(entry.slots.get(slot)?.tokens !== undefined ? { tokens: entry.slots.get(slot)!.tokens } : {}) });
-    this.updateProgress(entry, 'generating', entry.public.message, { activity: activity.phase, lastActivityAt: new Date().toISOString(), outputSource, ...this.providerTotals(entry), ...this.streamingSummary(entry) });
+    const plan = setupText ? readSetupPlan(setupText) : undefined;
+    this.updateProgress(entry, 'generating', entry.public.message, { activity: activity.phase, lastActivityAt: new Date().toISOString(), outputSource, ...this.providerTotals(entry), ...this.streamingSummary(entry), ...(plan ? { plan } : {}) });
   }
 
   /** In-flight persona total from partial output, refreshed whenever output arrives. Batch details are added by the cohort loop. */
@@ -1011,7 +1041,7 @@ export class LocalAgentService {
         catch { resolve({ code: null, stdout: '', stderr: '', missing: true, limited: false }); return; }
       }
       this.children.add(child);
-      const stdout: Buffer[] = []; const stdoutDecoder = new StringDecoder('utf8'); const stderr: Buffer[] = []; let bytes = 0; let outputChars = 0; let streamedPersonas = 0; let tail = ''; let lineBuffer = ''; let limited = false; let timedOut = false; let done = false; let killTimer: NodeJS.Timeout | undefined;
+      const stdout: Buffer[] = []; const stdoutDecoder = new StringDecoder('utf8'); const stderr: Buffer[] = []; let bytes = 0; let outputChars = 0; let streamedPersonas = 0; let tail = ''; let setupText = ''; let lineBuffer = ''; let limited = false; let timedOut = false; let done = false; let killTimer: NodeJS.Timeout | undefined;
       const stop = () => { if (done) return; limited = true; terminate(child); killTimer ??= setTimeout(() => { terminate(child, 'SIGKILL'); finish(null, false); }, 1000); killTimer.unref(); };
       const timer = setTimeout(() => { timedOut = true; stop(); }, timeoutMs); timer.unref();
       const finish = (code: number | null, missing: boolean) => {
@@ -1031,7 +1061,8 @@ export class LocalAgentService {
           for (const line of lines) { const delta = claudeStreamDelta(line); text += delta.text; if (delta.tokens !== undefined) tokens = delta.tokens; if (delta.thinking) thinking = true; }
         }
         outputChars += text.length; const window = tail + text; for (const match of window.matchAll(PERSONA_KEY)) if (match.index + match[0].length > tail.length) streamedPersonas++; tail = window.slice(-PERSONA_KEY_TAIL);
-        this.recordActivity(entry, { phase: 'receiving', outputChars, streamedPersonas, ...(tokens !== undefined ? { outputTokens: tokens } : {}), ...(thinking ? { thinking } : {}) }, 'cli-stdout', slot);
+        if (slot === SETUP_SLOT && setupText.length < PLAN_TEXT_LIMIT) setupText += text;
+        this.recordActivity(entry, { phase: 'receiving', outputChars, streamedPersonas, ...(tokens !== undefined ? { outputTokens: tokens } : {}), ...(thinking ? { thinking } : {}) }, 'cli-stdout', slot, slot === SETUP_SLOT && text ? setupText : undefined);
       } });
       child.stderr.on('data', (data: Buffer) => { bytes += data.length; if (bytes > maxBytes) { stop(); return; } if (captureStderr || process.env.JEV_AGENT_DEBUG_DIR) stderr.push(Buffer.from(data)); });
       child.once('error', error => finish(null, (error as NodeJS.ErrnoException).code === 'ENOENT'));

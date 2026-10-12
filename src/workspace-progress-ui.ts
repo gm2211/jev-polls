@@ -57,6 +57,10 @@ function draftStatus(job){
   const active=Array.isArray(p.activeBatches)?p.activeBatches.length:0;
   if(!p.completedBatches&&!active&&!details.length){
     if(/waiting/i.test(job.message||''))return 'Planning who is in the audience: paused briefly, it picks up again on its own.';
+    const plan=p.plan,groups=Array.isArray(plan?.groups)?plan.groups.length:0,named=plan?.name?' “'+plan.name+'”':'';
+    if(plan?.stage==='assumptions')return 'Planned'+named+': '+plural(groups,'group')+'. Personas start arriving next.';
+    if(groups)return 'Planning'+named+': '+groups+(groups===1?' group':' groups')+' so far. Personas start arriving after this.';
+    if(named)return 'Planning'+named+': choosing the groups in it.';
     return p.activity==='starting'&&!p.outputChars?'Waiting for '+provider+' to start planning the audience.':'Planning who is in the audience. Personas start arriving after this.';
   }
   const written=(p.completedPersonas||0)+(p.inFlightPersonas||0),states=draftGroupStates(p);
@@ -69,10 +73,24 @@ function draftGroupStates(p){
   for(const d of Array.isArray(p.batchDetails)?p.batchDetails:[])if(d.state==='connecting'||d.state==='retrying')counts.connecting++;else if(d.state==='thinking')counts.thinking++;else if(d.state==='writing')counts.writing++;
   return counts;
 }
+/* The groups the plan has named so far, with each one's share once every weight is known. */
+function draftPlanGroups(plan){
+  const groups=Array.isArray(plan?.groups)?plan.groups.filter(g=>g&&typeof g.label==='string'):[];if(!groups.length)return '';
+  const total=plan.stage==='assumptions'&&groups.every(g=>Number.isFinite(g.weight)&&g.weight>=0)?groups.reduce((sum,g)=>sum+g.weight,0):0;
+  const shown=groups.slice(0,5).map(g=>g.label+(total>0?' '+Math.round(g.weight/total*100)+'%':''));
+  return shown.join(', ')+(groups.length>5?' and '+(groups.length-5)+' more':'');
+}
+/* The newest checked persona, so the readout shows who is arriving. */
+function draftLatest(p){
+  const latest=Array.isArray(p.latestAccepted)?p.latestAccepted.at(-1):null;if(!latest||typeof latest.label!=='string')return '';
+  const label=latest.label.length>60?latest.label.slice(0,59)+'…':latest.label;
+  return 'latest: '+label+(Number.isFinite(latest.age)?', '+latest.age:'');
+}
 function draftDetail(job){
   const p=job.progress||{},checked=p.completedPersonas;
   if(!Number.isFinite(checked)||!job.cohort)return '';
-  if(checked)return checked.toLocaleString('en-US')+' checked and saved';
+  if(checked){const latest=draftLatest(p);return checked.toLocaleString('en-US')+' checked and saved'+(latest?' · '+latest:'')}
+  if(!p.completedBatches&&!(Array.isArray(p.activeBatches)&&p.activeBatches.length)&&!(Array.isArray(p.batchDetails)&&p.batchDetails.length)){const groups=draftPlanGroups(p.plan);if(groups)return groups}
   const states=draftGroupStates(p),parts=[];
   if(states.writing)parts.push(states.writing+' writing');
   if(states.thinking)parts.push(states.thinking+' thinking');

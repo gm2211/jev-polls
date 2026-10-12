@@ -42,6 +42,7 @@ function studyQuestionList(p){
 function setupQuestion(s){const entries=Object.entries(s.questions||{});return entries.find(([key])=>key===S.sections['setup-question-'+s.id])||entries[0]}
 /** The "Create the audience" form: describe who answers and how many, then Generate. Progress and review follow in this same panel. Compact so the whole form, Generate included, fits the step panel without scrolling: the brief's hint is its placeholder, and the count sits beside the drafting AI. */
 function setupAudienceForm(p,s,pending,saved){
+  restoreAudienceDraft(p,s);
   const running=!!S.localStart||S.localJob?.status==='running';
   const prompt=area('Who are they?','cohortPrompt',S.cohortPrompt,'','4','audience').replace('<textarea ','<textarea placeholder="Their context, habits and how they differ. A few sentences are enough." ');
   const size=field('How many people?','cohortSize',S.cohortSize,'number','Up to '+COHORT_MAX.toLocaleString('en-US')+', in batches.','min="1" max="'+COHORT_MAX+'" step="1"','audience');
