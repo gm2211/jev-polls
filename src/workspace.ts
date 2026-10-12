@@ -372,8 +372,9 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
     if (method === 'GET' && pathname === '/api/agent/jobs') {
       const projectId = safeId.optional().parse(new URL(request.url ?? '/', origin).searchParams.get('projectId') ?? undefined);
       const saved = await store.read();
-      // A completed proposal tied to an older revision can no longer be applied, so it is not offered again.
-      const jobs = (localAgents.list?.(projectId) ?? []).filter(job => job.status !== 'completed' || job.revision === saved.revision);
+      // A completed whole-workspace proposal tied to an older revision can no longer be applied, so it is not offered again.
+      // A generated audience adds only its own cohort, so later saves never make it unusable and it stays on offer until used or discarded.
+      const jobs = (localAgents.list?.(projectId) ?? []).filter(job => job.status !== 'completed' || !!job.cohort || job.revision === saved.revision);
       send(response, 200, { jobs }); return;
     }
     const agentRoute = /^\/api\/agent\/jobs\/([0-9a-f-]{36})(?:\/(cancel|apply|discard|members))?$/.exec(pathname);
