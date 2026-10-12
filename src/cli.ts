@@ -81,7 +81,7 @@ function plan(saved: Pipeline, cohorts: Record<string, Cohort>) {
 }
 program.command('plan').argument('<pipeline>').description('Inspect graph and maximum request count without credentials or API calls').action(async file => { const { pipeline, cohorts } = await loadProject(file); output(plan(pipeline, cohorts)); });
 
-async function openWorkspace(file: string | undefined, opts: { directory?: string; port?: number }) {
+async function openWorkspace(file: string | undefined, opts: { directory?: string; port?: number; demo?: boolean }) {
   if (opts.port && opts.port > 65535) throw new Error('Port must be at most 65535');
   const directory = resolve(opts.directory ?? '.jev-polls/workspace');
   if (file) {
@@ -127,15 +127,15 @@ async function openWorkspace(file: string | undefined, opts: { directory?: strin
       await store.save(draft, saved.revision);
     }
   }
-  const workspace = await startWorkspaceServer({ directory, port: opts.port, emit: event => process.stderr.write(JSON.stringify(event) + '\n') });
+  const workspace = await startWorkspaceServer({ directory, port: opts.port, demo: !!opts.demo || process.env.JEV_POLLS_DEMO === '1', emit: event => process.stderr.write(JSON.stringify(event) + '\n') });
   const shutdown = () => { void workspace.close().then(() => { process.exitCode = 0; }); };
   process.once('SIGINT', shutdown); process.once('SIGTERM', shutdown);
   output({ status: 'workspace-ready', url: workspace.url, directory, note: 'Create or open a project, add its cohorts and pipeline, then review before choosing Run study. Opening the workspace or connecting an account never runs a study.' });
 }
-program.command('workspace').option('--directory <directory>', 'Saved workspace directory').option('--port <port>', 'Local workspace port', integer)
+program.command('workspace').option('--directory <directory>', 'Saved workspace directory').option('--port <port>', 'Local workspace port', integer).option('--demo', 'Demo mode: Run study uses local mock answers; nothing is sent to TypeSafe or billed')
   .description('Open the cohort builder, visual pipeline editor, and run history').action(opts => openWorkspace(undefined, opts));
 program.command('connect').argument('[pipeline]', 'Optional existing pipeline to import for editing; never runs automatically')
-  .option('--directory <directory>', 'Saved workspace directory').option('--port <port>', 'Local workspace port', integer)
+  .option('--directory <directory>', 'Saved workspace directory').option('--port <port>', 'Local workspace port', integer).option('--demo', 'Demo mode: Run study uses local mock answers; nothing is sent to TypeSafe or billed')
   .description('Connect TypeSafe and set up studies in the browser workspace').action(openWorkspace);
 
 program.command('mcp').option('--workspace-url <url>', 'Running loopback workspace URL', 'http://127.0.0.1:4181/')

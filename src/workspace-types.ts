@@ -31,6 +31,8 @@ export interface WorkspacePlan {
   newRequests: number;
   /** reused: every request is saved, so the step's results come back unchanged; partial: some are; run: none are, or an earlier step changes what it reads; skipped: its condition is false. */
   stages: { id: string; label: string; kind: string; dependsOn: string[]; cohort?: string; profiles?: number; repeats?: number; requests: number; reused: number; reuse: 'reused' | 'partial' | 'run' | 'skipped'; budget?: StageBudget; batching?: BatchPlan; usage?: UsageEstimate; handOffs?: HandOff[] }[];
+  /** The workspace runs in demo mode: mock answers, nothing sent or billed. */
+  demo?: boolean;
   /** Estimated TypeSafe bill if every request is new; absent for GLiNER. */
   cost?: CostEstimate;
   /** Estimated TypeSafe bill for the requests not answered by saved results. */

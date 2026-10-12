@@ -28,7 +28,17 @@ behaviors:
   - id: provider-required
     description: Without a ready evaluation provider, Run study is disabled and Set up evaluation provider is offered.
   - id: no-mock-fallback
-    description: Normal runs use the selected live provider with no silent mock fallback; mock runs never enter workspace history.
+    description: >-
+      Normal runs use the selected live provider with no silent mock fallback; mock runs never enter
+      workspace history, except in demo mode.
+  - id: demo-mode
+    description: >-
+      A workspace started with --demo (or JEV_POLLS_DEMO=1) runs every study on locally generated mock
+      answers without a TypeSafe account; Before you run says demo mode, shows no cost, and warns that
+      nothing is sent or billed and the results mean nothing.
+    source:
+      text: I thought jev was supposed to be super cheap - how come I already used over 1 dollar
+      reference: 2026-10-12 jev-polls project thread, Giulio (demo recordings had run real studies)
   - id: cancel-run
     description: >-
       Cancel run stops new evaluations, lets in-flight ones finish, and saves the run as

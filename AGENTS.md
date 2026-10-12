@@ -20,6 +20,8 @@ before preparing cohorts or studies. Preserve sourced facts versus synthetic
 assumptions, profile-independent question preparation, and explicit weighting.
 Never present mock distributions or synthetic profiles as observed human data.
 
+When recording or rehearsing demos, or driving the browser to click Run study for screenshots, start the workspace with `--demo` (or `JEV_POLLS_DEMO=1`) so runs use mock answers and never bill the user's TypeSafe key.
+
 Run `npm run verify` and `npm run demo` after changes. For report changes, inspect
 the rendered report in Codex's built-in browser on desktop and narrow viewports.
 Keep machine output as JSON on stdout and progress as JSON lines on stderr.

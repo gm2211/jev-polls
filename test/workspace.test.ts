@@ -538,3 +538,33 @@ test('a study keeps its seed across reviews, so a second run reuses every saved 
   await run({ seed: 'fresh' });
   assert.equal((await (await post('/api/plan', { pipelineId: 'study' })).json()).seed, 'fresh');
 });
+
+test('demo mode runs on mock answers with no TypeSafe account, cost or billing', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'jev-demo-workspace-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const server = await startWorkspaceServer({ directory, demo: true,
+    getAuthStatus: async () => ({ configured: false, source: 'none' }),
+    providerFactory: () => { throw Error('Demo mode must never create a TypeSafe provider'); },
+  });
+  t.after(() => server.close());
+  const html = await (await fetch(server.url)).text();
+  const csrf = html.match(/<meta name="jev-csrf" content="([a-f0-9]+)"/)![1];
+  const post = (path: string, value: unknown) => fetch(new URL(path, server.url), { method: 'POST', headers: { origin: new URL(server.url).origin, 'content-type': 'application/json', 'x-jev-csrf': csrf }, body: JSON.stringify(value) });
+  assert.equal((await post('/api/workspace', { document, revision: 0 })).status, 200);
+  assert.equal((await (await fetch(new URL('/api/workspace', server.url))).json()).demo, true);
+  const plan = await (await post('/api/plan', { pipelineId: 'study' })).json();
+  assert.equal(plan.demo, true); assert.equal(plan.cost, undefined);
+  assert.match(plan.warnings[0], /^Demo mode: .*Nothing is sent to TypeSafe or billed/);
+  const accepted = await post('/api/run', { pipelineId: 'study', revision: plan.revision, planToken: plan.planToken, seed: 'test', concurrency: 1, maxRequests: 1 });
+  assert.equal(accepted.status, 202);
+  let job = await accepted.json() as WorkspaceRun;
+  for (let i = 0; i < 100 && job.status === 'running'; i++) {
+    await new Promise(resolve => setTimeout(resolve, 10));
+    job = await (await fetch(new URL(`/api/run/${job.id}`, server.url))).json() as WorkspaceRun;
+  }
+  assert.equal(job.status, 'completed');
+  assert.deepEqual(job.usage, { inputTokens: 0, outputTokens: 0, requests: 1, cacheHits: 0 });
+  const record = JSON.parse(await readFile(join(directory, 'runs', job.id, 'run.json'), 'utf8'));
+  assert.equal(record.provider, 'mock');
+  assert.equal((await fetch(new URL(`/reports/${job.id}`, server.url))).status, 200);
+});
