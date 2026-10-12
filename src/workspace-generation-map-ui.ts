@@ -82,7 +82,7 @@ function liveMapDetail(v){
   const segment=v.segments[seat.segment],chip=segment?'<span class="live-map-chip" style="'+liveSeatStyle(seat)+'">'+esc(segment.label)+'</span>':'',group=seat.batch>=0?'group '+(seat.batch+1):'';
   if(seat.member){
     const person=seat.member,attributes=Object.entries(person.attributes||{}).slice(0,4);
-    return '<h4>'+esc(person.label)+' '+chip+'</h4><p class="subtle">Synthetic profile · Age '+esc(person.age)+' · Checked and saved</p><p>'+esc(person.background||'')+'</p>'+(attributes.length?'<dl>'+attributes.map(([key,value])=>'<dt>'+esc(key)+'</dt><dd>'+esc(typeof value==='string'?value:JSON.stringify(value))+'</dd>').join('')+'</dl>':'');
+    return '<h4>'+esc(person.label)+' '+chip+'</h4><p class="subtle">Synthetic profile · Age '+esc(person.age)+' · Checked and saved</p><p>'+esc(person.background||'')+'</p>'+(attributes.length?'<dl>'+attributes.map(([key,value])=>'<dt>'+esc(personaAttrs.label(key))+'</dt><dd'+(personaAttrs.wide(value)?' class="attr-wide"':'')+'>'+personaAttrs.html(value,key)+'</dd>').join('')+'</dl>':'');
   }
   const d=seat.detail,message=seat.state==='done'?'Checked and saved. Loading the profile…'
     :seat.state==='empty'?(group?'Waiting. Its '+group+' has not started yet.':'Waiting while the audience is planned.')

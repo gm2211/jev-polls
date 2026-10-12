@@ -4,6 +4,7 @@ import { TEXT_SELECTION_CSS } from './text-selection.js';
 import { FAVICON_LINKS } from './workspace-icon.js';
 import { PALETTE_DARK, PALETTE_LIGHT } from './workspace-live-ui.js';
 import { WORKSPACE_FONT_CSS, WORKSPACE_PALETTES, paletteCSS } from './workspace-theme.js';
+import { ATTRIBUTE_FORMAT_CSS, createAttributeFormat } from './persona-attributes.js';
 
 const escapeHtml = (value: unknown): string => String(value ?? '')
   .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')
@@ -104,8 +105,7 @@ export function renderReport(run: RunRecord, options: { workspace?: boolean; pro
     .seats{display:grid;grid-template-columns:repeat(auto-fill,12px);gap:3px}.seat{width:12px;height:12px;padding:0;border:0;border-radius:3px;background:var(--hover);cursor:pointer}.seat[aria-pressed=true]{outline:2px solid var(--ink);outline-offset:1px}
     .person{background:var(--raised);border-radius:10px;padding:18px;display:grid;gap:14px;min-width:0}.person h3{font-size:var(--text-lg)}.person-sub{color:var(--muted);font-size:var(--text-sm)}
     .their{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:12px;display:grid;gap:8px}.their .bar{grid-template-columns:minmax(0,120px) minmax(0,1fr) 40px}
-    .facts{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px 16px}.fact{display:grid;gap:2px;min-width:0}.fact dt{font-size:var(--text-xs);color:var(--muted);text-transform:uppercase;letter-spacing:.06em}.fact dd{margin:0;overflow-wrap:anywhere}
-    .chips{display:flex;flex-wrap:wrap;gap:4px}.chip{font-size:var(--text-sm);background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:1px 8px}
+    .facts{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px 16px}.fact{display:grid;gap:2px;min-width:0;align-content:start}.fact dt{font-size:var(--text-xs);color:var(--muted);text-transform:uppercase;letter-spacing:.06em}.fact dd{margin:0;overflow-wrap:anywhere}.fact.wide{grid-column:1/-1}
     .picker{display:flex;align-items:center;gap:8px;font-size:var(--text-sm)}.picker select{padding:5px 8px;border:1px solid var(--control-line);border-radius:6px;background:var(--field)}
     .steps{display:grid;list-style:none;margin:0;padding:0}.steps li{display:grid;grid-template-columns:28px minmax(0,1fr);gap:12px;padding:8px 0;position:relative}.steps li::before{content:"";position:absolute;left:13px;top:36px;bottom:-8px;width:2px;background:var(--line)}.steps li:last-child::before{display:none}
     .step-n{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font-size:var(--text-sm);font-weight:600;background:var(--blue-soft);color:var(--blue)}.steps .skipped .step-n{background:var(--surface);border:1px dashed var(--control-line);color:var(--muted)}.steps .failed .step-n{background:var(--surface);border:1px solid var(--red);color:var(--red)}
@@ -121,6 +121,7 @@ export function renderReport(run: RunRecord, options: { workspace?: boolean; pro
     @media(max-width:860px){.answer,.people{grid-template-columns:1fr}}
     @media(max-width:640px){.shell{padding:0 16px 44px}.card{padding:16px}.intro h1{font-size:var(--text-xl)}.bar{grid-template-columns:minmax(0,110px) minmax(0,1fr) 42px}}
     @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important}}
+      ${ATTRIBUTE_FORMAT_CSS}
   </style>
 </head>
 <body>
@@ -313,12 +314,7 @@ export function renderReport(run: RunRecord, options: { workspace?: boolean; pro
       if(answer.type==='score'){const levels=question?.type==='score'?question.criteria.length-1:3;return 'color-mix(in srgb, var(--blue) '+Math.round(Math.min(1,answer.score/(levels||1))*85+15)+'%, var(--hover))';}
       return answer.noul>=0.5?'var(--blue)':'var(--control-line)';
     }
-    const humanKey=key=>key.replace(/([a-z])([A-Z])/g,(_,a,b)=>a+' '+b.toLowerCase()).replace(/[_-]+/g,' ').replace(/^./,c=>c.toUpperCase());
-    function attributeValue(value){
-      if(Array.isArray(value)){const chips=el('div','chips');value.forEach(item=>chips.append(el('span','chip',item!==null&&typeof item==='object'?JSON.stringify(item):String(item))));return chips;}
-      if(value!==null&&typeof value==='object')return el('span','',Object.entries(value).map(([k,v])=>humanKey(k)+': '+(v!==null&&typeof v==='object'?JSON.stringify(v):String(v))).join(' · '));
-      return el('span','',value===null?'—':String(value));
-    }
+    const attrs=(()=>{const __name=value=>value;return (${createAttributeFormat.toString()})()})();
     function renderPerson(stage,persona,host){
       host.replaceChildren();const cohort=cohortFor(stage);
       host.append(el('h3','',persona.label));const sub=el('div','person-sub',segmentLabel(persona.segment,stage)+' · '+persona.age+' years');if(persona.weight!==1)sub.textContent+=' · counts '+fmt(persona.weight,2)+'× in its segment';host.append(sub);
@@ -333,7 +329,7 @@ export function renderReport(run: RunRecord, options: { workspace?: boolean; pro
         host.append(box);
       });
       if(!votes.length)host.append(el('p','hint','No answer is recorded for this profile.'));
-      const entries=Object.entries(persona.attributes??{});if(entries.length){const dl=el('dl','facts');entries.forEach(([key,value])=>{const item=el('div','fact');const dd=el('dd');dd.append(attributeValue(value));item.append(el('dt','',humanKey(key)),dd);dl.append(item);});host.append(dl);}
+      const entries=Object.entries(persona.attributes??{});if(entries.length){const dl=el('dl','facts');entries.forEach(([key,value])=>{const item=el('div',attrs.wide(value)?'fact wide':'fact');const dd=el('dd');dd.innerHTML=attrs.html(value,key);item.append(el('dt','',attrs.label(key)),dd);dl.append(item);});host.append(dl);}
       const prov=el('details');prov.append(el('summary','','Where this profile comes from'));
       const lines=el('div','details');lines.append(el('span','hint',persona.syntheticFields.length?'Synthetic fields: '+persona.syntheticFields.join(', '):'No fields are marked synthetic.'));
       votes.forEach(v=>lines.append(el('span','hint','Answer '+v.repeat+' · '+v.model+' · '+(v.cacheHit?'reused from cache':'requested'))));

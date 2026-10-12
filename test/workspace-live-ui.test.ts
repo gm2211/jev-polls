@@ -3,10 +3,11 @@ import assert from 'node:assert/strict';
 import { runInNewContext } from 'node:vm';
 import { createArenaModel } from '../src/workspace-arena-model.js';
 import { ARENA_CONTROLS_CLIENT } from '../src/workspace-arena-controls.js';
+import { createAttributeFormat } from '../src/persona-attributes.js';
 import { createLiveVotingView, WORKSPACE_LIVE_UI_CLIENT, WORKSPACE_LIVE_UI_CSS } from '../src/workspace-live-ui.js';
 
 const model = createArenaModel();
-const view = createLiveVotingView(model);
+const view = createLiveVotingView(model, createAttributeFormat());
 type Member = Parameters<typeof model.tileVisual>[0];
 
 const questions = model.describeQuestions({ pick: { type: 'choice', label: 'Which name?', criteria: { a: { label: 'Alpha <b>', description: '' }, b: { label: 'Beta', description: '' } } } });
