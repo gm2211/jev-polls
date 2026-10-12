@@ -3714,6 +3714,14 @@ test('drafting progress separates accepted from being written and describes each
   assert.match(html, /Writing personas, 5 groups at a time/);
   const settingUp = draftProgress({ id: 'j', engine: 'claude', status: 'running', startedAt: new Date().toISOString(), cohort: { id: 'c', size: 1000 }, progress: { phase: 'generating', totalBatches: 48, completedBatches: 0, completedPersonas: 0, totalPersonas: 1000, activeBatches: [], maxConcurrentBatches: 16 } });
   assert.match(settingUp, /Planning who is in the audience\. Personas start arriving after this\./);
+  const planning = (plan: object) => draftProgress({ id: 'j', engine: 'claude', status: 'running', cohort: { id: 'c', size: 1000 }, progress: { phase: 'generating', totalBatches: 48, completedBatches: 0, completedPersonas: 0, totalPersonas: 1000, activeBatches: [], plan } });
+  assert.match(planning({ name: 'Night gamers', groups: [], sources: 0, stage: 'naming' }), /Planning “Night gamers”: choosing the groups in it\./);
+  const partway = planning({ name: 'Night gamers', groups: [{ label: 'Students', weight: 30 }, { label: 'Shift workers' }], sources: 0, stage: 'groups' });
+  assert.match(partway, /Planning “Night gamers”: 2 groups so far\./); assert.match(partway, /Students, Shift workers/); assert.doesNotMatch(partway.replace(/<[^>]*>/g, ' '), /%/, 'no shares until every weight is known');
+  const planned = planning({ name: 'Night gamers', groups: [{ label: 'Students', weight: 1 }, { label: 'Shift workers', weight: 3 }, ...['A', 'B', 'C', 'D'].map(label => ({ label, weight: 0 }))], sources: 0, stage: 'assumptions' });
+  assert.match(planned, /Planned “Night gamers”: 6 groups\. Personas start arriving next\./);
+  assert.match(planned, /Students 25%, Shift workers 75%, A 0%, B 0%, C 0% and 1 more/);
+  assert.match(draftProgress({ id: 'j', engine: 'chatgpt', status: 'running', cohort: { id: 'c', size: 1000 }, progress: { ...progress, latestAccepted: [{ id: 'p1', label: 'Night-shift nurse who plays co-op shooters', age: 41, segment: 'a' }] } }), /160 checked and saved · latest: Night-shift nurse who plays co-op shooters, 41/);
   assert.match(draftProgress({ id: 'j', engine: 'claude', status: 'running', message: 'Setting up the audience: waiting 20 s after a rate limit', cohort: { id: 'c', size: 1000 }, progress: { phase: 'generating', totalBatches: 48, completedBatches: 0, completedPersonas: 0, totalPersonas: 1000, activeBatches: [] } }), /paused briefly/);
   assert.doesNotMatch(html.replace(/<[^>]*>/g,' '), /batch|segments|weights|assumptions|tokens|characters|partial output/, 'no internal jargon');
   assert.match(draftProgress({ id: 'j', engine: 'chatgpt', status: 'running', startedAt: new Date().toISOString(), cohort: { id: 'c', size: 1000 }, progress: { ...progress, inFlightPersonas: 0, batchDetails: undefined } }), /<strong>160<\/strong>/);
