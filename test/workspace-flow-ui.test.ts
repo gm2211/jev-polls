@@ -42,7 +42,7 @@ async function flowHarness() {
   };
   const html = renderWorkspace('flow-test', 'token');
   const script = html.match(/<script nonce="flow-test">([\s\S]*?)<\/script>/)![1]!;
-  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.flowTest={S,flowAction,flowCreateMenu,flowKindMatches,flowConnect,flowDisconnect,flowInputs,flowNode,flowReadiness,flowConnections,flowCohortMap,flowTodo,flowRoundTabs,flowNode,flowInspector,flowCanvas,flowWorkspace,flowReads,flowRunOrder,flowListMode,flowTipShow,flowNodeInputs,flowWireEnd,setupAction,stageForm,resultSetup};})();');
+  const exposed = script.replace(/\}\)\(\);$/, 'globalThis.flowTest={S,flowAction,flowCreateMenu,flowKindMatches,flowConnect,flowDisconnect,flowInputs,flowNode,flowReadiness,flowConnections,flowCohortMap,flowTodo,flowRoundTabs,flowNode,flowInspector,flowCanvas,flowWorkspace,flowReads,flowRunOrder,flowListMode,flowTipShow,flowNodeInputs,flowWireEnd,setupAction,stageForm,resultSetup,flowNewStage,removeStep,stepReaders,requestStepDeletion,stepDeletionAction,undoStepDeletion};})();');
   new Script(exposed).runInNewContext(context);
   await new Promise<void>(resolve => setImmediate(resolve));
   const client = context.flowTest;
@@ -639,4 +639,73 @@ test('a Final answer switches between letting Jev decide and taking the top opti
   assert.deepEqual(plain(added.questions.choice.criteria), { a: 'A', b: 'B' });
   flowAction('flow-disconnect', { dataset: { id: added.id, key: 'answer_1' } });
   assert.match(flowInspector(pipeline, added), /data-mode="top" aria-pressed="false" disabled/, 'top option needs a connected Choice');
+});
+
+test('deleting a step removes every reference to it and leaves later steps in place', async () => {
+  const { pipeline, source, other, target, removeStep, stepReaders } = await flowHarness();
+  const combine: any = { id: 'combine', kind: 'aggregate', label: 'Combined', dependsOn: ['source', 'other'], outputQuestion: 'answer', inputs: [{ stage: 'source', question: 'answer', weight: 1 }, { stage: 'other', question: 'answer', weight: 1 }] };
+  const top: any = { id: 'top', kind: 'decision', label: 'Top', dependsOn: ['source'], from: { stage: 'source', question: 'answer' }, outputQuestion: 'answer' };
+  pipeline.stages.push(combine, top);
+  pipeline.layout = { source: { x: 0, y: 0 }, other: { x: 0, y: 200 } };
+  target.inputs = { answer_1: { stage: 'source', question: 'answer', select: 'summary' }, answer_2: { stage: 'other', question: 'answer', select: 'summary' } };
+  target.dependsOn = ['source', 'other'];
+  target.when = { all: [{ stage: 'source', question: 'answer', metric: 'margin', op: 'gt', value: 0.1 }, { stage: 'other', question: 'answer', metric: 'margin', op: 'gt', value: 0.1 }] };
+  other.questions.answer.optionsFrom = { stage: 'source', question: 'answer' };
+  assert.deepEqual(stepReaders(pipeline, 'source').map((x: any) => x.id), ['other', 'target', 'combine', 'top']);
+  removeStep(pipeline, 'source');
+  assert.deepEqual(pipeline.stages.map((x: any) => x.id), ['other', 'target', 'combine', 'top']);
+  assert.equal(pipeline.layout.source, undefined);
+  assert.deepEqual(plain(target.inputs), { answer_2: { stage: 'other', question: 'answer', select: 'summary' } });
+  assert.deepEqual(plain(target.dependsOn), ['other']);
+  assert.deepEqual(plain(target.when), { stage: 'other', question: 'answer', metric: 'margin', op: 'gt', value: 0.1 }, 'a group left with one rule becomes that rule');
+  assert.deepEqual(plain(combine.inputs), [{ stage: 'other', question: 'answer', weight: 1 }]);
+  assert.deepEqual(plain(combine.dependsOn), ['other']);
+  assert.deepEqual(plain(top.from), { stage: '', question: '' });
+  assert.deepEqual(plain(top.dependsOn), []);
+  assert.equal(other.questions.answer.optionsFrom, undefined);
+  assert.deepEqual(plain(other.questions.answer.criteria), { a: 'A', b: 'B' }, 'options read from the deleted step stay as typed options');
+  assert.equal(JSON.stringify(pipeline).includes('"source"'), false, 'nothing still points at the deleted step');
+});
+
+test('every kind of step offers delete in its panel and on its card, behind one confirmation', async () => {
+  const { S, pipeline, flowInspector, flowNode, flowNewStage, requestStepDeletion, stepDeletionAction, element } = await flowHarness();
+  const combine: any = { id: 'combine', kind: 'aggregate', label: 'Combined', dependsOn: ['source'], outputQuestion: 'answer', inputs: [{ stage: 'source', question: 'answer', weight: 1 }] };
+  const top: any = { id: 'top', kind: 'decision', label: 'Top', dependsOn: ['source'], from: { stage: 'source', question: 'answer' }, outputQuestion: 'answer' };
+  pipeline.stages.push(combine, top, { ...flowNewStage(pipeline, 'choose'), id: 'jev' });
+  S.flowPanel = true;
+  for (const stage of pipeline.stages) {
+    S.stageId = stage.id;
+    assert.match(flowInspector(pipeline, stage), new RegExp(`data-act="step-delete" data-id="${stage.id}"`), `${stage.kind} panel`);
+    assert.match(flowNode(pipeline, stage, false), new RegExp(`data-act="step-delete" data-id="${stage.id}"`), `${stage.kind} card`);
+  }
+  let opened = 0; const dialog = element('deleteStepDialog'); dialog.showModal = () => { opened++; }; dialog.close = () => {};
+  requestStepDeletion('source');
+  assert.equal(opened, 1);
+  assert.equal(pipeline.stages.length, 6, 'asking does not delete');
+  assert.match(element('deleteStepImpact').textContent, /Steps 4, 5 will stay but stop reading from it/);
+  stepDeletionAction('step-delete-close', { dataset: {} });
+  assert.equal(S.stepDeletion, null);
+  assert.equal(pipeline.stages.length, 6, 'cancel keeps the step');
+});
+
+test('a confirmed delete can be undone, but never over a later edit', async () => {
+  const { S, pipeline, target, requestStepDeletion, stepDeletionAction, undoStepDeletion, element } = await flowHarness();
+  const dialog = element('deleteStepDialog'); dialog.showModal = () => {}; dialog.close = () => {};
+  target.inputs = { answer_1: { stage: 'source', question: 'answer', select: 'summary' } }; target.dependsOn = ['source'];
+  pipeline.layout = { source: { x: 10, y: 20 } };
+  const before = JSON.stringify(pipeline.stages);
+  S.stageId = 'source'; S.flowPanel = true;
+  requestStepDeletion('source'); stepDeletionAction('step-delete-confirm', { dataset: {} });
+  assert.deepEqual(plain(pipeline.stages.map((x: any) => x.id)), ['other', 'target']);
+  assert.equal(S.flowPanel, false, 'the panel of a deleted step closes');
+  assert.equal(S.dirty, true);
+  assert.ok(undoStepDeletion());
+  assert.equal(JSON.stringify(pipeline.stages), before, 'undo restores the step and its connections');
+  assert.deepEqual(plain(pipeline.layout.source), { x: 10, y: 20 });
+  assert.equal(S.stageId, 'source'); assert.equal(S.flowPanel, true);
+  requestStepDeletion('other'); stepDeletionAction('step-delete-confirm', { dataset: {} });
+  pipeline.stages[0].label = 'Edited after the delete';
+  undoStepDeletion();
+  assert.deepEqual(plain(pipeline.stages.map((x: any) => x.id)), ['source', 'target'], 'a later edit is kept rather than overwritten');
+  assert.equal(pipeline.stages[0].label, 'Edited after the delete');
 });

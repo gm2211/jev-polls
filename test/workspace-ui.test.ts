@@ -368,7 +368,8 @@ test('step settings are one flat form with no heading, mode or section tabs', as
   assert.doesNotMatch(html, /data-act="section-view"|data-section-panel|<h2>|Simple|Advanced/);
   assert.equal((html.match(/name="label"/g) ?? []).length, 1); assert.doesNotMatch(html, /name="phasePool"/);
   assert.doesNotMatch(html, /name="(?:join|dependsOn|hasWhen)"|data-inputs-editor/, 'a lone step shows no dependency, branch or input blocks');
-  assert.match(html, /data-act="add-question"[\s\S]*data-act="delete-stage"/, 'both step actions share the footer');
+  assert.match(html, /data-act="add-question"/);
+  assert.doesNotMatch(html, /data-act="(?:delete-stage|step-delete)"/, 'delete lives in the panel header, not the Settings footer');
 });
 
 test('saving flat step settings keeps the contracts it does not show', async () => {

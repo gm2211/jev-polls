@@ -227,3 +227,20 @@ behaviors:
     source:
       text: the options section should give me the "option" (no pun intended) of using the outputs of a previous stage as outputs
       reference: jev-polls project thread, Giulio, 2026-10-12
+
+  - id: delete-any-step
+    description: >-
+      Every kind of step (Ask the audience, Combine answers, Final answer) can be deleted from its
+      step panel header and from its card on the canvas, or with Delete or Backspace on a focused
+      card. One dialog confirms it and names the later steps that read from it. Those steps stay and
+      lose only the connections, run-order links, branch rules and option sources that pointed at
+      the deleted step; options taken from it stay as typed options. The toast's Undo or Ctrl/⌘+Z
+      restores the step with its connections and canvas position, unless the study changed since.
+    details: >-
+      The canvas card shows its delete button on hover or keyboard focus to keep narrow cards
+      readable; phone lists and touch screens show it on every card or the selected one. Undo keeps
+      up to 20 deletions and refuses rather than overwrite a later edit. Typing in a field never
+      deletes a step.
+    source:
+      text: "1. every node type should have a way to delete it from subpane / 2. I should be able to delete nodes quickly from canvas (with confirmation and undo)"
+      reference: jev-polls project thread "delete from side pane", Giulio, 2026-10-12
