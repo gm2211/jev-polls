@@ -63,7 +63,7 @@ The selected step inspector shows its question and **Options to compare**; **Coh
 
 **Create with agent** accepts a request, UTF-8 TXT/Markdown/CSV/JSON material up to 256 KiB, or both. Only **Prepare options** sends that request, material and the selected question to the chosen global drafting provider; cohort personas and unrelated questions are excluded. Current edits save first. Review the paginated proposal, then **Use these options** edits only the selected question's criteria. Cancelling a draft does not change options. Imported or drafted candidates are user/agent inputs, never observed human responses.
 
-A follow-up starts connected to its predecessor. Advanced step settings retain custom instructions, input projections, sampling, repeats and branching. **Review run** saves pending edits before planning; only **Run study** starts study inference.
+A follow-up starts connected to its predecessor. Advanced step settings retain custom instructions, input projections, sampling, repeats and branching. **Check and run** saves pending edits before planning; only **Run study** starts study inference.
 
 The browser calls a research workflow a **study**. Its saved definition and CLI schema remain a **pipeline**; existing JSON files, commands, and MCP tool names are unchanged.
 

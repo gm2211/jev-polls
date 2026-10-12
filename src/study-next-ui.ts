@@ -37,12 +37,12 @@ function studyNextAction(p){
   const todo=flowTodo(p)[0];
   if(todo)return {label:'Next: '+nextTodoText(p,todo),act:'flow-fix'};
   const lone=isolatedStep(p);
-  if(lone){const n=p.stages.indexOf(lone)+1;return {label:'Next: connect step '+n+' to step '+(n-1),act:'next-connect',id:lone.id,secondary:{label:'Review run',act:'next-review'}}}
+  if(lone){const n=p.stages.indexOf(lone)+1;return {label:'Next: connect step '+n+' to step '+(n-1),act:'next-connect',id:lone.id,secondary:{label:'Check and run',act:'next-review'}}}
   if(S.plan&&S.reviewPanel&&S.plan.pipelineId===p.id)return {label:'Run study',act:'start-run',disabled:!evaluationReady(S.plan.provider)};
   const run=studyLatestRun(p);
   if(run?.status==='running')return {label:'Watch the run',act:'next-results',id:run.id};
   if(run?.status==='completed'&&runMatchesStudy(run,p))return {label:'See results',act:'next-results',id:run.id};
-  return {label:'Review run',act:'next-review'};
+  return {label:'Check and run',act:'next-review'};
 }
 function studyNextButtons(p){
   const a=studyNextAction(p);
@@ -55,7 +55,7 @@ function studyReviewPanel(p){
   const plan=S.plan,ready=evaluationReady(plan.provider);
   const rows=plan.stages.map(item=>{const s=p.stages.find(x=>x.id===item.id),title=s?flowNodeTitle(p,s).title:item.label;return '<li class="review-panel-row"><span class="flow-number">'+(p.stages.findIndex(x=>x.id===item.id)+1)+'</span><span class="review-panel-title">'+esc(title)+'</span><span class="review-panel-requests">'+item.requests.toLocaleString('en-US')+(item.requests===1?' request':' requests')+'</span></li>'}).join('');
   const summary='<div class="run-review-summary review-panel-summary"><div><strong>'+plural(plan.stages.length,'step')+'</strong><span>in run order</span></div><div><strong>Up to '+Number(plan.maxRequests||0).toLocaleString('en-US')+'</strong><span>model requests</span></div><div><strong>'+esc(evaluationProviderName(plan.provider))+'</strong><span>'+esc(plan.model)+(plan.provider==='gliner'?' · runs locally with GLiNER, no billing':' · billed to your TypeSafe account')+'</span></div></div>';
-  return '<aside class="flow-inspector round-panel review-panel" aria-label="Review run" data-inspector-tab="review"><div class="flow-inspector-head"><div class="round-panel-title"><h2 tabindex="-1">Review run</h2><span class="round-panel-kind">'+esc(studyQuestion(p))+'</span></div><div class="row"><button class="button small icon-button" data-act="flow-panel-close" aria-label="Close review" title="Close (Esc)">'+icon('close')+'</button></div></div><div class="flow-inspector-body" role="region" aria-label="Run summary">'+summary+runCaveats(plan)+'<h3>Steps, in run order</h3><ol class="review-panel-steps">'+rows+'</ol><p class="subtle">Nothing runs until you choose Run study.</p><div class="row"><button type="button" class="button small" data-act="next-review-page">'+icon('list')+' Every detail and run setting</button></div></div><div class="guided-footer"><button type="button" class="button" data-act="next-review-close">Edit study</button><div class="row"><button type="button" class="button" data-act="evaluation-settings" '+(ready?'hidden':'')+'>Set up evaluation provider</button><button type="button" class="button primary" data-act="start-run" '+(ready?'':'disabled')+'>Run study</button></div></div></aside>';
+  return '<aside class="flow-inspector round-panel review-panel" aria-label="Before you run" data-inspector-tab="review"><div class="flow-inspector-head"><div class="round-panel-title"><h2 tabindex="-1">Before you run</h2><span class="round-panel-kind">'+esc(studyQuestion(p))+'</span></div><div class="row"><button class="button small icon-button" data-act="flow-panel-close" aria-label="Close" title="Close (Esc)">'+icon('close')+'</button></div></div><div class="flow-inspector-body" role="region" aria-label="Run summary">'+summary+runCaveats(plan)+'<h3>Steps, in run order</h3><ol class="review-panel-steps">'+rows+'</ol><p class="subtle">Nothing runs until you choose Run study.</p><div class="row"><button type="button" class="button small" data-act="next-review-page">'+icon('list')+' Every detail and run setting</button></div></div><div class="guided-footer"><button type="button" class="button" data-act="next-review-close">Edit study</button><div class="row"><button type="button" class="button" data-act="evaluation-settings" '+(ready?'hidden':'')+'>Set up evaluation provider</button><button type="button" class="button primary" data-act="start-run" '+(ready?'':'disabled')+'>Run study</button></div></div></aside>';
 }
 function studyNextClick(a,el){
   if(a==='next-review'){reviewPlan(true).catch(fail);return true}

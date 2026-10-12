@@ -231,14 +231,14 @@ behaviors:
     description: >-
       The study header always shows one next action in words, in order: "Add your first question",
       "Next: write the question", "Next: add the options", "Next: choose who answers" (or lower the
-      sample size), "Next: connect step N to step M", "Review run", "Run study", then "Watch the
+      sample size), "Next: connect step N to step M", "Check and run", "Run study", then "Watch the
       run" while it runs and "See results" once a run of this exact study has completed. Clicking
       it opens the right step and tab, or the review, or the results.
     details: >-
       Steps are named by number when a study has more than one. A step with no wires beside other
-      steps gets the connect suggestion, with Review run kept beside it so independent steps are
+      steps gets the connect suggestion, with Check and run kept beside it so independent steps are
       never blocked. Moving cards never invalidates "See results"; any content edit returns the
-      header to Review run. Typing a study's first question names the study when it has no question
+      header to Check and run. Typing a study's first question names the study when it has no question
       of its own.
     source:
       text: >-
@@ -249,14 +249,14 @@ behaviors:
       reference: jev-polls project thread, Giulio, 2026-10-10 (both quotes)
   - id: review-in-panel
     description: >-
-      From the header, Review run opens the run summary as a slide-over on the canvas (steps in run
+      From the header, Check and run opens the run summary as a slide-over on the canvas (steps in run
       order, request bound, provider and model, the model-estimates caveat) with Run study one click
       away; the full page stays reachable for run settings.
     details: >-
       Reviewing saves the study and plans the run but never starts inference; only Run study does.
       Selecting a step, Esc or the close control dismisses the panel and drops the plan. Run study
-      then opens the live view of the run. The step wizard's final Review run and the command
-      palette's Review run open this same panel, never the full page. Part of guided-demo-path.
+      then opens the live view of the run. The step wizard's final Check and run and the command
+      palette's Check and run open this same panel, never the full page. Part of guided-demo-path.
     source:
       text: >-
         you must be able to produce a 1 minute demo that shows very simple, streamlined, almost
@@ -362,9 +362,21 @@ behaviors:
     source:
       text: actions and flow still unclear
       reference: jev-polls project chat, Giulio, 2026-10-10, with a screenshot of the 3-step game-name study canvas
+  - id: check-and-run-label
+    description: >-
+      The study header action that opens the run summary reads "Check and run", saying what happens
+      next: you check the steps, request count and provider, then start the run. The panel and the
+      full page it leads to are headed "Before you run", and the same words appear in the step
+      wizard's last button, the command palette and the breadcrumb.
+    details: >-
+      Replaces "Review run" (2026-10-12), which read as reviewing a run that had already happened.
+      Only Run study starts inference; Check and run still never does (review-and-run.no-implicit-inference).
+    source:
+      text: confusing - review run is weird phrasing
+      reference: jev-polls project thread, Giulio, 2026-10-12, with a screenshot of the study header buttons
   - id: review-run-page
     description: >-
-      Review run is one page with no tabs: a summary (steps, request bound, provider and model, the
+      The "Before you run" page is one page with no tabs: a summary (steps, request bound, provider and model, the
       model-estimates caveat), the steps in run order, then run settings. Each step reads like its
       flow card: number, name and question, kind, when it starts, who answers, and its request count.
     details: >-

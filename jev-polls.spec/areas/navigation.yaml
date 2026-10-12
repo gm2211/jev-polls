@@ -47,7 +47,7 @@ behaviors:
       and every page's big heading names that same last crumb.
     details: >-
       Levels are Projects / project / section (Studies, Cohorts, Runs, Project settings) / item
-      (study, cohort, run) / Review run or Study settings, and cohort persona or New cohort /
+      (study, cohort, run) / Before you run or Study settings, and cohort persona or New cohort /
       Regenerate personas. Moving down adds exactly one level; opening a study lands on its canvas
       with no step open. The step panel is an overlay on the study page, so it adds no level, and
       since 2026-10-10 step settings are a Settings tab of that panel rather than a page of their

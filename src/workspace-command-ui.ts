@@ -6,7 +6,7 @@ function commandEntries(){
   if(!S.doc)return [];
   const rows=[{id:'projects',label:'All projects',detail:'Workspace',action:'projects'},{id:'new-project',label:'New project',detail:'Create research project',action:'new-project'},{id:'settings',label:'AI settings',detail:'Models and providers',action:'ai-open'}];
   if(project())rows.push({id:'studies',label:'Studies',detail:'Current project',action:'tab',tab:'studies'},{id:'new-cohort',label:'New cohort',detail:'Create a synthetic audience',action:'new-cohort'},{id:'project-settings',label:'Project settings',detail:'Name and research brief',action:'project-settings'},{id:'draft',label:'Describe a study',detail:'Create or change steps with natural language',action:'draft-panel-open'},{id:'cohorts',label:'Cohorts',detail:'Current project',action:'tab',tab:'cohorts'},{id:'runs',label:'Live runs and results',detail:'Current project',action:'tab',tab:'runs'});
-  if(project()&&pipeline()?.stages.length)rows.push({id:'review-run',label:'Review run',detail:'Current study · opens the review panel',action:'next-review'});
+  if(project()&&pipeline()?.stages.length)rows.push({id:'review-run',label:'Check and run',detail:'Current study · see what will run, then start it',action:'next-review'});
   if(project()&&!projectPipelines().length)rows.push({id:'new-study',label:'New study',detail:'Create a study',action:'new-study'});
   for(const p of S.doc.projects||[]){
     rows.push({id:'project:'+p.id,label:p.name,detail:'Project',project:p.id});

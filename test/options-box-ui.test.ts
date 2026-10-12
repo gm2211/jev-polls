@@ -4,7 +4,7 @@ import { Script } from 'node:vm';
 import { renderWorkspace } from '../src/workspace-ui.js';
 
 // Runs the served browser client against a one-step study so the Options box, the
-// inline drafting-AI choice and the Review run entry points use the real code.
+// inline drafting-AI choice and the Check and run entry points use the real code.
 async function harness(engines: any[] = []) {
   const elements = new Map<string, any>();
   const element = (id: string) => {
@@ -345,18 +345,18 @@ test('outside the audience form the reason still points at AI settings', async (
   assert.equal(h.cohortBlockReason(true), 'Choose an available drafting AI above.');
 });
 
-test('the step wizard\'s final Review run opens the review panel action, not the full page', async () => {
+test('the step wizard\'s final Check and run opens the review panel action, not the full page', async () => {
   const h = await harness();
   h.S.sections['flow-inspector'] = 'question';
   h.S.sections[h.setupWizardKey(h.study, h.poll, 'answer')] = 'review';
   const html = h.stageForm(h.study, h.poll);
-  assert.match(html, /<button type="button" class="button primary" data-act="next-review" >Review run<\/button>/);
+  assert.match(html, /<button type="button" class="button primary" data-act="next-review" >Check and run<\/button>/);
   assert.doesNotMatch(html, /data-act="review"/);
 });
 
-test('Review run in the command palette opens the same slide-over as the header action', async () => {
+test('Check and run in the command palette opens the same slide-over as the header action', async () => {
   const h = await harness();
-  assert.deepEqual(plain(h.commandEntries().filter((row: any) => row.id === 'review-run')), [{ id: 'review-run', label: 'Review run', detail: 'Current study · opens the review panel', action: 'next-review' }]);
+  assert.deepEqual(plain(h.commandEntries().filter((row: any) => row.id === 'review-run')), [{ id: 'review-run', label: 'Check and run', detail: 'Current study · see what will run, then start it', action: 'next-review' }]);
   h.responses.set('POST /api/plan', { pipelineId: 'study', provider: 'typesafe', model: 'jev', maxRequests: 8, stages: [{ id: 'ask', label: 'Ask', requests: 8 }], warnings: [], revision: 1, planToken: 't' });
   h.S.tab = 'cohorts'; h.S.sections.pipeline = 'advanced';
   h.commandExecute('review-run');
@@ -366,10 +366,10 @@ test('Review run in the command palette opens the same slide-over as the header 
   assert.equal(h.S.reviewPanel, true);
   assert.equal(h.reviewPage(), false, 'the full review page stays closed');
   assert.equal(h.requests.filter((r: string) => r === 'POST /api/plan').length, 1);
-  assert.match(h.element('app').innerHTML, /aria-label="Review run"/);
+  assert.match(h.element('app').innerHTML, /aria-label="Before you run"/);
 });
 
-test('the palette offers no Review run without a study that has steps', async () => {
+test('the palette offers no Check and run without a study that has steps', async () => {
   const h = await harness();
   h.S.pipelineId = null;
   assert.equal(h.commandEntries().some((row: any) => row.id === 'review-run'), false);
