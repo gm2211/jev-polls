@@ -1817,7 +1817,7 @@ test('batch states move from connecting to writing to checking to accepted, and 
   assert.equal(done.progress!.retries, 1);
 });
 
-test('a rough estimate appears from streaming speed before any batch completes and is replaced by batch timings after two', async t => {
+test('time left follows the pace personas are written across all batches, from the first one to the end', async t => {
   const root = await setup(t); t.mock.timers.enable({ apis: ['Date'] });
   const hold = deferred<void>(); let first!: FakeChild;
   const service = new LocalAgentService({ temporaryRoot: root, spawn: fakeSpawner(async ({ args, child }) => {
@@ -1832,11 +1832,11 @@ test('a rough estimate appears from streaming speed before any batch completes a
   t.mock.timers.tick(10000); first.stdout.write(personaKey(1));
   await waitFor(() => service.get(job.id)!.progress!.estimate !== undefined);
   const estimate = service.get(job.id)!.progress!.estimate!;
-  assert.equal(estimate.basis, 'streaming'); assert.ok(estimate.seconds > 0 && Number.isFinite(estimate.seconds));
+  assert.equal(estimate.basis, 'pace'); assert.equal(estimate.seconds, 1990, '5 written in 10 s is 0.5 a second, so 995 left take 1,990 s');
   assert.equal(service.get(job.id)!.progress!.completedBatches, 0);
   hold.resolve();
   await waitFor(() => (service.get(job.id)!.progress!.completedBatches ?? 0) >= 2, 4000);
-  assert.equal(service.get(job.id)!.progress!.estimate, undefined, 'after two batches the batch timings take over');
+  assert.equal(service.get(job.id)!.progress!.estimate?.basis, 'pace', 'checked batches keep the same pace-based estimate');
   service.cancel(job.id);
 });
 

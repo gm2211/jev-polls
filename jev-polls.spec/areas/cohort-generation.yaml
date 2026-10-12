@@ -303,6 +303,19 @@ behaviors:
       text: >-
         I would expect this to show up in cohorts at least once generated, and probably as draft as
         soon as I hit "generate"
+  - id: estimate-tracks-written
+    description: >-
+      Time left during generation follows the pace personas are being written across the whole job,
+      counting personas already written but not yet checked, and says Finishing… once every persona
+      is written or under five seconds remain, instead of a range.
+    details: >-
+      Added 2026-10-12 after the readout showed 999 of 1,000 written with 43–66 seconds left: the
+      fallback counted only checked personas, and the streaming estimate was dropped after the first
+      batches were accepted.
+    source:
+      text: >-
+        time estimates seem crazy because it looks like 999/1000 but 43-66 sec left - makes no sense
+      reference: 2026-10-12 jev-polls project thread, Giulio
   - id: live-seat-map
     description: >-
       While an audience of up to 1,000 people is generated, the progress panel shows a Who answers

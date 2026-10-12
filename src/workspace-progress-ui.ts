@@ -26,16 +26,19 @@ function draftRange(lowMs,highMs){
   return 'About '+low+'–'+high+' '+unit+' left';
 }
 function draftEstimate(p){
+  if(!Number.isFinite(p.totalPersonas)||!Number.isFinite(p.completedPersonas)||p.totalPersonas-p.completedPersonas<=0)return '';
+  // Time left follows what is written (checked or still arriving), so a nearly full count never shows a long wait.
+  const written=Math.min(p.totalPersonas,p.completedPersonas+(Number.isFinite(p.inFlightPersonas)?p.inFlightPersonas:0));
+  if(written>=p.totalPersonas)return 'Finishing…';
+  if(p.estimate&&Number.isFinite(p.estimate.seconds)){
+    const left=Math.max(0,p.estimate.seconds-(Date.now()-Date.parse(p.estimate.at))/1000);
+    return left<5?'Finishing…':draftRange(left*800,left*1250+2000);
+  }
   const durations=p.batchDurationsMs||[],sizes=p.completedBatchSizes||[];
   const rates=durations.map((ms,i)=>Number.isFinite(ms)&&ms>0&&Number.isFinite(sizes[i])&&sizes[i]>0?ms/sizes[i]:0).filter(n=>n>0);
-  const remaining=p.totalPersonas-p.completedPersonas;
-  if(!Number.isFinite(remaining)||remaining<=0)return '';
-  if(rates.length<2&&p.estimate&&p.estimate.basis==='streaming'){
-    const left=Math.max(0,p.estimate.seconds-(Date.now()-Date.parse(p.estimate.at))/1000);
-    return draftRange(left*700,left*1600+5000);
-  }
   if(rates.length<2)return p.totalBatches>2?'Estimating time left…':'';
   if(p.batchStartedAt&&Date.now()-Date.parse(p.batchStartedAt)>Math.max(...durations)*1.5)return 'Taking longer than usual';
+  const remaining=p.totalPersonas-written;
   const left=Number.isFinite(p.totalBatches)&&Number.isFinite(p.completedBatches)?Math.max(1,p.totalBatches-p.completedBatches):Infinity;
   const parallel=Math.max(1,Math.min(p.maxConcurrentBatches||1,left));
   const average=rates.reduce((a,b)=>a+b,0)/rates.length;
@@ -106,7 +109,7 @@ function draftSlots(job){
   return {
     count:counted?'<strong>'+written.toLocaleString('en-US')+'</strong>of '+total.toLocaleString('en-US')+' personas written':'',
     estimate:counted?esc(draftEstimate(p)):'',
-    estimateData:counted?JSON.stringify({totalPersonas:total,completedPersonas:checked,totalBatches:p.totalBatches,completedBatches:p.completedBatches,maxConcurrentBatches:p.maxConcurrentBatches,batchDurationsMs:p.batchDurationsMs,completedBatchSizes:p.completedBatchSizes,batchStartedAt:p.batchStartedAt,estimate:p.estimate}):'',
+    estimateData:counted?JSON.stringify({totalPersonas:total,completedPersonas:checked,inFlightPersonas:p.phase==='generating'||p.phase==='validating'?p.inFlightPersonas||0:0,totalBatches:p.totalBatches,completedBatches:p.completedBatches,maxConcurrentBatches:p.maxConcurrentBatches,batchDurationsMs:p.batchDurationsMs,completedBatchSizes:p.completedBatchSizes,batchStartedAt:p.batchStartedAt,estimate:p.estimate}):'',
     written:pct(written),checked:pct(checked),
     status:esc(draftStatus(job)),
     detail:esc(detail)+(detail&&activity?' · ':'')+(activity?'<span data-draft-activity="'+attr(p.lastActivityAt)+'">'+esc(activity)+'</span>':''),

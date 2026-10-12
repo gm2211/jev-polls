@@ -3779,9 +3779,16 @@ test('drafting progress separates accepted from being written and describes each
   const firstWords = draftProgress({ id: 'j', engine: 'claude', status: 'running', cohort: { id: 'c', size: 1000 }, progress: { ...before, batchDetails: [detail(1, 'writing'), detail(2, 'thinking'), detail(3, 'thinking')] } });
   assert.match(firstWords, /Writing the first personas\./); assert.match(firstWords, /Groups: 1 writing, 2 thinking/);
   assert.match(draftProgress({ id: 'j', engine: 'claude', status: 'running', cohort: { id: 'c', size: 1000 }, progress: { ...before, batchDetails: [detail(1, 'connecting')] } }), /Waiting for Claude Code to start writing\./);
-  const early = draftEstimate({ ...progress, estimate: { seconds: 240, basis: 'streaming', at: new Date().toISOString() } });
-  assert.match(early, /^About 2–7 min left$/);
+  const early = draftEstimate({ ...progress, estimate: { seconds: 240, basis: 'pace', at: new Date().toISOString() } });
+  assert.match(early, /^About 3–6 min left$/);
   assert.match(draftEstimate({ ...progress, estimate: undefined }), /Estimating time left…/);
+  // 999 written of 1,000 with only 600 checked is the end of the run, never a long wait.
+  const nearlyDone = { ...progress, completedPersonas: 600, inFlightPersonas: 399, completedBatches: 28, batchDurationsMs: [20000, 22000], completedBatchSizes: [21, 21] };
+  assert.equal(draftEstimate({ ...nearlyDone, estimate: { seconds: 1, basis: 'pace', at: new Date().toISOString() } }), 'Finishing…');
+  assert.equal(draftEstimate({ ...nearlyDone, inFlightPersonas: 400, estimate: undefined }), 'Finishing…', 'all written: only the checks are left');
+  assert.equal(draftEstimate({ ...nearlyDone, estimate: { seconds: 30, basis: 'pace', at: new Date(Date.now() - 28000).toISOString() } }), 'Finishing…', 'the estimate counts down between updates');
+  assert.match(draftEstimate({ ...nearlyDone, estimate: { seconds: 20, basis: 'pace', at: new Date().toISOString() } }), /^About 16–27 sec left$/);
+  assert.equal(draftEstimate({ ...nearlyDone, completedPersonas: 1000, inFlightPersonas: 0 }), '', 'nothing left to estimate once all are checked');
 });
 
 test('the browser tab shows the Jev icon and names the open page first', () => {
