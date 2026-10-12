@@ -326,8 +326,11 @@ behaviors:
       where it is in the queue. Only checked personas are ever shown as profiles.
     details: >-
       Added 2026-10-12 as option A (seat chart) of four designs offered in the project thread. Groups
-      are planned as a mix of segments, so a checked persona takes a seat planned for its own segment.
-      Larger audiences show the progress readout without the map.
+      are planned as a mix of segments, and the AI may write a slightly different mix, so a checked
+      persona always sits in the row of the segment it was written for and every seat in a row has
+      that row's colour; row sizes follow what was actually written. Changed 2026-10-12 after Giulio
+      saw other segments' colours inside one row. Larger audiences show the progress readout without
+      the map.
     source:
       text: >-
         it would also be cool to get a "host map" mini-view that gets populated with personas as they
