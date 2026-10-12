@@ -118,7 +118,7 @@ export function renderReport(run: RunRecord, options: { workspace?: boolean } = 
     const gliner=run.provider==='gliner';
     const yesWord=gliner?'Relative yes score':'Probability of yes';
     const CLOSE=0.05;
-    const KIND={poll:'Ask the audience',aggregate:'Combine answers',decision:'Final result'};
+    const KIND={poll:'Ask the audience',aggregate:'Combine answers',decision:'Final answer',choose:'Final answer'};
 
     function questionFor(stage,qid,seen=new Set()){
       if(!stage)return undefined;const visitKey=stage.id+'.'+qid;if(seen.has(visitKey))return undefined;seen.add(visitKey);
@@ -184,7 +184,7 @@ export function renderReport(run: RunRecord, options: { workspace?: boolean } = 
       if(!stage){const empty=el('div','empty','No step finished, so this run has no answer.');host.append(empty);return;}
       const qid=stageQuestions(stage).find(id=>stageResult(stage.id).summaries[id]);const summary=stageResult(stage.id).summaries[qid];const question=questionFor(stage,qid);
       const box=el('div','answer'),main=el('div','answer-side'),side=el('div','answer-side');
-      main.append(el('span','eyebrow',stage.kind==='decision'?'Final result':'Answer · '+stage.label));
+      main.append(el('span','eyebrow',stage.kind==='decision'||stage.kind==='choose'?'Final answer':'Answer · '+stage.label));
       const pairs=ranked(summary);
       if(summary.type==='choice'&&pairs.length){
         const [win,top]=pairs[0],runner=pairs[1];const big=el('div','big');const sw=el('span','swatch');sw.style.background=optionColor(question,win,summary);big.append(sw,choiceLabel(question,win));main.append(big);
