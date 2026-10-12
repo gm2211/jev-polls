@@ -272,8 +272,12 @@ const PERSONA_EFFORT = 'low';
  * synthetic people from fixed details needs no deep reasoning, and speed per stream is the limit: Opus streamed about 117
  * tokens/s against Sonnet's 170 (1,000 people took 3 min 16 s on Opus and 1 min 52 s on Sonnet with the same code). Haiku
  * streams faster but thought for 1,700 to 6,000 tokens a batch with no way to turn it off, so its batches were no quicker.
+ * The id is pinned because the alias follows the CLI version: Claude Code 2.1.282 on a Mac resolved sonnet to Sonnet 5,
+ * whose first token came after 33 to 53 s (the same batch on Sonnet 5.5: 3 to 7 s), and 1,000 people took 2 min 45 s.
+ * A CLI or account without the id falls back to the alias, then to its own default.
  */
-const AUDIENCE_MODEL = 'sonnet';
+const AUDIENCE_MODEL = 'claude-sonnet-5-5';
+const AUDIENCE_MODEL_ALIAS = 'sonnet';
 /** The start of every persona batch prompt of an engine, which a warm Claude Code process is given before the batch is known. */
 function personaPromptHead(engine: LocalAgentEngine): string {
   return (nativePersonas(engine)
@@ -281,8 +285,8 @@ function personaPromptHead(engine: LocalAgentEngine): string {
     : guidance.replace('documentJson is a string containing the COMPLETE workspace document;', 'documentJson is a string containing a JSON array of new persona objects;')).replace(' Include source IDs and syntheticFields.', '');
 }
 /** Claude Code arguments of a drafting call: no tools or customizations, streamed events, and the reply schema. */
-function claudeArgs(schema: object, audienceFlags: boolean): string[] {
-  return ['--print', '--safe-mode', '--restricted', '--tools', '', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--permission-mode', 'dontAsk', '--no-session-persistence', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--json-schema', JSON.stringify(schema), ...(audienceFlags ? ['--model', AUDIENCE_MODEL, '--effort', PERSONA_EFFORT] : [])];
+function claudeArgs(schema: object, audienceModel: string | undefined): string[] {
+  return ['--print', '--safe-mode', '--restricted', '--tools', '', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--permission-mode', 'dontAsk', '--no-session-persistence', '--output-format', 'stream-json', '--verbose', '--include-partial-messages', '--json-schema', JSON.stringify(schema), ...(audienceModel ? ['--model', audienceModel, '--effort', PERSONA_EFFORT] : [])];
 }
 /** Claude Code persona batches write with thinking off: low effort alone still thought for about 240 tokens a Sonnet batch. */
 const AUDIENCE_ENV: NodeJS.ProcessEnv = { MAX_THINKING_TOKENS: '0' };
@@ -797,6 +801,8 @@ export class LocalAgentService {
   private closed = false;
   /** Set once the Claude CLI drafted after --model and --effort were dropped, so later audience calls skip them. */
   private claudeAudienceFlagsUnsupported = false;
+  /** The audience model Claude Code accepted: the pinned id until a call fails early with it and works with the alias. */
+  private claudeAudienceModel = AUDIENCE_MODEL;
   private status?: { at: number; value: LocalAgentAvailability };
   private probing?: Promise<LocalAgentAvailability>;
 
@@ -1088,7 +1094,7 @@ export class LocalAgentService {
   /** Starts Claude Code processes for the first persona batches while the setup call runs; each holds the prompt head. */
   private async prewarm(entry: Entry, input: LocalAgentInput, count: number): Promise<void> {
     const head = personaPromptHead(input.engine);
-    const args = claudeArgs(personaOutputSchema, !this.claudeAudienceFlagsUnsupported);
+    const args = claudeArgs(personaOutputSchema, this.claudeAudienceFlagsUnsupported ? undefined : this.claudeAudienceModel);
     entry.warm ??= [];
     for (let index = 0; index < count && !entry.cancelled && !entry.settled && !this.closed; index++) {
       let directory: string;
@@ -1748,7 +1754,7 @@ export class LocalAgentService {
           const config = ['approval_policy="never"', 'web_search="disabled"', 'project_doc_max_bytes=0', 'agents.enabled=false', 'apps._default.enabled=false', 'mcp_servers={}', 'features.shell_tool=false', 'features.unified_exec=false', 'features.view_image=false', 'features.apps=false', 'features.plugins=false', 'features.hooks=false', 'features.memories=false', 'features.multi_agent=false', 'features.multi_agent_v2=false', 'features.browser_use=false', 'features.computer_use=false', 'features.image_generation=false', 'features.code_mode=false', 'features.skip_host_skill_discovery=true'];
           args = ['exec', '--json', '--ignore-user-config', '--ephemeral', '--skip-git-repo-check', '--sandbox', 'read-only', '--color', 'never', '--output-schema', schemaPath, '--output-last-message', resultPath, ...config.flatMap(value => ['-c', value]), '-'];
         } else {
-          args = claudeArgs(native ? personaOutputSchema : outputSchema, !!audience && !this.claudeAudienceFlagsUnsupported);
+          args = claudeArgs(native ? personaOutputSchema : outputSchema, audience && !this.claudeAudienceFlagsUnsupported ? this.claudeAudienceModel : undefined);
         }
         if (entry.cancelled) throw Error();
         const childEnv: NodeJS.ProcessEnv = audience && input.engine === 'claude' ? AUDIENCE_ENV : {};
@@ -1756,6 +1762,13 @@ export class LocalAgentService {
         if (warm) warmDirectory = warm.directory;
         let outcome = await this.command(input.engine, args, directory, prompt, this.timeoutMs, this.maxOutputBytes, entry, false, slot, input.engine === 'claude' ? 'claude-events' : 'raw', signal, childEnv, warm);
         const failedEarly = () => input.engine === 'claude' && outcome.code !== 0 && !outcome.limited && !outcome.missing && !entry.cancelled && !signal?.aborted && !outcome.stdout.includes('"type":"result"');
+        if (failedEarly() && args[args.indexOf('--model') + 1] === AUDIENCE_MODEL) {
+          // An older CLI or an account without the pinned id: try the alias, and keep it once it works.
+          const aliased = args.map((value, index) => args[index - 1] === '--model' ? AUDIENCE_MODEL_ALIAS : value);
+          const retried = await this.command(input.engine, aliased, directory, prompt, this.timeoutMs, this.maxOutputBytes, entry, false, slot, 'claude-events', signal, childEnv);
+          if (retried.code === 0) this.claudeAudienceModel = AUDIENCE_MODEL_ALIAS;
+          outcome = retried; args = aliased;
+        }
         if (failedEarly() && args.includes('--effort')) {
           // A CLI without --effort, or an account without the audience model: drop both, and stop asking once the CLI works without them.
           const plainModel = args.filter((value, index) => !['--effort', '--model'].includes(value) && !['--effort', '--model'].includes(args[index - 1]!));
