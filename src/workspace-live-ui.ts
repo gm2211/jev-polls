@@ -154,6 +154,8 @@ export function createLiveVotingView(model: ReturnType<typeof createArenaModel>,
   }
 
   function stageNav(input: any): string {
+    // The study graph, when the caller could build it: each step with what it reads and what it gives out.
+    if (input.graphHtml) return `<div class="lv-graph">${segmented('lv-steps', 'Steps', [['summary', 'Summary'], ['fields', 'Inputs & outputs']], input.stepsView === 'fields' ? 'fields' : 'summary')}${input.graphHtml}</div>`;
     if (input.stages.length < 2) return '';
     return `<nav class="lv-stages" aria-label="Study steps">${input.stages.map((stage: any) => {
       const dependencies = (stage.dependsOn || []).map((id: string) => input.stages.find((candidate: any) => candidate.id === id)?.label || id);
@@ -245,4 +247,5 @@ ${patternSelectors('stripes')}{background-image:repeating-linear-gradient(45deg,
 @media(max-width:760px){.lv-head{align-items:stretch}.lv-controls{gap:10px 12px}.lv-controls select{max-width:100%}.lv-map{max-height:62vh}.lv-replay-actions button,.lv-seg button{min-height:40px}.lv-scrub{flex-basis:100%}}
 @media(pointer:coarse){.lv-tile{min-width:var(--tile,18px)}}
 @media(prefers-reduced-motion:reduce){.live-voting *{animation:none!important;transition:none!important}}
+.lv-graph{flex:1 1 100%;display:flex;flex-direction:column;gap:6px;min-width:0}.lv-graph>.lv-field{flex-direction:row;align-items:center;gap:8px}.lv-graph .rg{padding-bottom:4px}.lv-graph>.lv-field button{min-height:30px;padding:3px 10px;border:1px solid var(--control-line,var(--line));border-radius:8px;background:var(--surface);color:var(--ink);cursor:pointer;font:inherit;font-size:var(--text-sm)}.lv-graph>.lv-field button:hover{background:var(--hover);border-color:var(--blue)}.lv-graph>.lv-field button[aria-pressed=true]{background:var(--selection);border-color:var(--blue);color:var(--button-ink,var(--ink));font-weight:600}
 `;

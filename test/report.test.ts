@@ -46,7 +46,8 @@ test('renders a one-page report: answer first, then results, people, and how the
   assert.match(html, /each person answered '\+r\+' times/);
   assert.match(html, /Repeats are not counted as extra people/);
   assert.match(html, /Ask the audience/);
-  assert.match(html, /runs only when a condition is met/);
+  assert.match(html, /Runs only if /);
+  assert.match(html, /runGraph.html\(\{pipeline,statuses,notes,audiences:cohortNames,mode:'full'/);
   assert.match(html, /Download run JSON/);
   assert.match(html, /application\/json/);
   assert.match(html, /https:\/\/example\.com\/study/);
