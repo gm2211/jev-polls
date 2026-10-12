@@ -208,7 +208,7 @@ function resultSetup(p,s){
     const selected=current.some(x=>x.stage===source.id&&x.question===q.id);
     return '<button class="setup-choice" data-act="setup-result" data-source="'+attr(source.id)+'" data-question="'+attr(q.id)+'" aria-pressed="'+selected+'"><strong>'+esc(q.label||source.label)+'</strong><span>'+'Step '+(p.stages.indexOf(source)+1)+' · '+answerName(q.type)+(selected?' · Selected':'')+'</span></button>';
   }).join('');
-  return tabs+panel(s.kind==='decision'?'Which answer should supply the result?':'Which answers should be combined?',s.kind==='decision'?'Uses the leading option from one earlier answer.':'Choose answers with matching options or ordered levels. New selections get equal weight.','<div class="setup-connections">'+(content||'<p>No compatible earlier answers available.</p>')+'</div>'+page.controls,'<div class="setup-step-toolbar">'+setupQuestionToolbar(p,s)+'</div>');
+  return panel(s.kind==='decision'?'Which answer should supply the result?':'Which answers should be combined?',s.kind==='decision'?'Uses the leading option from one earlier answer.':'Choose answers with matching options or ordered levels. New selections get equal weight.','<div class="setup-connections">'+(content||'<p>No compatible earlier answers available.</p>')+'</div>'+page.controls,'<div class="setup-step-toolbar">'+setupQuestionToolbar(p,s)+'</div>');
 }
 function setupAction(a,el){
   if(!a.startsWith('setup-'))return false;

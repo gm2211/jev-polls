@@ -2423,6 +2423,23 @@ test('point-and-click result selections reconcile data dependencies and compare 
   assert.ok(decision.dependsOn.includes('panel'), 'branch conditions keep their required source');
 });
 
+test('no step kind panel renders JavaScript function source', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, stageForm, advancedStageForm } = browser.client;
+  S.pipelineId = 'study';
+  const p = S.doc.pipelines[0], poll = p.stages[0];
+  const combine = { id: 'combine', label: 'Combined', kind: 'aggregate', outputQuestion: 'combined', inputs: [{ stage: poll.id, question: 'answer', weight: 1 }], dependsOn: [poll.id] };
+  const decision = { id: 'decision', label: 'Decision', kind: 'decision', from: { stage: poll.id, question: 'answer' }, outputQuestion: 'result', dependsOn: [poll.id] };
+  const empty = { id: 'empty', label: 'Empty', kind: 'aggregate', outputQuestion: 'combined', inputs: [], dependsOn: [] };
+  p.stages.push(combine, decision, empty);
+  for (const s of [poll, combine, decision, empty]) {
+    S.stageId = s.id;
+    for (const html of [stageForm(p, s), stageForm(p, s, true), advancedStageForm(p, s)]) {
+      assert.doesNotMatch(html, /function\s*\w*\s*\(|=>|\[native code\]|undefined|\[object Object\]/, s.kind + ' panel leaks code or unset values');
+    }
+  }
+});
+
 test('new choice options never reuse deleted keys referenced by branch conditions', async () => {
   const browser = browserHarness(); await settle();
   const { S, setupAction } = browser.client; S.pipelineId = 'study'; S.stageId = 'panel';
