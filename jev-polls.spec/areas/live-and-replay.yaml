@@ -88,9 +88,10 @@ behaviors:
       far, highlights the leader and animates smoothly, with a brief flash, when ranks change; it
       doubles as the colour legend.
     details: >-
-      Option colours are fourteen per theme, searched to stay apart for a deuteranope (and in
-      normal vision); options from the eighth on also carry a stripe or dot pattern as a second
-      cue. 
+      Option colours are fourteen muted colours per theme (OKLCH chroma at most 0.10, the dark set
+      the same hues 0.1 lighter), searched to stay apart for a deuteranope; options from the eighth
+      on also carry a stripe or dot pattern as a second cue. Muted on 2026-10-12 after Giulio said
+      "colors too saturated".
       The share is the report's own measure (weighted mean of answer probabilities), so the final
       leaderboard equals the report. Runs saved before weights were kept count members equally and
       say so. Score questions show the level distribution and mean; yes/no questions show likelihood

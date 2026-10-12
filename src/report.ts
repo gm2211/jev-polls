@@ -140,7 +140,12 @@ export function renderReport(run: RunRecord, options: { workspace?: boolean } = 
     function choiceLabel(question,key){const meaning=question?.type==='choice'?question.criteria[key]:null;return meaning&&typeof meaning==='object'?meaning.label:typeof meaning==='string'&&meaning.trim().length<=48?meaning.trim():key;}
     function scoreLabel(question,key){const level=Number(key);if(question?.type==='score'&&Number.isInteger(level)&&level>=0)return question.criteria[level]??key;return key;}
     function optionIndex(question,key){const keys=question?.type==='choice'?Object.keys(question.criteria):[];const index=keys.indexOf(key);return index<0?keys.length+String(key).length:index;}
-    function optionColor(question,key){const index=optionIndex(question,key);return index<14?'var(--c'+index+')':'hsl('+Math.round((index*137.508)%360)+' 58% 52%)';}
+    const COLOURED=6,OTHER='color-mix(in srgb, var(--faint) 40%, var(--surface))';
+    // With many options only the leading ones get a colour; the rest share one grey so the map stays readable.
+    function optionColor(question,key,summary){
+      if(summary&&Object.keys(summary.probabilities??{}).length>COLOURED+1&&!ranked(summary).slice(0,COLOURED).some(([k])=>k===key))return OTHER;
+      const index=optionIndex(question,key);return index<14?'var(--c'+index+')':'hsl('+Math.round((index*137.508)%360)+' 40% 60%)';
+    }
     function ranked(summary){return Object.entries(summary?.probabilities??{}).sort((a,b)=>b[1]-a[1]);}
     function stageQuestions(stage){return stage?.kind==='poll'?Object.keys(stage.questions):stage?(stage.outputQuestion?[stage.outputQuestion]:[]):[];}
     function segmentLabel(key,stage){
@@ -181,14 +186,14 @@ export function renderReport(run: RunRecord, options: { workspace?: boolean } = 
       main.append(el('span','eyebrow',stage.kind==='decision'?'Final result':'Answer · '+stage.label));
       const pairs=ranked(summary);
       if(summary.type==='choice'&&pairs.length){
-        const [win,top]=pairs[0],runner=pairs[1];const big=el('div','big');const sw=el('span','swatch');sw.style.background=optionColor(question,win);big.append(sw,choiceLabel(question,win));main.append(big);
+        const [win,top]=pairs[0],runner=pairs[1];const big=el('div','big');const sw=el('span','swatch');sw.style.background=optionColor(question,win,summary);big.append(sw,choiceLabel(question,win));main.append(big);
         const margin=summary.margin??(runner?top-runner[1]:top);
         let why=choiceLabel(question,win)+' came out on top with '+pct(top)+(runner?', '+points(margin)+' ahead of '+choiceLabel(question,runner[0]):'')+'.';
         if(runner&&margin<CLOSE)why+=' That is a close result, so treat the top names as near ties.';
         const segs=Object.entries(summary.bySegment??{});if(segs.length>1){const agree=segs.filter(([,s])=>ranked(s)[0]?.[0]===win).length;why+=' '+agree+' of '+segs.length+' segments put it first.';}
         if(stage.kind!=='poll')why+=' '+stagePlain(stage);
         main.append(el('p','why',why));
-        side.append(el('span','eyebrow','Top of the ranking'));const bars=el('div','bars');pairs.slice(0,3).forEach(([key,value],i)=>bars.append(barRow(choiceLabel(question,key),value,top,optionColor(question,key),i+1,i===0)));side.append(bars);
+        side.append(el('span','eyebrow','Top of the ranking'));const bars=el('div','bars');pairs.slice(0,3).forEach(([key,value],i)=>bars.append(barRow(choiceLabel(question,key),value,top,optionColor(question,key,summary),i+1,i===0)));side.append(bars);
         if(runner){const lead=el('p','hint','Lead over #2: ');lead.append(el('strong','',points(margin)),leadPill(margin));side.append(lead);}
       }else if(summary.type==='score'&&typeof summary.mean==='number'){
         main.append(el('div','big',fmt(summary.mean,1)+' out of '+(Math.max(...pairs.map(([k])=>Number(k))))),el('p','why',scoreWords(summary,question)));
@@ -214,7 +219,7 @@ export function renderReport(run: RunRecord, options: { workspace?: boolean } = 
       const question=questionFor(stage,qid);const block=el('div','question');block.append(el('h3','',summary.label||question?.label||qid));
       if(summary.type==='choice'){
         const pairs=ranked(summary),top=pairs[0]?.[1]??0,bars=el('div','bars');block.append(bars);
-        toggleRows(pairs.map(([key,value],i)=>barRow(choiceLabel(question,key),value,top,optionColor(question,key),i+1,i===0)),8,bars,'options');
+        toggleRows(pairs.map(([key,value],i)=>barRow(choiceLabel(question,key),value,top,optionColor(question,key,summary),i+1,i===0)),8,bars,'options');
         if(pairs.length>1){const margin=summary.margin??pairs[0][1]-pairs[1][1];const lead=el('p','hint','Lead over #2: ');lead.append(el('strong','',points(margin)),leadPill(margin));block.append(lead);}
         if(compact&&Object.keys(summary.bySegment??{}).length>1){const box=el('div','question');box.hidden=true;segmentTable(stage,summary,question,box);const more=button('Show by segment','more');more.setAttribute('aria-expanded','false');more.addEventListener('click',()=>{box.hidden=!box.hidden;more.textContent=box.hidden?'Show by segment':'Hide segments';more.setAttribute('aria-expanded',String(!box.hidden));});block.append(more,box);}
         else segmentTable(stage,summary,question,block);
@@ -249,7 +254,7 @@ export function renderReport(run: RunRecord, options: { workspace?: boolean } = 
         const ids=stageQuestions(stage).filter(qid=>result.summaries[qid]);if(!ids.length)return;shown++;
         const block=el('div','step-results'),title=el('div','step-title');title.append(el('span','eyebrow','Step '+(index+1)+' · '+KIND[stage.kind]),el('h3','',stage.label),el('span','hint',stagePlain(stage)));block.append(title);
         if(result.batching)block.append(el('p','hint',result.batching.note+' ('+result.batching.batches+' batches).'));
-        if(stage.kind==='decision'){const summary=result.summaries[ids[0]],question=questionFor(stage,ids[0]),top=ranked(summary)[0];if(top){const line=el('p','');const sw=el('span','swatch');sw.style.background=optionColor(question,top[0]);line.append(sw,' ',el('strong','',choiceLabel(question,top[0])),' with '+pct(top[1])+'. The ranking matches the step it came from.');block.append(line);host.append(block);return;}}
+        if(stage.kind==='decision'){const summary=result.summaries[ids[0]],question=questionFor(stage,ids[0]),top=ranked(summary)[0];if(top){const line=el('p','');const sw=el('span','swatch');sw.style.background=optionColor(question,top[0],summary);line.append(sw,' ',el('strong','',choiceLabel(question,top[0])),' with '+pct(top[1])+'. The ranking matches the step it came from.');block.append(line);host.append(block);return;}}
         ids.forEach(qid=>renderQuestion(stage,qid,result.summaries[qid],block,shown>1));host.append(block);
       });
       if(!shown)host.append(el('div','empty','No step recorded a result.'));
@@ -264,7 +269,7 @@ export function renderReport(run: RunRecord, options: { workspace?: boolean } = 
     }
     function seatColor(stage,qid,answer){
       if(!answer)return 'var(--hover)';const question=questionFor(stage,qid);
-      if(answer.type==='choice'){const top=ranked(answer)[0];return top?optionColor(question,top[0]):'var(--hover)';}
+      if(answer.type==='choice'){const top=ranked(answer)[0];return top?optionColor(question,top[0],stageResult(stage.id).summaries[qid]):'var(--hover)';}
       if(answer.type==='score'){const levels=question?.type==='score'?question.criteria.length-1:3;return 'color-mix(in srgb, var(--blue) '+Math.round(Math.min(1,answer.score/(levels||1))*85+15)+'%, var(--hover))';}
       return answer.noul>=0.5?'var(--blue)':'var(--control-line)';
     }
@@ -280,9 +285,9 @@ export function renderReport(run: RunRecord, options: { workspace?: boolean } = 
       if(persona.background)host.append(el('p','',persona.background));
       const {answers,votes}=personAnswers(stage,persona.id);
       Object.entries(answers).forEach(([qid,answer])=>{
-        const question=questionFor(stage,qid);const box=el('div','their');box.append(el('span','eyebrow',question?.label??qid));
-        if(answer.type==='choice'){const pairs=ranked(answer),top=pairs[0];if(top){const head=el('div','');const sw=el('span','swatch');sw.style.background=optionColor(question,top[0]);head.append(sw,' ',el('strong','',choiceLabel(question,top[0])),el('span','hint',' '+pct(top[1])+(pairs[1]?' · next '+choiceLabel(question,pairs[1][0])+' '+pct(pairs[1][1]):'')));box.append(head);}
-          const bars=el('div','bars');box.append(bars);toggleRows(pairs.map(([key,value])=>barRow(choiceLabel(question,key),value,1,optionColor(question,key))),4,bars,'options');}
+        const question=questionFor(stage,qid),overall=stageResult(stage.id).summaries[qid];const box=el('div','their');box.append(el('span','eyebrow',question?.label??qid));
+        if(answer.type==='choice'){const pairs=ranked(answer),top=pairs[0];if(top){const head=el('div','');const sw=el('span','swatch');sw.style.background=optionColor(question,top[0],overall);head.append(sw,' ',el('strong','',choiceLabel(question,top[0])),el('span','hint',' '+pct(top[1])+(pairs[1]?' · next '+choiceLabel(question,pairs[1][0])+' '+pct(pairs[1][1]):'')));box.append(head);}
+          const bars=el('div','bars');box.append(bars);toggleRows(pairs.map(([key,value])=>barRow(choiceLabel(question,key),value,1,optionColor(question,key,overall))),4,bars,'options');}
         else if(answer.type==='score')box.append(el('strong','',scoreLabel(question,Math.round(answer.score))+' ('+fmt(answer.score,1)+')'));
         else box.append(el('strong','',(gliner?'Relative yes score ':'Yes ')+pct(answer.noul)));
         host.append(box);
@@ -313,7 +318,7 @@ export function renderReport(run: RunRecord, options: { workspace?: boolean } = 
         const answers=new Map(personas.map(p=>[p.id,personAnswers(stage,p.id).answers[qid]]));
         const wrap=el('div','people'),map=el('div','map'),person=el('aside','person');person.setAttribute('aria-live','polite');
         const legend=el('div','legend');
-        if(question?.type==='choice'){const summary=stageResult(stage.id).summaries[qid];ranked(summary).forEach(([key])=>{const item=el('span');const sw=el('span','swatch');sw.style.background=optionColor(question,key);item.append(sw,choiceLabel(question,key));legend.append(item);});}
+        if(question?.type==='choice'){const summary=stageResult(stage.id).summaries[qid],pairs=ranked(summary),shown=pairs.length>COLOURED+1?pairs.slice(0,COLOURED):pairs;shown.forEach(([key])=>{const item=el('span');const sw=el('span','swatch');sw.style.background=optionColor(question,key,summary);item.append(sw,choiceLabel(question,key));legend.append(item);});if(shown.length<pairs.length){const item=el('span');const sw=el('span','swatch');sw.style.background=OTHER;item.append(sw,(pairs.length-shown.length)+' other options');legend.append(item);}}
         map.append(el('p','hint','Each square is one person, coloured by their answer to “'+(question?.label??qid)+'”. Select a square to see who they are.'),legend);
         const groups=new Map();personas.forEach(p=>{if(!groups.has(p.segment))groups.set(p.segment,[]);groups.get(p.segment).push(p);});
         let selected=personas[0]?.id;const seats=[];

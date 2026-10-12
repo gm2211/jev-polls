@@ -28,7 +28,8 @@ behaviors:
       Close (under 5 points) or Clear label, and how many segments put it first. Later steps show
       their ranking with the segment table behind a "Show by segment" button; a Final result step
       is one line. Who answered is the seat map used by the live audience view, one square per
-      person grouped by segment and coloured by their answer with the same option colours; selecting
+      person grouped by segment and coloured by their answer with the same option colours; with more than seven
+      options only the six leading ones get a colour and the rest share one grey; selecting
       a square shows that person's answers as bars and their attributes as readable fields and
       chips. Internal terms (within-segment weight, confidence, weighted total, poll, aggregate,
       decision, repeat-level comparison) are not shown; run identifiers, request counts, the
