@@ -8,7 +8,7 @@ import { NAVIGATION_CLIENT } from '../src/workspace-navigation-ui.js';
 function harness() {
   const escape = (value: unknown) => String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');
   const context: any = { S: { listPages: {} }, window: { innerWidth: 1280 }, inlineCohortTarget: () => false, poolForPhase: (_p:unknown,s:any) => s.pool, esc: escape, attr: escape, icon: () => '', render() {}, root: { querySelectorAll: () => [], querySelector: () => null } };
-  new Script(NAVIGATION_CLIENT + WORKSPACE_HOST_MAP_CLIENT + WORKSPACE_FLOW_CLIENT + ';globalThis.S=S;globalThis.api={S,hostMap,hostMapMember,hostMapDetails,hostMapAction,hostMapState,flowCohortMap}').runInNewContext(context);
+  new Script(NAVIGATION_CLIENT + WORKSPACE_HOST_MAP_CLIENT + WORKSPACE_FLOW_CLIENT + ';globalThis.S=S;globalThis.api={S,seatFitLines,seatPageSize,hostMapFocus,hostMap,hostMapMember,hostMapDetails,hostMapAction,hostMapState,flowCohortMap}').runInNewContext(context);
   return context.api;
 }
 const cohort = {id:'audience', name:'Audience', segments:[{id:'a',label:'Segment A',weightBasis:'assumed'}], sources:[], personas:Array.from({length:53},(_,i)=>({id:'p'+i,label:'Person '+i,segment:'a',background:'Synthetic <profile>',weight:2,syntheticFields:['background']}))};
@@ -56,4 +56,29 @@ test('pipeline member selection replaces map with focused detail and returns wit
   assert.doesNotMatch(focused,/host-map-members/);
   api.hostMapAction('host-member-close',{dataset:{map:key}});
   assert.match(api.flowCohortMap(pipeline,stage),/53 synthetic members/);
+});
+
+test('seat map pages shrink until the pane stops scrolling and grow back only while room for a whole line is spare', () => {
+  const api=harness();
+  assert.equal(api.seatFitLines(10,45,18,true,false),7,'45px of overflow drops three 18px lines');
+  assert.equal(api.seatFitLines(3,500,18,true,false),2,'never fewer than two lines');
+  assert.equal(api.seatFitLines(4,-40,18,true,false),6,'40px of room adds two lines');
+  assert.equal(api.seatFitLines(4,-40,18,false,false),4,'a map on one page has nothing to grow into');
+  assert.equal(api.seatFitLines(4,-40,18,true,true),4,'after shrinking for this pane size it does not grow again, so it cannot oscillate');
+  assert.equal(api.seatFitLines(4,-10,18,true,false),4,'less than a line of room changes nothing');
+  assert.equal(api.seatPageSize('host:x'),240,'a screenful before the pane is measured');
+  api.S.seatFits={'host:x':{size:96}};
+  assert.equal(api.seatPageSize('host:x'),96);
+  const html=api.hostMap(cohort,{key:'x'});
+  assert.equal((html.match(/class="live-seat"/g)||[]).length,53);
+  assert.match(html,/data-fit="host:x"/);
+});
+test('a selected member replaces the map, with a way back and to the neighbouring members', () => {
+  const api=harness();
+  const html=api.hostMapFocus(cohort,'proposal:j',cohort.personas[0],'All personas');
+  assert.match(html,/data-act="host-member-close" data-map="proposal:j"> All personas/);
+  assert.match(html,/aria-label="Previous member"/);
+  assert.match(html,/1 \/ 53/);
+  assert.match(html,/Synthetic &lt;profile>/);
+  assert.match(api.hostMapFocus({...cohort,personas:[{...cohort.personas[0],attributes:{budget:'£800'}}]},'k',{...cohort.personas[0],attributes:{budget:'£800'}},'Back'),/<dt>budget<\/dt><dd>£800<\/dd>/,'generated attributes stay visible');
 });
