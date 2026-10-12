@@ -439,7 +439,7 @@ function planCostTile(plan){const reusing=!S.rerunAll&&!!plan.newCost&&planReuse
 function runCaveats(plan){return '<p class="run-caveats"><strong>Model estimates, not human responses.</strong> Use this run to explore ideas, not to validate human preferences.</p>'}
 function reviewStep(p,item){
  const s=p.stages.find(x=>x.id===item.id),cohort=S.doc.cohorts.find(c=>c.id===p.cohorts[item.cohort]),n=id=>p.stages.findIndex(x=>x.id===id)+1;
- const title=s?flowNodeTitle(p,s):{title:item.label,sub:''},kind={poll:'Ask the audience',aggregate:'Combine',decision:'Final result',choose:'Final choice'}[item.kind]||item.kind;
+ const title=s?flowNodeTitle(p,s):{title:item.label,sub:''},kind={poll:'Ask the audience',aggregate:'Combine',decision:'Final answer · top option',choose:'Final answer · Jev decides'}[item.kind]||item.kind;
  const when=item.dependsOn.length?'After '+(item.dependsOn.length===1?'step ':'steps ')+item.dependsOn.map(n).join(', ')+(item.dependsOn.length>1&&s?.join==='any'?' (any one)':''):'Starts first';
  const who=item.kind==='poll'?(cohort?cohort.name+' · ':'')+(item.profiles!==undefined?plural(item.profiles,'persona')+((item.repeats||1)>1?' × '+item.repeats:''):''):item.kind==='aggregate'?'Weights the connected answers':item.kind==='choose'?'One Jev, no audience':'Picks the leading option, no model call';
  let details='';

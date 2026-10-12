@@ -23,8 +23,8 @@ function nextTodoText(p,todo){
   const s=p.stages.find(x=>x.id===todo.stageId),suffix=p.stages.length>1?' (step '+(p.stages.indexOf(s)+1)+')':'';
   if(s.kind==='aggregate')return 'choose the answers to combine'+suffix;
   if(s.kind==='decision')return 'choose the answer for the final result'+suffix;
-  if(s.kind==='choose'&&todo.tab==='connections')return 'connect what the final choice reads'+suffix;
-  if(s.kind==='choose'&&todo.tab==='question')return 'write what the final choice decides'+suffix;
+  if(s.kind==='choose'&&todo.tab==='connections')return 'connect what the final answer reads'+suffix;
+  if(s.kind==='choose'&&todo.tab==='question')return 'write what the final answer decides'+suffix;
   if(todo.tab==='question')return 'write the question'+suffix;
   if(todo.tab==='answers')return 'add the options'+suffix;
   return (flowSampleShort(p,s)?'lower the sample size':'choose who answers')+suffix;

@@ -11,8 +11,8 @@ function optionName(key,value){return value&&typeof value==='object'?value.label
 function optionDescription(value){return value&&typeof value==='object'?value.description:''}
 function stepTitle(p,s){
   const questions=Object.values(s.questions||{}),question=questions[0]?.label?.trim();
-  const custom=s.label?.trim(),prefix=(s.kind==='poll'||s.kind==='choose')&&custom&&!['First question','Next question','New question','Final choice'].includes(custom)&&custom!==question?custom+': ':'';
-  const title=s.kind==='choose'&&!(question&&!/^What should this (?:step|phase) decide\?$/.test(question))?(custom||'Final choice'):s.kind==='poll'||s.kind==='choose'?prefix+(question&&!/^What should this (?:step|phase) decide\?$/.test(question)?question:'Untitled question')+(questions.length>1?' + '+(questions.length-1)+' more':''):(s.label?.trim()||(s.kind==='aggregate'?'Combine answers':'Final result'));
+  const custom=s.label?.trim(),prefix=(s.kind==='poll'||s.kind==='choose')&&custom&&!['First question','Next question','New question','Final choice','Final answer'].includes(custom)&&custom!==question?custom+': ':'';
+  const title=s.kind==='choose'&&!(question&&!/^What should this (?:step|phase) decide\?$/.test(question))?(custom||'Final answer'):s.kind==='poll'||s.kind==='choose'?prefix+(question&&!/^What should this (?:step|phase) decide\?$/.test(question)?question:'Untitled question')+(questions.length>1?' + '+(questions.length-1)+' more':''):(s.label?.trim()||(s.kind==='aggregate'?'Combine answers':'Final result'));
   return (p.stages.findIndex(x=>x.id===s.id)+1)+'. '+title.replace(/\s+/g,' ');
 }
 function inputTitle(p,input){
@@ -22,7 +22,7 @@ function inputTitle(p,input){
 }
 function setupQuestionText(q){const text=q?.label||'';return /^What should this (?:step|phase) decide\?$/.test(text.trim())?'':text}
 function setupStageRole(p,s){
-  if(s.kind==='choose')return 'Final choice';
+  if(s.kind==='choose')return 'Final answer · Jev decides';
   if(s.kind!=='poll')return s.kind==='aggregate'?'Combined answer':'Final answer';
   const polls=p.stages.filter(x=>x.kind==='poll'),index=polls.findIndex(x=>x.id===s.id);
   return index===0?'Main question':s.dependsOn?.length?'Follow-up '+index:'Independent question '+(index+1);
@@ -213,7 +213,7 @@ function resultSetup(p,s){
     return '<button class="setup-choice" data-act="setup-result" data-source="'+attr(source.id)+'" data-question="'+attr(q.id)+'" aria-pressed="'+selected+'"><strong>'+esc(q.label||source.label)+'</strong><span>'+'Step '+(p.stages.indexOf(source)+1)+' · '+answerName(q.type)+(selected?' · Selected':'')+'</span></button>';
   }).join('');
   // Combine answers is a weighted average; a Final choice has Jev read the same outputs and pick one answer.
-  const switchToChoice=s.kind==='aggregate'?'<div class="notice setup-to-choice"><p>Want Jev to weigh these answers and pick one, instead of averaging them?</p><button type="button" class="button small" data-act="setup-to-choice">Switch to Final choice</button></div>':'';
+  const switchToChoice=s.kind==='aggregate'?'<div class="notice setup-to-choice"><p>Want Jev to weigh these answers and pick one, instead of averaging them?</p><button type="button" class="button small" data-act="setup-to-choice">Let Jev decide instead</button></div>':'';
   return switchToChoice+panel(s.kind==='decision'?'Which answer should supply the result?':'Which answers should be combined?',s.kind==='decision'?'Uses the leading option from one earlier answer.':'Choose answers with matching options or ordered levels. New selections get equal weight.','<div class="setup-connections">'+(content||'<p>No compatible earlier answers available.</p>')+'</div>'+page.controls,'<div class="setup-step-toolbar">'+setupQuestionToolbar(p,s)+'</div>');
 }
 function setupAction(a,el){
@@ -228,9 +228,9 @@ function setupAction(a,el){
     const base=s.inputs[0]&&resolvedQuestion(p,s.inputs[0].stage,s.inputs[0].question),inputs={};
     s.inputs.forEach(input=>{let key='answer_'+(p.stages.findIndex(x=>x.id===input.stage)+1),n=2;while(Object.hasOwn(inputs,key))key='answer_'+(p.stages.findIndex(x=>x.id===input.stage)+1)+'_'+n++;inputs[key]={stage:input.stage,question:input.question,select:'responses'}});
     const question=base?{...clone(base),instructions:'Weigh every earlier output you are given and answer once for the study as a whole.'}:{type:'choice',label:'',instructions:'Weigh every earlier output you are given and choose the best option for the study as a whole.',criteria:{option_a:'',option_b:''}};
-    const next={id:s.id,kind:'choose',label:s.label==='Combined answers'?'Final choice':s.label,questions:{[s.outputQuestion||'choice']:question},inputs,dependsOn:[...s.dependsOn],...(s.join?{join:s.join}:{}),...(s.when?{when:s.when}:{})};
+    const next={id:s.id,kind:'choose',label:s.label==='Combined answers'?'Final answer':s.label,questions:{[s.outputQuestion||'choice']:question},inputs,dependsOn:[...s.dependsOn],...(s.join?{join:s.join}:{}),...(s.when?{when:s.when}:{})};
     Object.keys(s).forEach(key=>delete s[key]);Object.assign(s,next);
-    S.sections['flow-inspector']='question';S.dirty=true;S.plan=null;render();say('Switched to Final choice. Jev reads every connected answer and picks one.');return true;
+    S.sections['flow-inspector']='question';S.dirty=true;S.plan=null;render();say('Switched to a Final answer that Jev decides. Jev reads every connected answer and picks one.');return true;
   }
   if(a==='setup-result'){
     const source=dataInputOptions(p,s).find(x=>x.id===el.dataset.source),qid=el.dataset.question,q=source&&resolvedQuestion(p,source.id,qid);
