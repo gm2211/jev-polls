@@ -273,7 +273,7 @@ export function renderReport(run: RunRecord, options: { workspace?: boolean } = 
       if(answer.type==='score'){const levels=question?.type==='score'?question.criteria.length-1:3;return 'color-mix(in srgb, var(--blue) '+Math.round(Math.min(1,answer.score/(levels||1))*85+15)+'%, var(--hover))';}
       return answer.noul>=0.5?'var(--blue)':'var(--control-line)';
     }
-    const humanKey=key=>key.replace(/([a-z])([A-Z])/g,'$1 $2').replace(/[_-]+/g,' ').replace(/^./,c=>c.toUpperCase());
+    const humanKey=key=>key.replace(/([a-z])([A-Z])/g,(_,a,b)=>a+' '+b.toLowerCase()).replace(/[_-]+/g,' ').replace(/^./,c=>c.toUpperCase());
     function attributeValue(value){
       if(Array.isArray(value)){const chips=el('div','chips');value.forEach(item=>chips.append(el('span','chip',item!==null&&typeof item==='object'?JSON.stringify(item):String(item))));return chips;}
       if(value!==null&&typeof value==='object')return el('span','',Object.entries(value).map(([k,v])=>humanKey(k)+': '+(v!==null&&typeof v==='object'?JSON.stringify(v):String(v))).join(' · '));
