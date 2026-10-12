@@ -12,8 +12,8 @@ import { BYOS_ENGINES, ByosConnectionError, extractJsonObject, isByosEngine, typ
 import { cohortSchema, jsonSchema, parseCohort } from './schema.js';
 import { MAX_COHORT_PERSONAS, MAX_WORKSPACE_BYTES } from './limits.js';
 import { validateWorkspaceDocument } from './workspace-store.js';
-import type { Cohort, Persona } from './types.js';
-import { createCohortInsights, getPersonaFieldValue, matchesDistributionBucket, validateTargets } from './cohort-insights.js';
+import type { Cohort, Json, Persona } from './types.js';
+import { attributeName, createCohortInsights, getPersonaFieldValue, matchesDistributionBucket, validateTargets } from './cohort-insights.js';
 import type { WorkspaceDocument } from './workspace-types.js';
 
 export type LocalAgentEngine = 'codex' | 'claude' | 'chatgpt' | ByosEngine;
@@ -264,12 +264,31 @@ export function personasFromTable(table: { fields?: unknown; rows?: unknown }, s
     (fields as string[]).forEach((raw, column) => {
       const field = raw.trim();
       if (field === 'position') return;
-      if (field.startsWith('attributes.')) attributes[field.slice('attributes.'.length)] = row[column];
+      if (field.startsWith('attributes.')) attributes[field.replace(/^(attributes\.)+/, '')] = row[column];
       else if (PERSONA_COLUMNS.has(field)) persona[field] = row[column];
       else attributes[field] = row[column];
     });
     return { ...persona, attributes };
   });
+}
+/**
+ * A persona's attributes spelled as the earlier personas of its cohort spelled them. Batches written at the same time
+ * can name one attribute currentGames, current_games or Current Games; the first spelling seen is kept for all of them.
+ * An attributes object nested inside attributes is lifted out.
+ */
+export function canonicalAttributes(attributes: Record<string, Json>, spellings: Map<string, string>): Record<string, Json> {
+  const nested = attributes.attributes;
+  const entries = nested && typeof nested === 'object' && !Array.isArray(nested)
+    ? [...Object.entries(attributes).filter(([key]) => key !== 'attributes'), ...Object.entries(nested)]
+    : Object.entries(attributes);
+  const result: Record<string, Json> = {};
+  for (const [key, value] of entries) {
+    const name = attributeName(key) || key;
+    const spelled = spellings.get(name) ?? key;
+    spellings.set(name, spelled);
+    if (!Object.hasOwn(result, spelled)) result[spelled] = value;
+  }
+  return result;
 }
 const nativePersonas = (engine: LocalAgentEngine) => engine !== 'codex';
 /**
@@ -1422,6 +1441,10 @@ export class LocalAgentService {
     const batchLimit = () => limitCause ? { allowed, cause: limitCause } : undefined;
     let acceptedPersonas = 0;
     let acceptedBatches = 0;
+    // Attribute spellings of this cohort: distribution target fields first, then whatever accepted personas used first.
+    const attributeSpellings = new Map<string, string>();
+    for (const target of targets) if (target.field.startsWith('attributes.')) { const key = target.field.slice('attributes.'.length).split('.')[0]!; attributeSpellings.set(attributeName(key) || key, key); }
+    for (const personas of Object.values(entry.checkpoint?.batches ?? {})) for (const persona of personas) canonicalAttributes(persona.attributes, attributeSpellings);
     let retries = 0;
     let serializedPersonaBytes = 2;
     let emptyGeneratedBytes = 0;
@@ -1599,7 +1622,7 @@ export class LocalAgentService {
       const requestData = dataFor(offset, batchSize);
       const cohortGuidance = guidance.replace('documentJson is a string containing the COMPLETE workspace document;', 'documentJson is a string containing the COMPLETE target cohort object;');
       const quotas = 'Obey each distributionAssignments slot in the exact returned persona order. Numeric buckets include min and exclude max; categorical buckets require the exact value. Targets control unweighted synthetic persona counts, never study weights. Do not approximate quotas or invent missing evidence. No unrelated workspace data is provided or needed.';
-      const personasPrompt = (first: number, count: number) => `${personaPromptHead(input.engine)} Write batch ${batchIndex + 1} of ${batches} of the personas of cohort ${request.id}, covering final positions ${first + 1}–${first + count} of ${request.size}. ${nativePersonas(input.engine) ? `Return the personas as a table, and nothing else: no cohort object and no cohort details. fields names the columns once: position, label, segment, age, background, then attributes.<name> for each attribute (and sourceIds only when a persona cites a source). rows holds exactly ${count} arrays, one per persona, each with one value per field in that order, starting with its final position (${first + 1} to ${first + count}); values follow the persona schema, with age as a number.` : `Return documentJson as a JSON array of exactly ${count} persona objects matching the persona schema, and nothing else: no cohort object and no cohort details.`}${kept.length ? ` Your previous reply for this batch had ${kept.length} of its ${batchSize} people, which are kept; write only the remaining ${count}, different from them.` : ''} Write only the fields in the persona schema; the app adds ids, weights and synthetic-field labels. The cohort details (cohortMetadata) are already set and are not yours to change: give each persona one of its segment ids, and add sourceIds only to cite its source ids. Keep every persona an adult and question-independent. Other batches are written at the same time, so make every person in this batch distinct, from each other and from the listed recent examples, while remaining plausible for the same population.${segmentPlan.length ? ' Give this batch exactly the segment mix in segmentMix (segment id: number of personas), which keeps the whole cohort in proportion to the segment weights.' : ''} ${quotas}\n\nPersona schema:\n${JSON.stringify(personaJsonSchema)}\n\nRequest data:\n${JSON.stringify(dataFor(first, count))}`;
+      const personasPrompt = (first: number, count: number) => `${personaPromptHead(input.engine)} Write batch ${batchIndex + 1} of ${batches} of the personas of cohort ${request.id}, covering final positions ${first + 1}–${first + count} of ${request.size}. ${nativePersonas(input.engine) ? `Return the personas as a table, and nothing else: no cohort object and no cohort details. fields names the columns once: position, label, segment, age, background, then attributes.<name> for each attribute (and sourceIds only when a persona cites a source). rows holds exactly ${count} arrays, one per persona, each with one value per field in that order, starting with its final position (${first + 1} to ${first + count}); values follow the persona schema, with age as a number.` : `Return documentJson as a JSON array of exactly ${count} persona objects matching the persona schema, and nothing else: no cohort object and no cohort details.`}${kept.length ? ` Your previous reply for this batch had ${kept.length} of its ${batchSize} people, which are kept; write only the remaining ${count}, different from them.` : ''} Write only the fields in the persona schema; the app adds ids, weights and synthetic-field labels. Name each attribute the request lists with one camelCase key (Current games becomes currentGames), spelled the same way in every batch, and keep attributes flat: never nest an attributes object inside attributes. The cohort details (cohortMetadata) are already set and are not yours to change: give each persona one of its segment ids, and add sourceIds only to cite its source ids. Keep every persona an adult and question-independent. Other batches are written at the same time, so make every person in this batch distinct, from each other and from the listed recent examples, while remaining plausible for the same population.${segmentPlan.length ? ' Give this batch exactly the segment mix in segmentMix (segment id: number of personas), which keeps the whole cohort in proportion to the segment weights.' : ''} ${quotas}\n\nPersona schema:\n${JSON.stringify(personaJsonSchema)}\n\nRequest data:\n${JSON.stringify(dataFor(first, count))}`;
       let prompt = personasOnly
         ? personasPrompt(offset, batchSize)
         : `${cohortGuidance} Prepare one bounded batch for cohort ${request.id}. Return documentJson as one cohort object matching the cohort schema, not a workspace. This is batch ${batchIndex + 1} of ${batches}, covering final positions ${offset + 1}–${offset + batchSize} of ${request.size}; return exactly ${batchSize} new personas. Keep every persona an adult and question-independent. Make this batch distinct from the listed recent examples while remaining plausible for the same population. ${original ? 'Copy originalCohortMetadata exactly, preserving sources, assumptions, segments, weights, weight provenance and distributionTargets.' : 'This batch establishes cohort metadata, sources, assumptions, segments and weights.'} Add only new personas. Include at least one persona for every positive-weight segment in the final complete cohort. ${quotas}\n\nCohort schema:\n${JSON.stringify(jsonSchema('cohort'))}\n\nRequest data:\n${JSON.stringify(requestData)}`;
@@ -1634,7 +1657,7 @@ export class LocalAgentService {
           if (!personasOnly) firstExplanation = output.explanation;
           const accepted: Cohort['personas'] = [];
           for (const persona of candidate.personas) {
-            const indexed = { ...persona, id: `persona-${String(offset + accepted.length + 1).padStart(5, '0')}` };
+            const indexed = { ...persona, attributes: canonicalAttributes(persona.attributes, attributeSpellings), id: `persona-${String(offset + accepted.length + 1).padStart(5, '0')}` };
             serializedPersonaBytes += (acceptedPersonas + accepted.length ? 1 : 0) + Buffer.byteLength(JSON.stringify(indexed));
             accepted.push(indexed);
             if (unchangedBytes + emptyGeneratedBytes - 2 + serializedPersonaBytes > MAX_WORKSPACE_BYTES) throw new FatalDraftFailure('The completed cohort would exceed the workspace size limit. Use a smaller persona count or reduce saved workspace data.');

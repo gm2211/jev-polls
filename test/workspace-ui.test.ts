@@ -1295,6 +1295,27 @@ test('persona grouping, filtering, and pagination operate on the full cohort', a
   assert.match(browser.element('app').innerHTML, /of 50/);
 });
 
+test('group-by menu nests attribute objects and lists each attribute once however batches spelled it', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, cohortExplorer } = browser.client;
+  const cohort = S.doc.cohorts[0];
+  const base = structuredClone(cohort.personas[0]);
+  cohort.personas = [
+    { ...base, id: 'a', label: 'Ann', attributes: { currentGames: 'Chess', playerHabits: { hoursPerDay: 2 } } },
+    { ...base, id: 'b', label: 'Bo', attributes: { current_games: 'Go', playerHabits: { hoursPerDay: 3 } } },
+    { ...base, id: 'c', label: 'Cy', attributes: { attributes: { currentGames: 'Chess' }, playerHabits: { hoursPerDay: 1 }, notes: 'rare' } },
+  ];
+  S.cohortId = cohort.id; S.personaGroup = 'attributes.current_games';
+  const html = cohortExplorer(cohort);
+  const menu = html.slice(html.indexOf('name="personaGroup"'), html.indexOf('</select>', html.indexOf('name="personaGroup"')));
+  assert.equal((menu.match(/>Current Games</g) ?? []).length, 1, 'three spellings share one choice');
+  assert.match(menu, /<optgroup label="Profile">.*>Age<.*>Segment<.*<\/optgroup>/);
+  assert.match(menu, /<optgroup label="Player Habits"><option value="attributes.playerHabits.hoursPerDay" >Hours Per Day<\/option><\/optgroup>/);
+  assert.match(menu, /<optgroup label="On some personas only">.*>Notes · 1 of 3</);
+  assert.match(menu, /<option value="attributes.currentGames" selected>Current Games</, 'a saved spelling selects its merged choice');
+  assert.equal((html.match(/<h3>Chess<\/h3>/g) ?? []).length, 1, 'personas group by the merged attribute');
+});
+
 test('explorer controls stay transient and target validation plus positive persona weights gate edits', async () => {
   const browser = browserHarness(); await settle();
   const { S, explorerAction } = browser.client;

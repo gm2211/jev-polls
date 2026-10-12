@@ -40,13 +40,23 @@ function segmentsEditor(c){const shares=segmentShares(c),selected=c.segments.fin
 function cohortSourceNote(c){return '<div class="source-empty">'+(c.sources.length?'These references support only the facts described in their notes. The personas remain synthetic, not real respondents.':'No reference documents attached. Persona details and group sizes are assumptions unless you add supporting evidence.')+'</div>'}
 function personaCard(c,p,weights){const share=weights.find(x=>x.personaId===p.id)?.weight||0;return '<button class="persona-tile" data-act="open-persona" data-id="'+attr(p.id)+'"><span class="persona-avatar" aria-hidden="true">'+esc((p.label||'VP').split(/\s+/).slice(0,2).map(x=>x[0]).join(''))+'</span><strong>'+esc(p.label)+'</strong><small class="persona-meta">'+esc(c.segments.find(s=>s.id===p.segment)?.label||p.segment)+' · age '+p.age+' · '+(p.sourceIds.length?plural(p.sourceIds.length,'source'):'synthetic')+'</small><small class="persona-share">'+percent(share*100)+'<span>cohort share</span></small><span class="open-cue" aria-hidden="true">→</span></button>'}
 
+/** Group-by choices: profile fields, then attributes most personas carry (an attribute object's fields under its own heading), then attributes only some personas carry, with how many. */
+function personaGroupOptions(c,attributes){
+  const total=c.personas.length,common=a=>a.count*2>=total,partial=attributes.filter(a=>!common(a)).sort((a,b)=>b.count-a.count||a.label.localeCompare(b.label));
+  return [{value:'',label:'No grouping'},{value:'age',label:'Age',group:'Profile'},{value:'segment',label:'Segment',group:'Profile'},
+    ...attributes.filter(a=>common(a)&&!a.family).map(a=>({value:a.field,label:a.label,group:'Attributes'})),
+    ...attributes.filter(a=>common(a)&&a.family).map(a=>({value:a.field,label:a.label,group:a.family})),
+    ...partial.map(a=>({value:a.field,label:(a.family?a.family+' › ':'')+a.label+' · '+a.count.toLocaleString('en-US')+' of '+total.toLocaleString('en-US'),group:'On some personas only'}))];
+}
 function personasExplorer(c){
-  const fields=insights.discoverFields(c),weights=insights.effectiveWeights(c);
+  const attributes=insights.groupableAttributes(c),weights=insights.effectiveWeights(c);
   let people=c.personas;if(S.personaFilter)people=people.filter(p=>insights.matchesBucket(p,S.personaFilter.field,S.personaFilter.bucket));
-  const group=S.personaGroup||'';if(group)people=[...people].sort((a,b)=>valueText(personaValue(a,group)).localeCompare(valueText(personaValue(b,group)),undefined,{numeric:true}));
+  const chosen=attributes.find(a=>a.paths.includes(S.personaGroup)),group=chosen?chosen.field:['age','segment'].includes(S.personaGroup)?S.personaGroup:'';
+  const groupValue=p=>chosen?chosen.paths.map(path=>personaValue(p,path)).find(v=>v!==undefined&&v!==null):personaValue(p,group);
+  if(group)people=[...people].sort((a,b)=>valueText(groupValue(a)).localeCompare(valueText(groupValue(b)),undefined,{numeric:true}));
   const page=pageItems(people,'personas',viewportPageSize(12,6));S.personaPage=page.index;
-  const groups=new Map();for(const p of page.items){let key=group?valueText(personaValue(p,group)):'';if(group==='segment')key=c.segments.find(s=>s.id===p.segment)?.label||key;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(p)}
-  const controls='<div class="explorer-controls">'+select('personaGroup',[{value:'',label:'No grouping'},...fields.map(f=>({value:f.field,label:cohortFieldLabel(f.field)}))],group,'Group personas by')+'<button class="button" data-act="new-persona">＋ Add persona</button></div>';
+  const groups=new Map();for(const p of page.items){let key=group?valueText(groupValue(p)):'';if(group==='segment')key=c.segments.find(s=>s.id===p.segment)?.label||key;if(!groups.has(key))groups.set(key,[]);groups.get(key).push(p)}
+  const controls='<div class="explorer-controls">'+select('personaGroup',personaGroupOptions(c,attributes),group,'Group personas by')+'<button class="button" data-act="new-persona">＋ Add persona</button></div>';
   const filter=S.personaFilter?'<p class="notice">Showing '+esc(cohortFieldLabel(S.personaFilter.field))+': '+esc(S.personaFilter.bucket.label)+' <button class="button small" data-act="persona-clear-filter">Show all personas</button></p>':'';
   const cards=[...groups].map(([label,rows])=>'<section class="persona-group">'+(label?'<h3>'+esc(label)+'</h3>':'')+'<div class="persona-grid">'+rows.map(p=>personaCard(c,p,weights)).join('')+'</div></section>').join('');
   return '<section class="panel personas-panel" aria-label="Personas">'+controls+filter+(cards||'<p class="subtle">No matching personas.</p>')+page.controls+'</section>';
