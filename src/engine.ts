@@ -305,7 +305,8 @@ export async function runPipeline(pipeline: Pipeline, cohorts: Record<string, Co
     let stage: ChooseStage;
     try { stage = { ...written, questions: resolveOptionsFrom(pipeline, written, stages) }; }
     catch (error) { return fail(errorMessage(error)); }
-    const bindings = Object.entries(stage.inputs);
+    // With join 'any', an input whose step was skipped is left out rather than sent empty.
+    const bindings = Object.entries(stage.inputs).filter(([, binding]) => stages[binding.stage]?.status === 'completed');
     const whole = resolvePollInputs(Object.fromEntries(bindings.filter(([, binding]) => (binding.select ?? 'summary') !== 'responses')), stages) as Record<string, Json>;
     const items: ChooseInput[] = bindings.map(([alias, binding]) => {
       const sourceLabel = pipeline.stages.find((item) => item.id === binding.stage)?.label ?? binding.stage;

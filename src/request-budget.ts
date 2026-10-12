@@ -548,7 +548,8 @@ export function planChoose(pipeline: Pipeline, stage: ChooseStage, inputs: Choos
   const largest = Math.max(mapLargest, mapRequests > 1 ? reduceState + emptyReduce.longestQuestionTokens : 0);
   const total = Math.max(mapTotal, mapRequests > 1 ? reduceState + emptyReduce.allQuestionsTokens : 0);
   const fits = !blocked && largest <= JEV_STATE_AND_QUESTION_LIMIT && total <= JEV_REQUEST_LIMIT;
-  const reads = parts.map((part) => `${plural(part.totalResponses, 'response')} from ${part.sourceLabel}`).join(' and ');
+  const list = parts.map((part) => `${plural(part.totalResponses, 'response')} from ${part.sourceLabel}`);
+  const reads = list.length > 1 ? `${list.slice(0, -1).join(', ')} and ${list.at(-1)}` : list[0]!;
   return {
     parts, totalResponses, mapRequests, groupSize, reduceRounds, layerRequests, requestsPerRun: layerRequests.reduce((sum, count) => sum + count, 0),
     largest, total, fits, meanRequestTokens: Math.ceil(mapSum / Math.max(1, mapRequests)), reduceTotal: mapRequests > 1 ? reduceState + emptyReduce.allQuestionsTokens : 0, ...(blocked ? { problem: blocked } : !fits ? { problem: 'even one slice or one combining request is over the limit; read summaries instead of every answer, or shorten the questions' } : {}),
