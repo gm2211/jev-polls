@@ -96,7 +96,7 @@ export type LocalAgentCommandResult =
   | { kind: 'draft'; target: 'project' | 'cohort' | 'study'; prompt: string; destination?: string; name?: string };
 export interface LocalAgentInput { projectId?: string; engine: LocalAgentEngine; model?: string; prompt: string; revision: number; document: WorkspaceDocument; cohort?: { id: string; size: number; step?: AudienceStep }; persona?: { cohortId: string; personaId: string }; options?: { pipelineId: string; stageId: string; questionId: string; material?: string }; material?: string; materialName?: string; command?: boolean; commandTargets?: CommandTarget[]; /** Continues the stopped cohort job with this id from its saved audience details and checked personas. */ resumeFrom?: string }
 export type LocalAgentSpawner = (command: string, args: readonly string[], options: SpawnOptionsWithoutStdio) => ChildProcessWithoutNullStreams;
-export interface LocalAgentOptions { chatgpt?: ChatGptDraftClient; byos?: Pick<ByosConnections, 'engines' | 'generate'>; spawn?: LocalAgentSpawner; timeoutMs?: number; probeTimeoutMs?: number; maxOutputBytes?: number; temporaryRoot?: string; /** Receives one structured line for every failed batch attempt and failed job. The workspace server writes them to stderr as JSON lines. */ log?: (line: Record<string, unknown>) => void; /** Waits before a retry after a rate limit. Resolves early when the signal aborts. Tests pass a fake. */ sleep?: (ms: number, signal: AbortSignal) => Promise<void>; /** Jitter source in [0, 1). */ random?: () => number; /** Shortest time a batch attempt runs before a second request for it may start (default 30 s). Tests pass 0. */ hedgeMinMs?: number; /** How often running batches are compared with accepted ones (default 2 s). */ hedgeCheckMs?: number; /** Folder where cohort jobs keep their audience details and checked personas, so a run can continue after a failure or an app restart. */ checkpointDirectory?: string }
+export interface LocalAgentOptions { chatgpt?: ChatGptDraftClient; byos?: Pick<ByosConnections, 'engines' | 'generate'>; spawn?: LocalAgentSpawner; timeoutMs?: number; probeTimeoutMs?: number; maxOutputBytes?: number; temporaryRoot?: string; /** Receives one structured line for every failed batch attempt and failed job. The workspace server writes them to stderr as JSON lines. */ log?: (line: Record<string, unknown>) => void; /** Waits before a retry after a rate limit. Resolves early when the signal aborts. Tests pass a fake. */ sleep?: (ms: number, signal: AbortSignal) => Promise<void>; /** Jitter source in [0, 1). */ random?: () => number; /** Shortest time a batch attempt runs before a second request for it may start (default 30 s). Tests pass 0. */ hedgeMinMs?: number; /** How often running batches are compared with accepted ones (default 2 s). */ hedgeCheckMs?: number; /** How long a Claude Code batch may stay silent once most batches are writing before a second request starts for it (default 10 s). */ quietHedgeMs?: number; /** Folder where cohort jobs keep their audience details and checked personas, so a run can continue after a failure or an app restart. */ checkpointDirectory?: string }
 export class LocalAgentError extends Error {
   constructor(readonly code: 'INVALID_AGENT_REQUEST' | 'AGENT_BUSY' | 'AGENT_SERVICE_CLOSED', message: string) { super(message); }
 }
@@ -113,15 +113,16 @@ const PERSONAS_PER_BATCH = 25;
 const MIN_PERSONAS_PER_BATCH = 10;
 /** Fewest and most persona batches a job runs at once. */
 const MIN_CONCURRENT_BATCHES = 16;
-const MAX_CONCURRENT_BATCHES = 64;
+const MAX_CONCURRENT_BATCHES = 48;
 /** Memory of one Claude Code batch process, measured at about 240 MB. */
 const CLI_PROCESS_BYTES = 250 * 1024 * 1024;
 /**
  * Persona batches run at once. Writing speed per stream is fixed by the model (about 170 tokens/s on Sonnet), so streams
  * are what shorten a large audience: 48 Claude Code Sonnet streams at once kept that speed with no rate limit in a real
  * run. Each Claude Code batch is its own process (about 240 MB and 1.5 CPU-seconds to start), so the machine sets the
- * number: four per CPU core and half the memory, between sixteen and 64. On an 18-core Mac with 48 at once, 1,000 people
- * took 58 s, of which about 17 s was each batch writing 21 people; 64 at once writes about 16 each.
+ * number: four per CPU core and half the memory, between sixteen and 48. On an 18-core Mac, 1,000 people took 58 s with 48
+ * at once and 75 s with 64: above about 50 requests the first reply came later (median 25 s against 17.5 s) and seven
+ * requests waited about 20 s more before any reply.
  * JEV_CONCURRENT_BATCHES overrides it, for benchmarks.
  */
 export function concurrentBatches(engine: LocalAgentEngine): number {
@@ -192,6 +193,14 @@ const HEDGE_FACTOR = 1.5;
 const HEDGE_AFTER_ACCEPTED = 3;
 const HEDGE_MIN_MS = 30_000;
 const HEDGE_CHECK_MS = 2_000;
+/**
+ * A Claude Code batch with no reply yet while most batches are writing is held by the service rather than slow: on a Mac
+ * with 64 at once, seven requests got their first reply about 20 s after the rest, and the run waited on them. Once three
+ * quarters of the running batches are writing, a batch still silent this much later gets a second request, a few beyond
+ * the concurrency window.
+ */
+const QUIET_HEDGE_MS = 10_000;
+const QUIET_HEDGE_SHARE = 0.75;
 /** Provider slots of second requests are offset from batch slots so their streamed output is kept apart. */
 const HEDGE_SLOT_OFFSET = 1_000_000;
 /** Accepted batches in a row that lift the window back to the job's full concurrency. */
@@ -798,6 +807,7 @@ export class LocalAgentService {
   private readonly random: () => number;
   private readonly hedgeMinMs: number;
   private readonly hedgeCheckMs: number;
+  private readonly quietHedgeMs: number;
   private readonly checkpointDirectory?: string;
   private closed = false;
   /** Set once the Claude CLI drafted after --model and --effort were dropped, so later audience calls skip them. */
@@ -820,6 +830,7 @@ export class LocalAgentService {
     this.random = options.random ?? Math.random;
     this.hedgeMinMs = Math.max(0, options.hedgeMinMs ?? HEDGE_MIN_MS);
     this.hedgeCheckMs = Math.max(1, options.hedgeCheckMs ?? HEDGE_CHECK_MS);
+    this.quietHedgeMs = Math.max(0, options.quietHedgeMs ?? QUIET_HEDGE_MS);
     this.checkpointDirectory = options.checkpointDirectory;
     this.loadCheckpoints();
   }
@@ -1495,6 +1506,27 @@ export class LocalAgentService {
         publishRunning();
       }
     };
+    // When most running batches first wrote; a batch still silent quietHedgeMs later gets a second request.
+    let mostWritingAt: number | undefined;
+    const quietExtra = Math.max(2, Math.ceil(concurrency / 8));
+    const considerQuietHedges = () => {
+      if (input.engine !== 'claude' || stopped || entry.cancelled || limitCause) return;
+      const active = [...running.entries()].filter(([, state]) => !state.checking && !state.waiting);
+      if (active.length < 4) return;
+      const now = Date.now();
+      if (mostWritingAt === undefined) {
+        if (active.filter(([batchIndex]) => entry.streamed.has(batchIndex)).length < active.length * QUIET_HEDGE_SHARE) return;
+        mostWritingAt = now;
+      }
+      if (now - mostWritingAt < this.quietHedgeMs) return;
+      for (const [batchIndex, state] of active) {
+        if (state.hedged || entry.streamed.has(batchIndex) || now - Date.parse(state.attemptStartedAt) < this.quietHedgeMs) continue;
+        if (inFlight + activeHedges >= allowed + quietExtra) return;
+        if (!hedges.get(batchIndex)?.()) continue;
+        this.logLine({ event: 'cohort-batch-hedged', jobId: entry.public.id, batch: batchIndex + 1, attempt: state.attempt, runningMs: now - Date.parse(state.attemptStartedAt), quiet: true });
+        publishRunning();
+      }
+    };
     const attemptBatch = async (batchIndex: number): Promise<void> => {
       const offset = offsets[batchIndex]!;
       const batchSize = batchSizeOf(batchIndex);
@@ -1664,7 +1696,7 @@ export class LocalAgentService {
         } finally { inFlight--; wakeStarts(); }
       }
     };
-    const hedgeTimer = setInterval(considerHedges, this.hedgeCheckMs); hedgeTimer.unref();
+    const hedgeTimer = setInterval(() => { considerHedges(); considerQuietHedges(); }, this.hedgeCheckMs); hedgeTimer.unref();
     try { await Promise.all(Array.from({ length: Math.min(concurrency, batches) }, worker)); }
     finally { clearInterval(hedgeTimer); }
     if (failure) throw (failure as { error: unknown }).error;
