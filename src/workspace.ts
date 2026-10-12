@@ -7,8 +7,9 @@ import { z } from 'zod';
 import { authStatus, setApiKey } from './auth.js';
 import { verifyTypeSafeConnection } from './auth-check.js';
 import { createProvider, ProviderError } from './provider.js';
-import { GLINER_MODEL, glinerStatus } from './gliner-provider.js';
-import { runPipeline } from './engine.js';
+import { GLINER_CACHE_IDENTITY, GLINER_MODEL, glinerStatus } from './gliner-provider.js';
+import { predictReuse, runPipeline } from './engine.js';
+import { costOf } from './request-budget.js';
 import { renderReport } from './report.js';
 import { loadRun } from './run-record.js';
 import { writeJson, writeText } from './io.js';
@@ -26,11 +27,12 @@ const MODEL = 'jev-1.13.0';
 const WORKSPACE_RUN_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const safeId = z.string().regex(/^[a-z][a-z0-9_-]*$/).max(160);
 const evaluationProvider = z.enum(['typesafe', 'gliner']);
-const runInput = z.object({ pipelineId: safeId, projectId: safeId.optional(), provider: evaluationProvider.default('typesafe'), revision: z.number().int().nonnegative(), planToken: z.string(), seed: z.string().min(1).max(200), concurrency: z.number().int().min(1).max(16), maxRequests: z.number().int().min(1).max(100_000) }).strict();
+const runInput = z.object({ pipelineId: safeId, projectId: safeId.optional(), provider: evaluationProvider.default('typesafe'), revision: z.number().int().nonnegative(), planToken: z.string(), seed: z.string().min(1).max(200).optional(), refresh: z.boolean().optional(), concurrency: z.number().int().min(1).max(16), maxRequests: z.number().int().min(1).max(100_000) }).strict();
 const savedJobSchema = z.object({
   id: z.string().regex(WORKSPACE_RUN_ID), projectId: safeId, pipelineId: safeId, pipelineName: z.string().max(100_000),
   status: z.enum(['running', 'completed', 'failed']), createdAt: z.string().max(100), message: z.string().max(100_000),
   provider: evaluationProvider.optional(),
+  seed: z.string().min(1).max(200).optional(),
   stages: z.array(z.object({ id: safeId, label: z.string().max(100_000), kind: z.enum(['poll', 'aggregate', 'decision']), dependsOn: z.array(safeId), status: z.enum(['pending', 'running', 'completed', 'skipped', 'failed']), reason: z.string().max(100_000).optional(), batching: z.object({ batches: z.number().int().positive(), reduceRounds: z.number().int().positive(), layers: z.number().int().nonnegative() }).strict().optional() }).strict()).optional(),
   progress: z.object({ stage: safeId, completed: z.number().int().nonnegative(), total: z.number().int().nonnegative() }).strict().optional(),
   liveMembers: z.array(z.object({ stage: safeId, personaId: safeId, label: z.string().max(100_000), segment: safeId, age: z.number().finite(), repeat: z.number().int().positive(), weight: z.number().finite().nonnegative().optional(), order: z.number().int().nonnegative().optional(), batch: z.object({ phase: z.enum(['map','combine']), done: z.number().int().nonnegative(), total: z.number().int().positive() }).strict().optional(), status: z.enum(['queued','running','completed','failed']), answers: z.record(z.string(), z.unknown()).optional(), model: z.string().optional(), cacheHit: z.boolean().optional(), reason: z.string().max(100_000).optional() }).strict()).optional(),
@@ -145,7 +147,7 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
           } catch { /* Ownerless artifacts are not workspace runs. */ }
         }
         if (!persistedProjectId || !existingProjects.has(persistedProjectId)) continue;
-        const summary: WorkspaceRun = { provider: record.provider, projectId: persistedProjectId, id, pipelineId: record.pipeline.id, pipelineName: record.pipeline.name, status: record.status, createdAt: record.createdAt, message, usage: record.usage, reportUrl: `/reports/${id}`, stages: recordedRunStages(record.pipeline, record), ...(persistedProgress ? { progress: persistedProgress } : {}), ...(persistedMembers ? { liveMembers: persistedMembers } : {}) };
+        const summary: WorkspaceRun = { provider: record.provider, seed: record.seed, projectId: persistedProjectId, id, pipelineId: record.pipeline.id, pipelineName: record.pipeline.name, status: record.status, createdAt: record.createdAt, message, usage: record.usage, reportUrl: `/reports/${id}`, stages: recordedRunStages(record.pipeline, record), ...(persistedProgress ? { progress: persistedProgress } : {}), ...(persistedMembers ? { liveMembers: persistedMembers } : {}) };
 
         jobs.set(summary.id, summary); runRecords.set(summary.id, join(path, 'run.json'));
       } catch {
@@ -167,6 +169,11 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
     const job = ownedRuns((await store.read()).document).find(item => item.id === id);
     if (!job) throw new HttpError(404, 'RUN_NOT_FOUND', 'Run was not found in an existing project.');
     return job;
+  }
+  /** A study keeps one seed across runs, so a run after a small edit samples the same personas and reuses every unchanged answer. */
+  function studySeed(document: WorkspaceDocument, pipelineId: string): string {
+    const latest = ownedRuns(document).filter(job => job.pipelineId === pipelineId && job.seed).sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+    return latest?.seed ?? pipelineId;
   }
   async function savedRunRecord(job: WorkspaceRun) {
     const path = runRecords.get(job.id);
@@ -215,7 +222,7 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
       activeProvider = provider;
       const record = await runPipeline(project.pipeline, project.cohorts, {
         provider, model: input.provider === 'gliner' ? GLINER_MODEL : MODEL,
-        seed: input.seed, concurrency: input.concurrency, maxRequests: input.maxRequests,
+        seed: job.seed!, refresh: input.refresh, concurrency: input.concurrency, maxRequests: input.maxRequests,
         cacheDir: join(directory, 'cache'),
         onProgress: event => { job.progress = event; job.message = `${event.stage}: ${event.completed} of ${event.total} evaluations processed`; options.emit?.({ event: 'progress', runId: job.id, ...event }); },
         onStageProgress: event => {
@@ -464,7 +471,7 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
       return;
     }
     if (method === 'POST' && pathname === '/api/plan') {
-      const input = z.object({ pipelineId: safeId, projectId: safeId.optional(), provider: evaluationProvider.default('typesafe') }).strict().parse(await body(request));
+      const input = z.object({ pipelineId: safeId, projectId: safeId.optional(), provider: evaluationProvider.default('typesafe'), seed: z.string().min(1).max(200).optional() }).strict().parse(await body(request));
       const saved = await store.read();
       let project;
       try { project = workspacePlan(saved.document, input.pipelineId, input.provider); }
@@ -475,7 +482,21 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
       plans.set(planToken, { pipelineId: input.pipelineId, revision: saved.revision, provider: input.provider, expires: Date.now() + 15 * 60_000 });
       const warnings = [...project.warnings];
       if (input.provider === 'gliner') warnings.push('GLiNER is a local English classifier. Its normalized label scores are not calibrated human response probabilities; persona simulation quality has not been established. Inputs above 512 combined text and question tokens are rejected.');
-      const plan: WorkspacePlan = { projectId: project.projectId, pipelineId: input.pipelineId, provider: input.provider, revision: saved.revision, planToken, model: input.provider === 'gliner' ? GLINER_MODEL : MODEL, maxRequests: project.maxRequests, ...(project.cost ? { cost: project.cost } : {}), warnings, stages: project.stages };
+      const model = input.provider === 'gliner' ? GLINER_MODEL : MODEL, seed = input.seed ?? studySeed(saved.document, input.pipelineId);
+      // Reading saved answers never calls the provider; if it cannot finish, every step simply shows as running again.
+      const reuse = await predictReuse(project.pipeline, project.cohorts, { provider: { name: input.provider, ...(input.provider === 'gliner' ? { cacheIdentity: GLINER_CACHE_IDENTITY } : {}) }, model, seed, cacheDir: join(directory, 'cache') }).catch(() => []);
+      const stages = project.stages.map(stage => {
+        const found = reuse.find(item => item.id === stage.id);
+        return { ...stage, reused: Math.min(stage.requests, found?.reused ?? 0), reuse: found?.state ?? 'run' as const };
+      });
+      // Saved answers cost nothing, so a step's estimate shrinks with the share of its requests that are new.
+      const newCost = project.cost ? costOf(stages.flatMap(stage => {
+        if (!stage.usage || !stage.requests || stage.reuse === 'skipped') return [];
+        const share = (stage.requests - stage.reused) / stage.requests;
+        return [{ inputTokens: Math.ceil(stage.usage.inputTokens * share), outputTokens: Math.ceil(stage.usage.outputTokens * share) }];
+      })) : undefined;
+      const newRequests = stages.reduce((sum, stage) => sum + (stage.reuse === 'skipped' ? 0 : stage.requests - stage.reused), 0);
+      const plan: WorkspacePlan = { projectId: project.projectId, pipelineId: input.pipelineId, provider: input.provider, revision: saved.revision, planToken, model, seed, maxRequests: project.maxRequests, newRequests, ...(project.cost ? { cost: project.cost, newCost } : {}), warnings, stages };
       send(response, 200, plan); return;
     }
     if (method === 'POST' && pathname === '/api/run') {
@@ -502,7 +523,7 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
         if (activeRun) throw new HttpError(409, 'RUN_IN_PROGRESS', 'A study is already running. Wait for it to finish.');
         // No await between consuming the review and taking the execution lock.
         if (!plans.delete(input.planToken)) throw new HttpError(409, 'REVIEW_REQUIRED', 'This review was already used. Review the study again.');
-        const job: WorkspaceRun = { projectId: project.projectId, provider: input.provider, id: randomUUID(), pipelineId: project.pipeline.id, pipelineName: project.pipeline.name, status: 'running', createdAt: new Date().toISOString(), message: input.provider === 'gliner' ? 'Loading local GLiNER model…' : 'Starting your reviewed study…', stages: initialRunStages(project.pipeline) };
+        const job: WorkspaceRun = { projectId: project.projectId, provider: input.provider, seed: input.seed ?? studySeed(latest.document, input.pipelineId), id: randomUUID(), pipelineId: project.pipeline.id, pipelineName: project.pipeline.name, status: 'running', createdAt: new Date().toISOString(), message: input.provider === 'gliner' ? 'Loading local GLiNER model…' : 'Starting your reviewed study…', stages: initialRunStages(project.pipeline) };
         jobs.set(job.id, job); activeRun = job;
         return { job, project };
       });

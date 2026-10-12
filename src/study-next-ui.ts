@@ -49,16 +49,45 @@ function studyNextButtons(p){
   return (a.secondary?'<button type="button" class="button" data-act="'+a.secondary.act+'">'+esc(a.secondary.label)+'</button>':'')+
     '<button type="button" class="button primary study-next" data-act="'+a.act+'"'+(a.id?' data-id="'+attr(a.id)+'"':'')+(a.kind?' data-kind="'+a.kind+'"':'')+(a.disabled?' disabled title="Set up the evaluation provider first"':'')+'>'+esc(a.label)+'</button>';
 }
+/** Steps whose saved answers still match come back from them; Re-run all steps asks every question again. */
+function planReusing(plan){return !S.rerunAll&&plan.stages.some(x=>x.reuse&&x.reuse!=='run')}
+function planNewRequests(plan){return S.rerunAll||plan.newRequests===undefined?Number(plan.maxRequests||0):plan.newRequests}
+function planReusedRequests(plan){return S.rerunAll?0:plan.stages.reduce((n,x)=>n+(x.reuse==='skipped'?0:x.reused||0),0)}
+/** The request count a step shows, with what it reuses from earlier runs. */
+function stageRequestsText(item,bold=false){
+  const count=n=>(bold?'<strong>'+n.toLocaleString('en-US')+'</strong>':n.toLocaleString('en-US'))+(n===1?' request':' requests');
+  if(S.rerunAll||!item.reuse||item.reuse==='run')return count(item.requests);
+  if(item.reuse==='skipped')return 'Skipped, its condition is false';
+  if(item.reuse==='reused')return item.requests?'No new requests':'Same result';
+  return (item.requests-item.reused).toLocaleString('en-US')+' new, '+item.reused.toLocaleString('en-US')+' saved';
+}
+function stageReuseTag(item){
+  if(S.rerunAll)return item.reuse&&item.reuse!=='run'?'<span class="reuse-tag reuse-again">Runs again</span>':'';
+  if(item.reuse==='reused')return '<span class="reuse-tag reuse-reused">Reused</span>';
+  if(item.reuse==='partial')return '<span class="reuse-tag reuse-partial">Partly reused</span>';
+  return '';
+}
+function planRequestsSummary(plan){
+  const fresh=planNewRequests(plan),reused=planReusedRequests(plan);
+  if(!fresh&&reused)return '<div><strong>No new requests</strong><span>Every step reuses its saved answers</span></div>';
+  return '<div><strong>Up to '+fresh.toLocaleString('en-US')+'</strong><span>'+(reused?'new model requests, '+reused.toLocaleString('en-US')+' reused from earlier runs':'model requests')+'</span></div>';
+}
+/** Offered only when something would be reused, since otherwise every step runs anyway. */
+function rerunAllControl(plan){
+  if(!plan.stages.some(x=>x.reuse&&x.reuse!=='run'))return '';
+  return '<label class="checkrow rerun-all" data-act="rerun-all"><input type="checkbox" '+(S.rerunAll?'checked':'')+'> Re-run all steps</label><p class="subtle rerun-all-help">'+(S.rerunAll?'Every step asks its questions again; saved answers are replaced.':'Steps whose question, audience, inputs and settings are unchanged reuse their saved answers.')+'</p>';
+}
 /** The run review as a slide-over: what will run, the request bound and the provider, with Run study one click away. The full page keeps run settings. */
 function studyReviewPanel(p){
   if(!S.plan||!S.reviewPanel||S.plan.pipelineId!==p.id)return '';
   const plan=S.plan,ready=evaluationReady(plan.provider);
-  const rows=plan.stages.map(item=>{const s=p.stages.find(x=>x.id===item.id),title=s?flowNodeTitle(p,s).title:item.label;return '<li class="review-panel-row"><span class="flow-number">'+(p.stages.findIndex(x=>x.id===item.id)+1)+'</span><span class="review-panel-title">'+esc(title)+'</span><span class="review-panel-requests">'+item.requests.toLocaleString('en-US')+(item.requests===1?' request':' requests')+'</span></li>'}).join('');
-  const summary='<div class="run-review-summary'+(plan.cost?' has-cost':'')+' review-panel-summary"><div><strong>'+plural(plan.stages.length,'step')+'</strong><span>in run order</span></div><div><strong>Up to '+Number(plan.maxRequests||0).toLocaleString('en-US')+'</strong><span>model requests</span></div>'+planCostTile(plan)+'<div><strong>'+esc(evaluationProviderName(plan.provider))+'</strong><span>'+esc(plan.model)+(plan.provider==='gliner'?' · runs locally with GLiNER, no billing':' · billed to your TypeSafe account')+'</span></div></div>';
-  return '<aside class="flow-inspector round-panel review-panel" aria-label="Before you run" data-inspector-tab="review"><div class="flow-inspector-head"><div class="round-panel-title"><h2 tabindex="-1">Before you run</h2><span class="round-panel-kind">'+esc(studyQuestion(p))+'</span></div><div class="row"><button class="button small icon-button" data-act="flow-panel-close" aria-label="Close" title="Close (Esc)">'+icon('close')+'</button></div></div><div class="flow-inspector-body" role="region" aria-label="Run summary">'+summary+runCaveats(plan)+'<h3>Steps, in run order</h3><ol class="review-panel-steps">'+rows+'</ol><p class="subtle">Nothing runs until you choose Run study.</p><div class="row"><button type="button" class="button small" data-act="next-review-page">'+icon('list')+' Every detail and run setting</button></div></div><div class="guided-footer"><button type="button" class="button" data-act="next-review-close">Edit study</button><div class="row"><button type="button" class="button" data-act="evaluation-settings" '+(ready?'hidden':'')+'>Set up evaluation provider</button><button type="button" class="button primary" data-act="start-run" '+(ready?'':'disabled')+'>Run study</button></div></div></aside>';
+  const rows=plan.stages.map(item=>{const s=p.stages.find(x=>x.id===item.id),title=s?flowNodeTitle(p,s).title:item.label;return '<li class="review-panel-row"><span class="flow-number">'+(p.stages.findIndex(x=>x.id===item.id)+1)+'</span><span class="review-panel-title">'+esc(title)+stageReuseTag(item)+'</span><span class="review-panel-requests">'+esc(stageRequestsText(item))+'</span></li>'}).join('');
+  const summary='<div class="run-review-summary'+(plan.cost?' has-cost':'')+' review-panel-summary"><div><strong>'+plural(plan.stages.length,'step')+'</strong><span>in run order</span></div>'+planRequestsSummary(plan)+planCostTile(plan)+'<div><strong>'+esc(evaluationProviderName(plan.provider))+'</strong><span>'+esc(plan.model)+(plan.provider==='gliner'?' · runs locally with GLiNER, no billing':' · billed to your TypeSafe account')+'</span></div></div>';
+  return '<aside class="flow-inspector round-panel review-panel" aria-label="Before you run" data-inspector-tab="review"><div class="flow-inspector-head"><div class="round-panel-title"><h2 tabindex="-1">Before you run</h2><span class="round-panel-kind">'+esc(studyQuestion(p))+'</span></div><div class="row"><button class="button small icon-button" data-act="flow-panel-close" aria-label="Close" title="Close (Esc)">'+icon('close')+'</button></div></div><div class="flow-inspector-body" role="region" aria-label="Run summary">'+summary+runCaveats(plan)+'<h3>Steps, in run order</h3><ol class="review-panel-steps">'+rows+'</ol>'+rerunAllControl(plan)+'<p class="subtle">Nothing runs until you choose Run study.</p><div class="row"><button type="button" class="button small" data-act="next-review-page">'+icon('list')+' Every detail and run setting</button></div></div><div class="guided-footer"><button type="button" class="button" data-act="next-review-close">Edit study</button><div class="row"><button type="button" class="button" data-act="evaluation-settings" '+(ready?'hidden':'')+'>Set up evaluation provider</button><button type="button" class="button primary" data-act="start-run" '+(ready?'':'disabled')+'>Run study</button></div></div></aside>';
 }
 function studyNextClick(a,el){
   if(a==='next-review'){reviewPlan(true).catch(fail);return true}
+  if(a==='rerun-all'){S.rerunAll=!S.rerunAll;render();return true}
   if(a==='next-review-page'){S.reviewPanel=false;render();return true}
   if(a==='next-review-close'){S.plan=null;S.reviewPanel=false;render();return true}
   if(a==='next-connect'){const p=pipeline();if(!p)return true;S.reviewPanel=false;S.plan=null;S.stageId=el.dataset.id;S.flowPanel=true;S.sections.pipeline='flow';S.sections['flow-inspector']='connections';render();root.querySelector('.flow-inspector h2')?.focus();return true}
@@ -74,6 +103,12 @@ export const STUDY_NEXT_CSS = String.raw`
 .review-panel-row{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
 .review-panel-title{min-width:0;overflow-wrap:anywhere;font-size:var(--text-md);font-weight:600}
 .review-panel-requests{color:var(--muted);font-size:var(--text-sm);white-space:nowrap}
+.reuse-tag{display:inline-block;margin-left:8px;padding:1px 7px;border-radius:999px;font-size:var(--text-xs);font-weight:600;vertical-align:1px;white-space:nowrap}
+.reuse-reused{background:var(--teal-soft);color:var(--teal)}
+.reuse-partial{background:var(--blue-soft);color:var(--blue)}
+.reuse-again{background:var(--amber-soft);color:var(--ink)}
+.rerun-all{margin-top:4px;font-size:var(--text-sm);color:var(--ink);cursor:pointer}
+.rerun-all-help{margin:2px 0 10px;font-size:var(--text-xs)}
 .review-panel .guided-footer .row{gap:8px;flex-wrap:wrap;justify-content:flex-end}
 
 `;

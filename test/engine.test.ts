@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { ProviderError } from '../src/provider.js';
 import type { Cohort, Evaluation, EvaluationRequest, Pipeline, Provider, Question, RunOptions } from '../src/types.js';
-import { runPipeline, selectPersonas } from '../src/engine.js';
+import { predictReuse, runPipeline, selectPersonas } from '../src/engine.js';
 import { simulateVotes } from '../src/analysis.js';
 
 const choiceQuestion: Question = {
@@ -267,6 +267,34 @@ test('cache reuses exact requests and changes when state changes', async () => {
     const third = await runPipeline(changed, { audience: cohort }, options(provider, { cacheDir }));
     assert.equal(third.usage.cacheHits, 0);
     assert.equal(provider.calls, 8);
+  } finally { await rm(cacheDir, { recursive: true, force: true }); }
+});
+
+test('predicted reuse names saved steps, re-runs changed steps and everything after them, and refresh asks again', async () => {
+  const cacheDir = await mkdtemp(join(tmpdir(), 'jev-reuse-'));
+  try {
+    const provider = fixedProvider();
+    const flow = pipeline([poll('first'), poll('second', ['first'])]);
+    const predict = (study: Pipeline, seed = 'seed') => predictReuse(study, { audience: cohort }, { provider, model: 'test-model', seed, cacheDir });
+    assert.deepEqual(await predict(flow), [{ id: 'first', reused: 0, state: 'run' }, { id: 'second', reused: 0, state: 'run' }]);
+    await runPipeline(flow, { audience: cohort }, options(provider, { cacheDir }));
+    assert.equal(provider.calls, 8);
+    assert.deepEqual(await predict(flow), [{ id: 'first', reused: 4, state: 'reused' }, { id: 'second', reused: 4, state: 'reused' }]);
+    assert.equal(provider.calls, 8, 'predicting never calls the provider');
+    assert.deepEqual((await predict(flow, 'other-seed')).map((item) => item.state), ['run', 'run'], 'a new seed asks everyone again');
+    const changedSecond = pipeline([poll('first'), poll('second', ['first'], { questions: { pick: { ...choiceQuestion, label: 'Pick again' } } })]);
+    assert.deepEqual(await predict(changedSecond), [{ id: 'first', reused: 4, state: 'reused' }, { id: 'second', reused: 0, state: 'run' }]);
+    const changedFirst = pipeline([poll('first', [], { questions: { pick: { ...choiceQuestion, label: 'Pick first' } } }), poll('second', ['first'])]);
+    assert.deepEqual((await predict(changedFirst)).map((item) => item.state), ['run', 'run'], 'a changed step re-runs every step after it');
+    const reused = await runPipeline(flow, { audience: cohort }, options(provider, { cacheDir }));
+    assert.equal(reused.usage.cacheHits, 8); assert.equal(provider.calls, 8);
+    const forced = await runPipeline(flow, { audience: cohort }, options(provider, { cacheDir, refresh: true }));
+    assert.equal(forced.usage.cacheHits, 0); assert.equal(forced.usage.requests, 8); assert.equal(provider.calls, 16);
+    await rm(join(cacheDir, (await readdir(cacheDir))[0]!));
+    const partly = await predict(flow);
+    const [first, second] = partly;
+    if (first!.state === 'partial') assert.deepEqual([first!.reused, second!.state], [3, 'run'], 'a step missing one saved answer re-runs that answer, and the steps after it in full');
+    else assert.deepEqual([first!.state, second!.state, second!.reused], ['reused', 'partial', 3]);
   } finally { await rm(cacheDir, { recursive: true, force: true }); }
 });
 
