@@ -11,8 +11,32 @@ behaviors:
       labeled demo data.
   - id: report-contents
     description: >-
-      Reports include a stage map with skipped and failed branches, distributions, segment filters,
-      respondent drilldown, source provenance, assumptions, repeat breakdown, and raw JSON export.
+      Reports include every step with skipped and failed branches, distributions, a per-segment
+      comparison, respondent drilldown, source provenance, assumptions, a repeat summary, and raw
+      JSON export.
+    details: >-
+      The segment comparison is a table of each segment's share for the leading options with each
+      segment's favourite outlined, replacing the segment filter. Repeats are described in words
+      ("Each person answered once", or "answered 3 times; the top option was the same every time")
+      and per-repeat winners are listed only when they differ. Repeats never count as extra people.
+  - id: one-page-answer-first
+    description: >-
+      The report is one page read top to bottom: the answer with a one-sentence reason, the results
+      of each step, who answered, and how the run was made. It has no view tabs.
+    details: >-
+      The answer names the final result's top option, its share, its lead over the runner-up with a
+      Close (under 5 points) or Clear label, and how many segments put it first. Later steps show
+      their ranking with the segment table behind a "Show by segment" button; a Final result step
+      is one line. Who answered is the seat map used by the live audience view, one square per
+      person grouped by segment and coloured by their answer with the same option colours; selecting
+      a square shows that person's answers as bars and their attributes as readable fields and
+      chips. Internal terms (within-segment weight, confidence, weighted total, poll, aggregate,
+      decision, repeat-level comparison) are not shown; run identifiers, request counts, the
+      study hash, questions as asked and the study context sit under disclosures in How this was
+      made. Decided 2026-10-12 from the respondent-records and By repeat screenshots.
+    source:
+      text: no clue what repeat is - overall report should be simplified and made more clear
+      reference: jev-polls project thread "give me a few designs to restructure this part of the report", Giulio, 2026-10-12
   - id: open-without-losing-edits
     description: Open report opens a separate tab so unsaved workspace edits stay intact.
   - id: consistent-style
@@ -21,7 +45,7 @@ behaviors:
       The report embeds the workspace fonts and light and dark palettes, stacks the jev wordmark
       over a "Study report" caption like the workspace brand bar, and opens in the theme the
       workspace saved (else the OS preference). Hex colors and serif or monospace faces are not
-      used. Decided 2026-10-10 from the UI audit ("the report looks like a different product").
+      used, except the option colours shared with the live audience map. Decided 2026-10-10 from the UI audit ("the report looks like a different product").
     source:
       text: fix everything (audit item 12, report styling)
       reference: jev-polls project thread "UI audit in headless browser", Giulio, 2026-10-10

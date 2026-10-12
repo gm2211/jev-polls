@@ -182,8 +182,8 @@ export function createLiveVotingView(model: ReturnType<typeof createArenaModel>)
 export const WORKSPACE_LIVE_UI_CLIENT = `window.liveVoting = (() => { const __name = (value) => value; const model = (${createArenaModel.toString()})(); return { model, view: (${createLiveVotingView.toString()})(model) }; })();`;
 
 /** Fourteen option colours per theme, searched so every pair stays apart under a deuteranopia simulation (CIE76 ΔE ≥ 20 light, ≥ 16 dark; ≥ 33 in normal vision); slots 7 and up add a stripe or dot pattern as a second cue. */
-const PALETTE_LIGHT = ['#602786', '#d6ec13', '#1313ec', '#ec6a13', '#0d0da0', '#10c647', '#136aec', '#a00d1c', '#d613ec', '#1a9357', '#39b8ef', '#931a57', '#39efcb', '#ec1395'];
-const PALETTE_DARK = ['#a461d1', '#f0f042', '#4242f0', '#f6f68e', '#4276f0', '#f07642', '#8eadf6', '#52e06e', '#f042bc', '#e3c9a0', '#97eded', '#f04265', '#42f0bc', '#d1618e'];
+export const PALETTE_LIGHT = ['#602786', '#d6ec13', '#1313ec', '#ec6a13', '#0d0da0', '#10c647', '#136aec', '#a00d1c', '#d613ec', '#1a9357', '#39b8ef', '#931a57', '#39efcb', '#ec1395'];
+export const PALETTE_DARK = ['#a461d1', '#f0f042', '#4242f0', '#f6f68e', '#4276f0', '#f07642', '#8eadf6', '#52e06e', '#f042bc', '#e3c9a0', '#97eded', '#f04265', '#42f0bc', '#d1618e'];
 const paletteVars = (colors: string[]): string => colors.map((color, index) => `--lv-c${index}:${color}`).join(';');
 const paletteSelectors = (colors: string[]): string => colors.map((_, index) => `.lv-tile[data-c="${index}"]{--c:var(--lv-c${index})}`).join('');
 const patternSelectors = (kind: 'stripes' | 'dots'): string => Array.from({ length: 14 }, (_, index) => index).filter(index => index >= 7 && (index % 2 === 1) === (kind === 'stripes')).map(index => `.lv-tile[data-s=done][data-c="${index}"]`).join(',');
