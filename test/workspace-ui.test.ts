@@ -3241,14 +3241,17 @@ test('a new tab reattaches to a running cohort generation and offers it on the C
   assert.equal(S.cohortSize, 1000);
   assert.equal(browser.storage.size, 0, 'nothing was remembered by this tab');
   const html = browser.element('app').innerHTML;
-  assert.match(html, /Generating 1,000 personas · 375 done/);
+  assert.match(html, /<strong>New audience<\/strong><span class="list-sub">Gamers who play at night<\/span>/); assert.match(html, /<small>Draft<\/small>.*<small>Generating · 375 of 1,000 written<\/small>/);
   assert.match(html, /data-act="cohort-job-open"/);
   assert.doesNotMatch(html, /class="empty-create" data-act="new-cohort"/, 'the empty state is replaced');
   assert.equal(S.localJob.status, 'running');
   assert.equal(commandState.draftProject, null);
   S.localJob = { ...running, status: 'completed', proposal: { document: browser.snapshot().document, explanation: 'Done' } };
-  assert.match(cohortJobNotice(), /Cohort ready to review · 1,000 personas/);
-  assert.match(cohortJobNotice(), /Review cohort/);
+  assert.match(cohortJobNotice(), /Ready to review · 1,000 personas/);
+  S.localJob = { ...running, cohort: { ...running.cohort, step: { pipelineId: 'study', stageId: 'panel' } }, progress: { ...running.progress, inFlightPersonas: 40, plan: { name: 'Night gamers', groups: [], sources: 0, stage: 'naming' } } };
+  assert.match(cohortJobNotice(), /<strong>Night gamers<\/strong>/); assert.match(cohortJobNotice(), /Generating · 415 of 1,000 written/); assert.match(cohortJobNotice(), /data-act="cohort-resume"/, 'a step’s draft opens in its step');
+  S.localJob = { ...running, status: 'failed', resumable: { keptPersonas: 420 } };
+  assert.match(cohortJobNotice(), /Stopped · 420 of 1,000 kept/);
 });
 
 test('recovery prefers a running job, skips option, persona and command jobs, and opens the Draft with assistant panel for study drafts', async () => {
