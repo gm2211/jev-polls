@@ -1,3 +1,4 @@
+import { hostedOrigin, hostedPasswordMatches, type HostedOptions } from './hosting.js';
 import { MAX_COHORT_PERSONAS, MAX_WORKSPACE_BYTES } from './limits.js';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { randomBytes, randomUUID } from 'node:crypto';
@@ -68,6 +69,8 @@ export interface WorkspaceServerOptions {
   getGlinerStatus?: () => Promise<{ ready: boolean; model: string; message?: string }>;
   emit?: (event: Record<string, unknown>) => void;
   localAgents?: Pick<LocalAgentService, 'availability' | 'start' | 'get' | 'cancel' | 'close'> & Partial<Pick<LocalAgentService, 'list' | 'settle' | 'disposition' | 'members'>>;
+  /** Serve on a public URL behind a shared password instead of loopback only. */
+  hosted?: HostedOptions;
 }
 
 /** Account connection and review are separate from explicit study execution. */
@@ -274,8 +277,16 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
 
   async function handle(request: IncomingMessage, response: ServerResponse) {
     const remote = request.socket.remoteAddress ?? '';
-    if (!['127.0.0.1', '::ffff:127.0.0.1'].includes(remote) || request.headers.host !== expectedHost || (request.headers.origin !== undefined && request.headers.origin !== origin)) throw new HttpError(403, 'FORBIDDEN', 'Open the local workspace URL directly.');
     const pathname = new URL(request.url ?? '/', origin).pathname;
+    if (options.hosted) {
+      // The platform's health check reaches the instance directly, with its own Host header.
+      if (request.method === 'GET' && pathname === '/healthz') { send(response, 200, { ok: true }); return; }
+      if (request.headers.host !== expectedHost || (request.headers.origin !== undefined && request.headers.origin !== origin)) throw new HttpError(403, 'FORBIDDEN', 'Open the workspace URL directly.');
+      if (!hostedPasswordMatches(request, options.hosted.password)) {
+        response.setHeader('WWW-Authenticate', 'Basic realm="Jev Polls", charset="UTF-8"');
+        throw new HttpError(401, 'PASSWORD_REQUIRED', 'Enter the workspace password.');
+      }
+    } else if (!['127.0.0.1', '::ffff:127.0.0.1'].includes(remote) || request.headers.host !== expectedHost || (request.headers.origin !== undefined && request.headers.origin !== origin)) throw new HttpError(403, 'FORBIDDEN', 'Open the local workspace URL directly.');
     const method = request.method;
     if (method !== 'GET') {
       if (method !== 'POST') throw new HttpError(405, 'METHOD_NOT_ALLOWED', 'Use the workspace controls.');
@@ -445,7 +456,7 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
     }
     if (method === 'GET' && pathname.startsWith('/reports/')) {
       const job = await ownedRun(pathname.slice('/reports/'.length));
-      send(response, 200, renderReport(await savedRunRecord(job), { workspace: true }), true, true); return;
+      send(response, 200, renderReport(await savedRunRecord(job), { workspace: true, projectId: job.projectId }), true, true); return;
     }
     if (method === 'GET' && pathname === '/report') {
       const latest = ownedRuns((await store.read()).document).sort((a,b) => b.createdAt.localeCompare(a.createdAt)).find(job => job.reportUrl);
@@ -547,10 +558,13 @@ export async function startWorkspaceServer(options: WorkspaceServerOptions): Pro
   });
   await new Promise<void>((resolveListening, reject) => {
     server.once('error', reject);
-    server.listen(options.port ?? 0, '127.0.0.1', () => {
+    const publicOrigin = options.hosted ? hostedOrigin(options.hosted) : undefined;
+    server.listen(options.port ?? 0, publicOrigin ? '0.0.0.0' : '127.0.0.1', () => {
       server.removeListener('error', reject); const address = server.address();
       if (!address || typeof address === 'string') { reject(new Error('Could not bind workspace server')); return; }
-      expectedHost = `127.0.0.1:${address.port}`; origin = `http://${expectedHost}`; resolveListening();
+      if (publicOrigin) { expectedHost = publicOrigin.host; origin = publicOrigin.origin; }
+      else { expectedHost = `127.0.0.1:${address.port}`; origin = `http://${expectedHost}`; }
+      resolveListening();
     });
   });
   return { url: origin + '/', close: () => closePromise ??= (async () => {

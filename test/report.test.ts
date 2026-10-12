@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Script } from 'node:vm';
-import { renderReport } from '../src/report.js';
+import { renderReport, stageAudiences } from '../src/report.js';
 import type { Cohort, RunRecord } from '../src/types.js';
 
 const cohort: Cohort = {
@@ -140,4 +140,29 @@ test('report provenance uses actual run provider and recorded model identifiers'
 test('workspace reports offer a direct return link without browser history', () => {
   assert.match(renderReport(fixture(), { workspace: true }), /<a class="button report-back" href="\/">← Back to workspace<\/a>/);
   assert.doesNotMatch(renderReport(fixture()), /href="\/"/);
+});
+
+test('How this was made describes the cohort each audience step asked', () => {
+  const run = fixture();
+  run.cohorts['cohort-a'] = { ...cohort, generationPrompt: 'Weekly streamers', distributionTargets: [{ field: 'attributes.region', kind: 'categorical', buckets: [{ label: 'Northeast', value: 'Northeast', percent: 100 }] }] };
+  const concept = run.pipeline.stages[0];
+  if (concept?.kind === 'poll') concept.inputs = { earlier: { stage: 'decision', question: 'selected', select: 'winner' } };
+  const audience = stageAudiences(run).concept;
+  assert.deepEqual(audience, {
+    cohortId: 'cohort-a', name: 'Early listeners', profiles: 1, asked: 1, ages: [32, 32],
+    segments: [{ label: 'Regular listeners', percent: 100 }],
+    breakdowns: [{ label: 'Region', buckets: [{ label: 'Northeast', percent: 100 }] }],
+    origin: 'Synthetic profiles drafted by AI from a description', sources: 1,
+  });
+  const html = renderReport(run, { workspace: true, projectId: 'project-1' });
+  assert.match(html, /"cohortLink":"\/#project=project-1\\u0026tab=cohorts"/);
+  assert.match(html, /function audienceBlock\(stage,a\)/);
+  assert.match(html, /No earlier answers\./);
+  assert.doesNotMatch(renderReport(run), /"cohortLink":"/);
+});
+
+test('steps saved with the old Final choice name read as Final answer', () => {
+  const html = renderReport(fixture());
+  assert.match(html, /\['Final choice','Final result'\]\.includes\(stage\.label\)\?'Final answer'/);
+  assert.match(html, /KIND\[stage\.kind\]\?\?'Step'/);
 });

@@ -4,11 +4,12 @@ import { Script } from 'node:vm';
 import { WORKSPACE_FLOW_CLIENT } from '../src/workspace-flow-ui.js';
 import { WORKSPACE_HOST_MAP_CLIENT } from '../src/workspace-host-map-ui.js';
 import { NAVIGATION_CLIENT } from '../src/workspace-navigation-ui.js';
+import { PERSONA_ATTRIBUTES_CLIENT } from '../src/persona-attributes.js';
 
 function harness() {
   const escape = (value: unknown) => String(value).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('"','&quot;');
   const context: any = { S: { listPages: {} }, window: { innerWidth: 1280 }, inlineCohortTarget: () => false, poolForPhase: (_p:unknown,s:any) => s.pool, esc: escape, attr: escape, icon: () => '', render() {}, root: { querySelectorAll: () => [], querySelector: () => null } };
-  new Script(NAVIGATION_CLIENT + WORKSPACE_HOST_MAP_CLIENT + WORKSPACE_FLOW_CLIENT + ';globalThis.S=S;globalThis.api={S,seatFitLines,seatPageSize,hostMapFocus,hostMap,hostMapMember,hostMapDetails,hostMapAction,hostMapState,flowCohortMap}').runInNewContext(context);
+  new Script(PERSONA_ATTRIBUTES_CLIENT + NAVIGATION_CLIENT + WORKSPACE_HOST_MAP_CLIENT + WORKSPACE_FLOW_CLIENT + ';globalThis.S=S;globalThis.api={S,seatFitLines,seatPageSize,hostMapFocus,hostMap,hostMapMember,hostMapDetails,hostMapAction,hostMapState,flowCohortMap}').runInNewContext(context);
   return context.api;
 }
 const cohort = {id:'audience', name:'Audience', segments:[{id:'a',label:'Segment A',weightBasis:'assumed'}], sources:[], personas:Array.from({length:53},(_,i)=>({id:'p'+i,label:'Person '+i,segment:'a',background:'Synthetic <profile>',weight:2,syntheticFields:['background']}))};
@@ -85,5 +86,5 @@ test('a selected member replaces the map, with a way back and to the neighbourin
   assert.match(html,/aria-label="Previous member"/);
   assert.match(html,/1 \/ 53/);
   assert.match(html,/Synthetic &lt;profile>/);
-  assert.match(api.hostMapFocus({...cohort,personas:[{...cohort.personas[0],attributes:{budget:'£800'}}]},'k',{...cohort.personas[0],attributes:{budget:'£800'}},'Back'),/<dt>budget<\/dt><dd>£800<\/dd>/,'generated attributes stay visible');
+  assert.match(api.hostMapFocus({...cohort,personas:[{...cohort.personas[0],attributes:{budget:'£800'}}]},'k',{...cohort.personas[0],attributes:{budget:'£800'}},'Back'),/<dt>Budget<\/dt><dd>£800<\/dd>/,'generated attributes stay visible');
 });

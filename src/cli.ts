@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { hostedFromEnvironment } from './hosting.js';
 import { Command, Option } from 'commander';
 import { cp, mkdir, readdir, readFile, access } from 'node:fs/promises';
 import { resolve, dirname, join } from 'node:path';
@@ -127,7 +128,9 @@ async function openWorkspace(file: string | undefined, opts: { directory?: strin
       await store.save(draft, saved.revision);
     }
   }
-  const workspace = await startWorkspaceServer({ directory, port: opts.port, demo: !!opts.demo || process.env.JEV_POLLS_DEMO === '1', emit: event => process.stderr.write(JSON.stringify(event) + '\n') });
+  const hosted = hostedFromEnvironment();
+  const port = opts.port ?? (hosted && process.env.PORT ? integer(process.env.PORT) : undefined);
+  const workspace = await startWorkspaceServer({ directory, port, hosted, demo: !!opts.demo || process.env.JEV_POLLS_DEMO === '1', emit: event => process.stderr.write(JSON.stringify(event) + '\n') });
   const shutdown = () => { void workspace.close().then(() => { process.exitCode = 0; }); };
   process.once('SIGINT', shutdown); process.once('SIGTERM', shutdown);
   output({ status: 'workspace-ready', url: workspace.url, directory, note: 'Create or open a project, add its cohorts and pipeline, then review before choosing Run study. Opening the workspace or connecting an account never runs a study.' });

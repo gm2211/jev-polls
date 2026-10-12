@@ -518,7 +518,7 @@ document.addEventListener('pointerdown',e=>{
   if(!viewport||e.target.closest('.flow-create-menu,input,select,textarea,a'))return;
   const box=viewport.getBoundingClientRect();if(e.clientX>=box.left+viewport.clientLeft+viewport.clientWidth||e.clientY>=box.top+viewport.clientTop+viewport.clientHeight)return;
   const node=e.target.closest('[data-flow-node]'),output=e.target.closest('.flow-map [data-act=flow-output]');
-  flowDrag={pointerId:e.pointerId,type:e.pointerType,x:e.clientX,y:e.clientY,node,output,onWire:!!e.target.closest('.flow-wire-hit'),viewport,moved:false,scrollLeft:viewport.scrollLeft,scrollTop:viewport.scrollTop,menuOpen:!!S.flowCreate};
+  flowDrag={pointerId:e.pointerId,type:e.pointerType,x:e.clientX,y:e.clientY,node,output,onWire:!!e.target.closest('.flow-wire-hit'),viewport,moved:false,scrollLeft:viewport.scrollLeft,scrollTop:viewport.scrollTop,menuOpen:!!S.flowCreate,panelOpen:!!root.querySelector('.flow-workspace>.round-panel')};
 });
 document.addEventListener('pointermove',e=>{
   const d=flowDrag;if(!d||e.pointerId!==d.pointerId)return;
@@ -548,6 +548,7 @@ function flowPointerEnd(e,cancelled){
   const p=pipeline(),map=d.viewport.querySelector('.flow-map'),space=d.viewport.querySelector('.flow-space');if(!p||!map||!space)return;
   flowSuppressClick=true;setTimeout(()=>{flowSuppressClick=false},0);
   if(S.flowSource){S.flowSource=null;render();return}
+  if(d.panelOpen){flowAction('flow-panel-close',{dataset:{}});return}
   const mapBox=map.getBoundingClientRect(),spaceBox=space.getBoundingClientRect(),scale=flowScaleApplied||1;
   flowOpenCreate(p,(e.clientX-mapBox.left)/scale,(e.clientY-mapBox.top)/scale,e.clientX-spaceBox.left,e.clientY-spaceBox.top);
 }

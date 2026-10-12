@@ -1,11 +1,12 @@
 import { createArenaModel } from './workspace-arena-model.js';
+import { createAttributeFormat } from './persona-attributes.js';
 
 /**
  * Markup for the live voting map. Everything here is a pure string builder over plain data, so the unit tests
  * and the browser run the same code; the browser glue that keeps the DOM current lives in workspace-arena-controls.
  * Keep the factory self-contained: it is serialized into the inline client script.
  */
-export function createLiveVotingView(model: ReturnType<typeof createArenaModel>) {
+export function createLiveVotingView(model: ReturnType<typeof createArenaModel>, attrs: ReturnType<typeof createAttributeFormat>) {
   type Member = Parameters<typeof model.tileVisual>[0];
   type Question = NonNullable<Parameters<typeof model.tileVisual>[1]>;
   type Board = ReturnType<typeof model.leaderboard>;
@@ -59,8 +60,6 @@ export function createLiveVotingView(model: ReturnType<typeof createArenaModel>)
     return `<div class="lv-answer"><strong>${esc(id)}</strong><span>Answer format unavailable</span></div>`;
   }
 
-  const fieldLabel = (key: string): string => key.replace(/([a-z])([A-Z])/g, (_, a, b) => a + ' ' + b.toLowerCase()).replace(/[_-]+/g, ' ').replace(/^./, c => c.toUpperCase());
-  const fieldText = (value: unknown): string => Array.isArray(value) ? value.map(item => item !== null && typeof item === 'object' ? JSON.stringify(item) : String(item)).join(', ') : value !== null && typeof value === 'object' ? Object.entries(value as Record<string, unknown>).map(([k, v]) => `${fieldLabel(k)}: ${fieldText(v)}`).join(' · ') : value === null || value === undefined ? '—' : String(value);
 
   function detailHtml(member: Member | undefined, o: { question?: Question; questions: Question[]; segmentLabel: string; hidden?: boolean; persona?: { background?: string; attributes?: Record<string, unknown> } }): string {
     if (!member) return `<div class="lv-detail-empty"><strong>Pick a tile</strong><p>Hover to see who voted and what they picked. Click, or move with the arrow keys and press Enter, to read their full answer.</p></div>`;
@@ -70,7 +69,7 @@ export function createLiveVotingView(model: ReturnType<typeof createArenaModel>)
     const batch = member.batch && member.status === 'running' ? `<p>${member.batch.phase === 'map' ? 'Reading the responses in batches' : 'Combining the batch verdicts'}: ${Math.min(member.batch.done, member.batch.total)} of ${member.batch.total} steps done.</p>` : '';
     const answers = member.answers ? Object.entries(member.answers).map(([id, answer]) => answerView(id, answer, o.questions.find(item => item.id === id) ?? (id === o.question?.id ? o.question : undefined))).join('') : '<p class="lv-muted">No model answer recorded yet.</p>';
     const fields = Object.entries(o.persona?.attributes ?? {});
-    const profile = o.persona && (o.persona.background || fields.length) ? `<div class="lv-profile"><h4>Who they are</h4>${o.persona.background ? `<p>${esc(o.persona.background)}</p>` : ''}${fields.length ? `<dl>${fields.map(([key, value]) => `<div><dt>${esc(fieldLabel(key))}</dt><dd>${esc(fieldText(value))}</dd></div>`).join('')}</dl>` : ''}</div>` : '';
+    const profile = o.persona && (o.persona.background || fields.length) ? `<div class="lv-profile"><h4>Who they are</h4>${o.persona.background ? `<p>${esc(o.persona.background)}</p>` : ''}${fields.length ? `<dl>${fields.map(([key, value]) => `<div><dt>${esc(attrs.label(key))}</dt><dd>${attrs.html(value, key)}</dd></div>`).join('')}</dl>` : ''}</div>` : '';
     return `${close}<div class="lv-detail-mark" aria-hidden="true">${initial}</div><h3>${esc(member.label)}</h3><p>${esc(o.segmentLabel)} · age ${esc(member.age)} · ${esc(statusWord(member))}${member.repeat > 1 ? ` · repeat ${member.repeat}` : ''}</p>${member.model ? `<p>Model: ${esc(member.model)}${member.cacheHit ? ' · cached result' : ''}</p>` : ''}${batch}${member.reason ? `<p role="alert">${esc(member.reason)}</p>` : ''}<div class="lv-answers"><h4>Model answers</h4>${answers}<p class="lv-muted">The model returns a share for every option; it does not return written reasoning.</p></div>${profile}<p class="lv-synthetic">Synthetic profile; model output is not observed human behavior.</p>`;
   }
 
@@ -189,7 +188,7 @@ export function createLiveVotingView(model: ReturnType<typeof createArenaModel>)
 }
 
 /** Browser build of the model and view: one `window.liveVoting` the workspace script drives. */
-export const WORKSPACE_LIVE_UI_CLIENT = `window.liveVoting = (() => { const __name = (value) => value; const model = (${createArenaModel.toString()})(); return { model, view: (${createLiveVotingView.toString()})(model) }; })();`;
+export const WORKSPACE_LIVE_UI_CLIENT = `window.liveVoting = (() => { const __name = (value) => value; const model = (${createArenaModel.toString()})(); const attrs = (${createAttributeFormat.toString()})(); return { model, view: (${createLiveVotingView.toString()})(model, attrs) }; })();`;
 
 /** Fourteen muted option colours (OKLCH chroma ≤ 0.10), the dark set being the light set 0.1 lighter so an option keeps its hue across themes. Searched so every pair stays apart under a deuteranopia simulation (CIE76 ΔE ≥ 16 in both themes); slots 7 and up add a stripe or dot pattern as a second cue. */
 export const PALETTE_LIGHT = ['#a15652', '#7c9bda', '#d4c174', '#70d6c3', '#54526b', '#6f5d00', '#38538d', '#cfa38d', '#a8779c', '#9cbbdd', '#6a4c4f', '#b57a47', '#8b65a2', '#b48388'];

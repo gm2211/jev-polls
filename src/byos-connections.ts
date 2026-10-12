@@ -45,6 +45,19 @@ export function keychainKeyStore(namespace = 'jev-polls'): ByosKeyStore {
   };
 }
 
+/** Environment variables that supply a BYOS key on hosts without a Keychain, such as a hosted workspace. */
+export const BYOS_KEY_ENV: Record<ByosEngine, string> = { grok: 'XAI_API_KEY', openrouter: 'OPENROUTER_API_KEY', 'claude-api': 'ANTHROPIC_API_KEY', groq: 'GROQ_API_KEY', huggingface: 'HF_TOKEN' };
+
+/** Keys from the environment take precedence; everything else falls through to the given store. */
+export function environmentKeyStore(fallback: ByosKeyStore, env: NodeJS.ProcessEnv = process.env): ByosKeyStore {
+  const fromEnv = (engine: ByosEngine) => env[BYOS_KEY_ENV[engine]]?.trim() || null;
+  return {
+    read: async engine => fromEnv(engine) ?? fallback.read(engine),
+    write: async (engine, key) => { if (fromEnv(engine)) throw new ByosConnectionError(`This key is set by ${BYOS_KEY_ENV[engine]} on the server. Change it there.`); await fallback.write(engine, key); },
+    remove: async engine => { if (fromEnv(engine)) throw new ByosConnectionError(`This key is set by ${BYOS_KEY_ENV[engine]} on the server. Remove it there.`); await fallback.remove(engine); },
+  };
+}
+
 function provider(engine: ByosEngine): ByosProvider {
   switch (engine) {
     case 'grok': return grok({ deviceCodeViaSite: false });
@@ -75,7 +88,7 @@ export interface ByosGenerateRequest { engine: ByosEngine; model: string; instru
 
 export class ByosConnections {
   private readonly cache = new Map<ByosEngine, string | null>();
-  constructor(private readonly store: ByosKeyStore = keychainKeyStore()) {}
+  constructor(private readonly store: ByosKeyStore = environmentKeyStore(keychainKeyStore())) {}
 
   private async key(engine: ByosEngine): Promise<string | null> {
     if (!this.cache.has(engine)) this.cache.set(engine, await this.store.read(engine));
