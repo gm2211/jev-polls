@@ -6,7 +6,7 @@ import type { Cohort, Json, Pipeline } from './types.js';
 import type { WorkspaceActivity, WorkspaceDocument, WorkspaceProject, WorkspaceSaved } from './workspace-types.js';
 import { parseCohort, parsePipeline, stageOrder } from './schema.js';
 import { validateTargets } from './cohort-insights.js';
-import { enforceBudgets, estimateBudgets, type BatchPlan, type StageBudget } from './request-budget.js';
+import { costOf, enforceBudgets, estimateBudgets, estimateStageUsage, type BatchPlan, type CostEstimate, type StageBudget, type UsageEstimate } from './request-budget.js';
 
 const FILE_NAME = 'workspace.json';
 const MAX_DOCUMENT_BYTES = MAX_WORKSPACE_BYTES;
@@ -252,7 +252,9 @@ export function workspacePlan(document: WorkspaceDocument, pipelineId: string, p
   pipeline: Pipeline;
   cohorts: Record<string, Cohort>;
   maxRequests: number;
-  stages: Array<{ id: string; label: string; kind: string; dependsOn: string[]; cohort?: string; profiles?: number; repeats?: number; requests: number; budget?: StageBudget; batching?: BatchPlan }>;
+  stages: Array<{ id: string; label: string; kind: string; dependsOn: string[]; cohort?: string; profiles?: number; repeats?: number; requests: number; budget?: StageBudget; batching?: BatchPlan; usage?: UsageEstimate }>;
+  /** Estimated TypeSafe bill if every step runs and nothing is cached; absent for GLiNER, which runs locally. */
+  cost?: CostEstimate;
   warnings: string[];
 } {
   const { projectId, pipeline, cohorts } = resolveWorkspaceProject(document, pipelineId);
@@ -270,8 +272,10 @@ export function workspacePlan(document: WorkspaceDocument, pipelineId: string, p
     const batching = budgets[stage.id]?.batching;
     const requests = profiles * repeats * (batching?.requestsPerRun ?? 1);
     maxRequests += requests;
-    return { id: stage.id, label: stage.label, kind: stage.kind, dependsOn: [...stage.dependsOn], cohort: stage.cohort, profiles, repeats, requests, ...(budgets[stage.id] && provider !== 'gliner' ? { budget: budgets[stage.id]! } : {}), ...(batching ? { batching } : {}) };
+    const usage = budgets[stage.id] && provider !== 'gliner' ? estimateStageUsage(budgets[stage.id]!, profiles * repeats) : undefined;
+    return { id: stage.id, label: stage.label, kind: stage.kind, dependsOn: [...stage.dependsOn], cohort: stage.cohort, profiles, repeats, requests, ...(budgets[stage.id] && provider !== 'gliner' ? { budget: budgets[stage.id]! } : {}), ...(batching ? { batching } : {}), ...(usage ? { usage } : {}) };
   });
+  const cost = provider === 'gliner' ? undefined : costOf(stages.flatMap((stage) => 'usage' in stage && stage.usage ? [stage.usage] : []));
   const warnings = new Set<string>(budgetWarnings);
   for (const cohort of new Set(Object.values(cohorts))) {
     if (cohort.sources.length === 0) warnings.add(`Cohort '${cohort.name}' has no source records; treat profile details and population estimates as assumptions.`);
@@ -285,7 +289,7 @@ export function workspacePlan(document: WorkspaceDocument, pipelineId: string, p
     const noProfileSources = cohort.personas.filter((persona) => persona.sourceIds.length === 0).length;
     if (noProfileSources) warnings.add(`Cohort '${cohort.name}' has ${noProfileSources} profile(s) without linked source records.`);
   }
-  return { projectId, pipeline, cohorts, maxRequests, stages, warnings: [...warnings] };
+  return { projectId, pipeline, cohorts, maxRequests, stages, ...(cost ? { cost } : {}), warnings: [...warnings] };
 }
 
 function validateCohortDraft(value: unknown, path: string): void {

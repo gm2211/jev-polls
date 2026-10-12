@@ -19,7 +19,7 @@ import { agentConnectionConfig } from './agent-config.js';
 import { renderReport } from './report.js';
 import { loadRun } from './run-record.js';
 import { hashValue } from './engine-utils.js';
-import { enforceBudgets, estimateBudgets } from './request-budget.js';
+import { costOf, enforceBudgets, estimateBudgets, estimateStageUsage } from './request-budget.js';
 import { readJson, writeJson, writeText } from './io.js';
 import type { Pipeline, Cohort } from './types.js';
 
@@ -74,7 +74,8 @@ function plan(pipeline: Pipeline, cohorts: Record<string, Cohort>) {
   const budgetWarnings = enforceBudgets(budgets);
   const eligible = (c: Cohort) => c.personas.filter(p => c.segments.some(s => s.id === p.segment && s.weight > 0)).length;
   const stages = stageOrder(pipeline).map(s => ({ id: s.id, kind: s.kind, dependsOn: s.dependsOn, join: s.join ?? 'all', conditional: !!s.when, ...(s.kind === 'poll' ? { cohort: s.cohort, respondents: s.size ?? eligible(cohorts[s.cohort]), repeats: s.repeats ?? 1, questionsPerRequest: Object.keys(s.questions).length, maxRequests: (s.size ?? eligible(cohorts[s.cohort])) * (s.repeats ?? 1) * (budgets[s.id]?.batching?.requestsPerRun ?? 1), ...(budgets[s.id] ? { jevRequestSize: { ...budgets[s.id], batching: undefined } } : {}), ...(budgets[s.id]?.batching ? { batching: budgets[s.id]!.batching } : {}) } : { maxRequests: 0 }) }));
-  return { pipeline: pipeline.id, stages, ...(budgetWarnings.length ? { warnings: budgetWarnings } : {}), maxRequests: stages.reduce((sum, s) => sum + s.maxRequests, 0), note: 'Upper bound includes mutually exclusive branches; cached responses use no new request. jevRequestSize estimates the largest request per step against Jev limits (32,000 tokens for persona details plus the longest question; 64,000 in total); steps over a limit fail this plan. A step with a batched input lists its layers: layerRequests are requests per respondent and repeat, the map layer first, then each combining round.' };
+  const estimatedCost = costOf(stageOrder(pipeline).flatMap(s => s.kind === 'poll' && budgets[s.id] ? [estimateStageUsage(budgets[s.id]!, (s.size ?? eligible(cohorts[s.cohort])) * (s.repeats ?? 1))] : []));
+  return { pipeline: pipeline.id, stages, ...(budgetWarnings.length ? { warnings: budgetWarnings } : {}), maxRequests: stages.reduce((sum, s) => sum + s.maxRequests, 0), estimatedCost, note: 'Upper bound includes mutually exclusive branches; cached responses use no new request. estimatedCost is the TypeSafe bill in US dollars if every step runs uncached, at the observed blended rate per million tokens. jevRequestSize estimates the largest request per step against Jev limits (32,000 tokens for persona details plus the longest question; 64,000 in total); steps over a limit fail this plan. A step with a batched input lists its layers: layerRequests are requests per respondent and repeat, the map layer first, then each combining round.' };
 }
 program.command('plan').argument('<pipeline>').description('Inspect graph and maximum request count without credentials or API calls').action(async file => { const { pipeline, cohorts } = await loadProject(file); output(plan(pipeline, cohorts)); });
 

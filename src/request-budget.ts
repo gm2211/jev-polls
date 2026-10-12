@@ -87,6 +87,10 @@ export interface StageBudget {
   /** Plain-language findings; present when status is warning or blocked. */
   message?: string;
   largestPart: { name: string; tokens: number };
+  /** Mean estimated tokens of one request across the step's eligible personas (the map layer when batched); feeds the cost estimate. */
+  meanRequestTokens: number;
+  /** Estimated tokens of one reply: every question's answer, with its probabilities. */
+  replyTokens: number;
   /** Present when a `responses` input is read in batches and then combined. */
   batching?: BatchPlan;
   /** Who answered each input (by input name, or earlier step id without named inputs): each respondent's profile with their response, or only a summary of the group. */
@@ -345,10 +349,12 @@ export function estimateStageBudget(pipeline: Pipeline, cohorts: Record<string, 
       inputs[batched.alias] = { value: mapInput(1, batching.batches, total, entry === undefined ? [] : [entry]), extraTokens: Math.ceil(extraBytes / 3), kind: 'responses' };
     }
   }
+  let requestTokensSum = 0;
   for (const persona of personas) {
     const state = buildPollState(pipeline, cohort, stage, persona, stage.inputs === undefined ? { upstream: upstreamPlaceholder! } : { inputs: Object.fromEntries(Object.entries(inputs).map(([alias, item]) => [alias, item.value])), ...(batching ? { guide: MAP_GUIDE } : {}), respondents });
     const extra = Object.values(inputs).reduce((sum, item) => sum + item.extraTokens, 0);
     const size = requestSize(state, stage.questions);
+    requestTokensSum += size.total + extra;
     if (worst && size.stateTokens + extra <= worst.size.stateTokens + worst.extra) continue;
     const parts: Array<{ name: string; tokens: number; responses?: string }> = [
       { name: `the profile of ${personaLabel(persona)} (background and details)`, tokens: tokensOf({ ...persona, attributes: undefined }) + tokensOf(persona.attributes) * 2 },
@@ -395,9 +401,38 @@ export function estimateStageBudget(pipeline: Pipeline, cohorts: Record<string, 
     status: blocked ? 'blocked' : warned ? 'warning' : 'ok',
     ...(message ? { message } : {}),
     largestPart: { name: top.name, tokens: top.tokens },
+    meanRequestTokens: Math.ceil(requestTokensSum / personas.length),
+    replyTokens: Object.values(stage.questions).reduce((sum, question) => sum + tokensOf(representativeAnswer(question)), 0),
     ...(batching ? { batching } : {}),
     ...(Object.keys(respondentDetail).length ? { respondents: respondentDetail } : {}),
   };
+}
+
+/**
+ * Observed TypeSafe billing for jev-1.13.0 in October 2026: $1.30 for 33.55M tokens (input and output together).
+ * TypeSafe does not publish per-token prices, so input and output share this blended rate; update it when they do.
+ */
+export const JEV_USD_PER_MILLION_TOKENS = 0.039;
+/** Real runs bill about 1.2 to 1.6 times the bytes/3 request estimate (Jev's own prompt and tokenizer) and about 0.8 to 1.7 times the reply estimate. */
+const BILLED_INPUT_RATIO = 1.4;
+const BILLED_OUTPUT_RATIO = 1.1;
+
+export interface UsageEstimate { inputTokens: number; outputTokens: number }
+export interface CostEstimate extends UsageEstimate { usd: number; usdPerMillionTokens: number }
+
+/** Billed tokens for one step: `runs` is respondents times repeats; batched steps add their combining requests. */
+export function estimateStageUsage(budget: StageBudget, runs: number): UsageEstimate {
+  const layers = budget.batching?.layerRequests ?? [1];
+  const combining = layers.slice(1).reduce((sum, count) => sum + count, 0);
+  const input = runs * (layers[0]! * budget.meanRequestTokens + combining * (budget.batching?.reduceTotal ?? 0));
+  const output = runs * (layers[0]! + combining) * budget.replyTokens;
+  return { inputTokens: Math.ceil(input * BILLED_INPUT_RATIO), outputTokens: Math.ceil(output * BILLED_OUTPUT_RATIO) };
+}
+
+export function costOf(usage: UsageEstimate[]): CostEstimate {
+  const inputTokens = usage.reduce((sum, item) => sum + item.inputTokens, 0);
+  const outputTokens = usage.reduce((sum, item) => sum + item.outputTokens, 0);
+  return { inputTokens, outputTokens, usd: ((inputTokens + outputTokens) / 1_000_000) * JEV_USD_PER_MILLION_TOKENS, usdPerMillionTokens: JEV_USD_PER_MILLION_TOKENS };
 }
 
 export function estimateBudgets(pipeline: Pipeline, cohorts: Record<string, Cohort>, stages: Stage[]): Record<string, StageBudget> {
