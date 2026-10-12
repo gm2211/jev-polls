@@ -90,6 +90,37 @@ behaviors:
         flexible grouping is good, but maybe there's a better way to present this / a way of making
         this menu hierarchical
       reference: 2026-10-12 jev-polls project thread, Giulio
+  - id: cohort-page-fixed-header
+    description: >-
+      On a cohort's Personas tab the cohort title, its section tabs and the page around them stay in
+      place; only the persona rows scroll, inside a panel capped at the window's remaining height,
+      with the pager directly under the rows.
+    details: >-
+      Paging stays the main way through a large cohort (12 per page on desktop, 6 on phone widths,
+      interface-quality.pagination-in-flow); the rows scroll only when a page is taller than the
+      window. The header is two rows: the title with Back to study, save status and Delete on its
+      right, then the persona count and About this cohort on one line. Section tabs stay on one row
+      on phones. A very short window (zoom) keeps a 360px panel and lets the page scroll.
+    source:
+      text: list can scroll though pagination is better but not title and rest of ui
+      reference: >-
+        2026-10-12 jev-polls project chat, Giulio, with a screenshot of a 1,000-persona cohort whose
+        title scrolled away; follow-up "so much vertical space wasted - we need more inlining"
+  - id: cohort-autosave
+    description: >-
+      Cohort and persona pages have no Save button: each edit saves on its own shortly after it is
+      made, and the header shows "Saving…", "All changes saved", or why the edit is not saved yet.
+    details: >-
+      Chosen 2026-10-12 under Giulio's standing approval, replacing explicit Save on these pages
+      (projects.explicit-save stays for studies and project settings). Saving does not re-render the
+      page, so the field being typed in keeps focus; an edit made while a save is in flight stays
+      unsaved and goes in the next save. Invalid fields or a workspace changed elsewhere stop
+      autosave and are named in the status, without a browser validation popup. Autosave waits while
+      a drafting job runs, so a pending persona replacement is not invalidated. A generated cohort
+      that is adopted onto its cohort page is saved straight away.
+    source:
+      text: also the save button is unclear what it does, maybe get rid of it?
+      reference: 2026-10-12 jev-polls project chat, Giulio, on the cohort page header
   - id: content-addressed-import
     description: cohort import stores an immutable revision named by the cohort ID and a content hash.
   - id: sampling-preserves-weights
