@@ -111,3 +111,20 @@ behaviors:
     description: >-
       Ask AI or Shift+Enter sends a natural-language request that can search, navigate to a
       validated result, or open a prefilled creation or editing flow, without saving or running.
+  - id: palette-scope
+    description: >-
+      The palette knows where it was opened: a chip in the search bar names the open step, study,
+      cohort, run or project, and Ask AI from a study or step with steps sends the request straight
+      to the drafting assistant with that study (and step) as its focus. The proposal opens in the
+      drafting panel as a reviewable, step-by-step diff; nothing changes until Apply, and Undo (or
+      Cmd/Ctrl+Z) restores the study while nothing has changed since.
+    details: >-
+      Clearing the chip (its close button, or Backspace in an empty search) searches everywhere and
+      sends Ask AI to the command router as before; reopening the palette starts from the current
+      view again. Search results are unchanged by the scope. The drafting panel names the study it
+      will change ("Changing …") with a Draft anything button that drops the focus. The focus is
+      recorded on the job, so a reload restores it. Cohort, run and project scopes are shown but
+      still use the command router.
+    source:
+      text: cmd+k should be context aware - e.g. I should be able to ask my assistant to modify my study
+      reference: 2026-10-12 jev-polls project thread, Giulio

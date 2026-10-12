@@ -52,6 +52,7 @@ function deleteStep(){
 /** Undo puts the step back only while the study is as the deletion left it, so it never discards a later edit. */
 function undoStepDeletion(){
   const undo=S.stepUndo?.at(-1);if(!undo)return false;
+  if(undo.kind==='assistant')return undoAssistantProposal(undo);
   const p=S.doc.pipelines.find(x=>x.id===undo.pipelineId);
   if(!p||JSON.stringify(p.stages)!==undo.after){S.stepUndo=[];say('The study changed after that delete, so it can no longer be undone.');return true}
   S.stepUndo.pop();

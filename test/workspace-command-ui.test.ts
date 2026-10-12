@@ -22,11 +22,17 @@ function harness(overrides: Record<string, unknown> = {}) {
     audienceQueued: () => (context.queued ?? []), audienceNext: async () => { calls.push('audience-next'); return true; },
     loadLocalAgents: async () => {}, draftReady: () => true, draftCancelButton: () => '', proposalReview: () => '<p>Review</p>',
     fail(e: Error) { calls.push('error:' + e.message); },
+    stepTitle: (p: any, st: any) => (p.stages.findIndex((x: any) => x.id === st.id) + 1) + '. ' + (st.label || Object.values(st.questions || {})[0]?.['label' as never] || 'Untitled question'),
+    optionName: (k: string, v: any) => v && typeof v === 'object' ? v.label : v ?? k,
+    flowInputs: (_: any, st: any) => Array.isArray(st.inputs) ? st.inputs.map((x: any) => [x.stage, x]) : Object.entries(st.inputs || {}),
+    cohort: () => null, retainSelections() {}, say(m: string) { calls.push('say:' + m); }, sayUndo(m: string) { calls.push('undo-toast:' + m); },
+    save: async () => { calls.push('save'); S.dirty = false; },
+    startDraftJob: async (details: () => any) => { const body = details(); calls.push('draft-job'); context.drafted = body; },
     applyLocalProposal: async () => { S.proposalApplied = true; const p = { id: 'new', name: 'New study', stages: [{ id: 'newstep', kind: 'poll' }] }; S.doc.pipelines.push(p); context.project().pipelineIds.push(p.id); },
   };
   Object.assign(context, overrides);
-  new Script(DRAFT_CONTENT_CLIENT + COMMAND_CLIENT + '\nglobalThis.command={draftAttachRead,draftMaterial,commandBeforeRender,commandEntries,commandExecute,commandInput,commandAction,commandOpen,commandApplyProposal,draftSidePanel,commandResults,commandJobVisible,commandAskAI,commandClose,commandChoices,state:commandState};').runInNewContext(context);
-  return { ...context.command, S, calls, key: listeners.get('keydown')! };
+  new Script(DRAFT_CONTENT_CLIENT + COMMAND_CLIENT + '\nglobalThis.command={commandScope,studyEdits,undoAssistantProposal,draftTarget,commandPalette,draftAttachRead,draftMaterial,commandBeforeRender,commandEntries,commandExecute,commandInput,commandAction,commandOpen,commandApplyProposal,draftSidePanel,commandResults,commandJobVisible,commandAskAI,commandClose,commandChoices,state:commandState};').runInNewContext(context);
+  return { ...context.command, S, calls, context, key: listeners.get('keydown')! };
 }
 
 test('commands search every project and navigate to an exact step after preserving edits', () => {
@@ -176,4 +182,72 @@ test('applying a proposal that asks for audiences hands over to the audience que
   withQueue.commandAction('draft-panel-open', { dataset: {} }); await withQueue.commandApplyProposal();
   assert.ok(withQueue.calls.includes('audience-next'));
   assert.equal(withQueue.S.pipelineId, 'names', 'the queue chooses the step to show'); assert.equal(withQueue.commandJobVisible(), false);
+});
+
+
+test('palette shows where it is and a study scope sends the request to the assistant with that study in focus', async () => {
+  const requests: any[] = [];
+  const h = harness({ api: async (path: string) => { requests.push(path); return {}; } });
+  h.S.pipelineId = 'names'; h.S.stageId = 'ask';
+  h.commandOpen();
+  assert.deepEqual({ kind: h.commandScope().kind, name: h.commandScope().name }, { kind: 'study', name: 'Naming study' });
+  assert.match(h.commandPalette(), /class="command-scope"[\s\S]*Study[\s\S]*Naming study/);
+  assert.match(h.commandPalette(), /ask AI to change this study/);
+  h.S.flowPanel = true; assert.equal(h.commandScope().kind, 'step'); assert.equal(h.commandScope().stageId, 'ask');
+  h.commandInput({ target: { id: 'commandSearch', value: 'add a follow-up asking why' } });
+  assert.match(h.commandChoices()[0].label, /^Ask AI to change this step: add a follow-up asking why/);
+  await h.commandAskAI();
+  assert.deepEqual(requests, [], 'a study edit skips the command router');
+  assert.deepEqual(JSON.parse(JSON.stringify(h.context.drafted)), { prompt: 'add a follow-up asking why', focus: { pipelineId: 'names', stageId: 'ask' } });
+  assert.equal(h.state.open, false); assert.equal(h.commandJobVisible(), true); assert.equal(h.S.flowPanel, false);
+  assert.match(h.draftSidePanel(), /Edit with assistant[\s\S]*Changing[\s\S]*Naming study · 1\. Name preference/);
+});
+
+test('clearing the scope searches everywhere and asks the router again', async () => {
+  const requests: any[] = [];
+  const h = harness({ api: async (path: string) => { requests.push(path); return { status: 'completed', commandResult: { kind: 'search', query: 'x', destinations: [] } }; } });
+  h.S.pipelineId = 'names'; h.commandOpen();
+  h.key({ key: 'Backspace', target: { id: 'commandSearch', value: '' }, preventDefault() {} });
+  assert.equal(h.commandScope(), null); assert.doesNotMatch(h.commandPalette(), /command-scope"/);
+  h.commandInput({ target: { id: 'commandSearch', value: 'make a snack study' } }); await h.commandAskAI();
+  assert.deepEqual(requests, ['/api/agent/commands']);
+  h.commandClose(); h.commandOpen(); assert.equal(h.commandScope().kind, 'study', 'reopening starts from the current view again');
+  h.S.tab = 'runs'; assert.equal(h.commandScope().kind, 'project');
+});
+
+test('a study edit needs a drafting connection and says so in the palette', async () => {
+  const h = harness({ draftReady: () => false }); h.S.pipelineId = 'names'; h.commandOpen();
+  h.commandInput({ target: { id: 'commandSearch', value: 'rename the first step' } }); await h.commandAskAI();
+  assert.match(h.state.error, /Connect a drafting provider/); assert.equal(h.state.open, true); assert.equal(h.context.drafted, undefined);
+});
+
+test('study edits read as plain step-by-step changes', () => {
+  const h = harness();
+  const doc = { cohorts: [{ id: 'gamers', name: 'Gamers' }, { id: 'parents', name: 'Parents' }] };
+  const before = { name: 'Naming study', description: '', cohorts: { a: 'gamers', b: 'parents' }, stages: [
+    { id: 'ask', label: 'Name vote', kind: 'poll', cohort: 'a', dependsOn: [], questions: { pick: { type: 'choice', label: 'Which name?', instructions: '', criteria: { nova: 'Nova', orbit: 'Orbit' } } } },
+    { id: 'old', label: 'Old step', kind: 'poll', cohort: 'a', dependsOn: [], questions: { q: { type: 'noul', label: 'Old?', instructions: '' } } }] };
+  const after = { ...before, stages: [
+    { ...before.stages[0], label: 'Name pick', cohort: 'b', questions: { pick: { type: 'choice', label: 'Which name fits best?', instructions: '', criteria: { nova: 'Nova', comet: 'Comet' } } } },
+    { id: 'why', label: 'Why', kind: 'poll', cohort: 'a', dependsOn: ['ask'], inputs: { winner: { stage: 'ask', question: 'pick' } }, questions: { q: { type: 'noul', label: 'Why?', instructions: '' } } }] };
+  assert.deepEqual([...h.studyEdits(before, after, doc, doc)], [
+    'Step 1 “Name pick”: renamed “Name vote” → “Name pick”; question “Which name?” → “Which name fits best?”; adds option “Comet”; drops option “Orbit”; asks “Parents” instead of “Gamers”',
+    'Added Step 2: “Why”',
+    'Removed step “Old step”',
+  ]);
+});
+
+test('applying an assistant edit can be undone, and only while nothing changed since', async () => {
+  const h = harness(); h.S.pipelineId = 'names';
+  const original = JSON.stringify(h.S.doc);
+  h.commandAction('draft-panel-open', { dataset: {} });
+  await h.commandApplyProposal();
+  assert.ok(h.calls.some((c: string) => c.startsWith('undo-toast:Applied the assistant’s changes')));
+  assert.equal(h.S.stepUndo.at(-1).kind, 'assistant');
+  assert.equal(h.undoAssistantProposal(h.S.stepUndo.at(-1)), true);
+  assert.equal(JSON.stringify(h.S.doc), original); assert.equal(h.S.pipelineId, 'names'); assert.ok(h.calls.includes('save'));
+  h.commandAction('draft-panel-open', { dataset: {} }); h.S.proposalApplied = false;
+  await h.commandApplyProposal(); h.S.doc.pipelines[0].name = 'Edited after';
+  h.calls.length = 0; h.undoAssistantProposal(h.S.stepUndo.at(-1));
+  assert.equal(h.S.doc.pipelines[0].name, 'Edited after'); assert.equal(h.S.stepUndo.length, 0); assert.ok(h.calls.some((c: string) => /can no longer be undone/.test(c)));
 });
