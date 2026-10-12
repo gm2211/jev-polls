@@ -101,6 +101,23 @@ behaviors:
     source:
       text: this is still too slow - it should take no longer than 30 seconds
       reference: 2026-10-11 jev-polls project thread, Giulio
+  - id: forgiving-batch-checks
+    description: >-
+      A persona age written as a number in a string is read as that number; in a batch that can be topped
+      up, a table row with the wrong number of values or a person that fails the persona format is left
+      out and written again in the top-up, instead of the whole batch; setup age bucket bounds are rounded
+      into 18 to 121.
+    details: >-
+      Added 2026-10-12 after "stalling at 992" on a real 1,000-person run on an 18-core Mac (5 min, 6
+      retries). Its server log showed a setup reply rejected for an age bucket bound out of range (most of
+      a 44 s setup), four batches rejected for an age written as a string, one for a row with 14 values for
+      13 fields, and one batch rejected and then slow twice, taking 257 s while most took 66 to 82 s. Each
+      rejection cost a whole batch written again. Batches with distribution targets still need every row,
+      since their slots are matched by position, and a batch where no one passes is still retried whole
+      with the reason.
+    source:
+      text: stalling at 992, also I would expect this to show up in cohorts at least once generated, and probably as draft as soon as I hit "generate"
+      reference: 2026-10-12 jev-polls project thread, Giulio
   - id: slow-batch-second-request
     description: >-
       A batch attempt running far longer than the accepted batches gets one second, identical request;

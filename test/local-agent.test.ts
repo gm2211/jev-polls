@@ -6,7 +6,7 @@ import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promise
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { ChildProcessWithoutNullStreams, SpawnOptionsWithoutStdio } from 'node:child_process';
-import { BatchRejected, LocalAgentError, readSetupPlan, backoffCause, batchSizes, LocalAgentService, checkCohortBatch, checkCohortSetup, checkPersonaBatch, concurrentBatches, personasFromTable, segmentSequence, claudeEnvelope, takeAudienceRequests, type LocalAgentJob, type LocalAgentSpawner } from '../src/local-agent.js';
+import { BatchRejected, LocalAgentError, readSetupPlan, backoffCause, batchSizes, LocalAgentService, checkCohortBatch, checkCohortSetup, checkPersonaBatch, ShortBatch, concurrentBatches, personasFromTable, segmentSequence, claudeEnvelope, takeAudienceRequests, type LocalAgentJob, type LocalAgentSpawner } from '../src/local-agent.js';
 import type { ChatGptDraftClient } from '../src/chatgpt.js';
 import type { Cohort, DistributionTargetBucket, Persona } from '../src/types.js';
 import { validateWorkspaceDocument } from '../src/workspace-store.js';
@@ -1610,6 +1610,18 @@ test('Claude Code persona batch processes start during the setup call, hold the 
   }
 });
 
+test('a persona batch reads numeric-string ages, and a top-up batch drops bad rows and invalid people instead of failing', () => {
+  const { personas, ...metadata } = batchCohort(3); const expected = { id: 'customers', size: 3, metadata: metadata as Record<string, unknown> };
+  const attributes = Object.keys(personas[0]!.attributes);
+  const fields = ['position', 'label', 'segment', 'age', 'background', ...attributes.map(name => `attributes.${name}`)];
+  const row = (index: number, age: unknown) => [index, `Persona ${index}`, personas[0]!.segment, age, 'Distinct background', ...Object.values(personas[0]!.attributes)];
+  // Seen on a Mac in four of 48 batches: an age written as a string.
+  assert.equal(checkPersonaBatch(JSON.stringify({ fields, rows: [row(1, '34'), row(2, 40), row(3, ' 52 ')] }), expected).personas[0]!.age, 34);
+  const messy = JSON.stringify({ fields, rows: [row(1, 34), [...row(2, 40), 'extra'], row(3, 'unknown')] });
+  assert.throws(() => checkPersonaBatch(messy, expected), /row 2 has \d+ values for \d+ fields/, 'a full batch with targets still needs every row');
+  assert.throws(() => checkPersonaBatch(messy, expected, true), (error: unknown) => error instanceof ShortBatch && error.personas.length === 1 && error.personas[0]!.label === 'Persona 1', 'a top-up batch keeps the good person and asks for two more');
+});
+
 test('a persona table becomes persona objects, and a row with the wrong number of values is rejected', () => {
   assert.deepEqual(personasFromTable({ fields: ['position', 'label', 'age', 'attributes.city', 'income'], rows: [[1, 'Ana', 34, 'Lyon', 'middle']] }), [{ label: 'Ana', age: 34, attributes: { city: 'Lyon', income: 'middle' } }]);
   assert.equal(personasFromTable({ fields: ['label', 'age'], rows: [['Ana', 34], ['Ben']] }), 'row 2 has 1 values for 2 fields');
@@ -1825,6 +1837,9 @@ test('the setup call returns cohort details with no personas, checked like a fir
   assert.equal(reject([metadata]), 'the reply is not a cohort object');
   // Seen in a real Claude run: a setup that invented a target on a plain field passed, then failed the final check after every batch.
   assert.match(reject({ ...metadata, distributionTargets: [{ field: 'country', kind: 'categorical', buckets: [{ label: 'US', percent: 100, value: 'US' }] }] }), /^the distribution targets are invalid: .*attributes/);
+  // Seen on a Mac: an open-ended top age bucket out of range failed the setup and cost a retry every batch waited for.
+  assert.deepEqual(checkCohortSetup(JSON.stringify({ ...metadata, distributionTargets: [{ field: 'age', kind: 'numeric', buckets: [{ label: 'Under 65', percent: 60, min: 16, max: 65 }, { label: '65+', percent: 40, min: 65, max: 999 }] }] }), 'customers').distributionTargets,
+    [{ field: 'age', kind: 'numeric', buckets: [{ label: 'Under 65', percent: 60, min: 18, max: 65 }, { label: '65+', percent: 40, min: 65, max: 121 }] }]);
   assert.deepEqual(checkCohortSetup(JSON.stringify({ ...metadata, distributionTargets: [{ field: 'attributes.country', kind: 'categorical', buckets: [{ label: 'US', percent: 100, value: 'US' }] }] }), 'customers').distributionTargets, [{ field: 'attributes.country', kind: 'categorical', buckets: [{ label: 'US', percent: 100, value: 'US' }] }]);
 });
 
@@ -1842,16 +1857,17 @@ function loggedService(client: ChatGptDraftClient) {
 const replyWith = (input: string, change: (cohort: Cohort) => void) => { const reply = JSON.parse(cohortBatchResponse(input)); const cohort = JSON.parse(reply.documentJson) as Cohort; change(cohort); return JSON.stringify({ ...reply, documentJson: JSON.stringify(cohort) }); };
 
 test('a batch that keeps failing names the batch and the check, logs every attempt, and leaves the workspace unchanged', async t => {
-  const { lines, service } = loggedService(nativeDraft(input => requestData(input).batch?.number === 2 ? replyWith(input, cohort => { delete (cohort.personas[2] as Partial<Persona>).segment; }) : cohortBatchResponse(input)));
+  const { lines, service } = loggedService(nativeDraft(input => requestData(input).batch?.number === 2 ? replyWith(input, cohort => { for (const persona of cohort.personas) delete (persona as Partial<Persona>).segment; }) : cohortBatchResponse(input)));
   t.after(() => service.close());
+  // A batch with some good people is topped up instead (below); here no one passes, so the whole batch is retried.
   const done = await terminal(service, service.start(batchRequest(60)));
   assert.equal(done.status, 'failed'); assert.equal(done.proposal, undefined);
-  assert.equal(done.message, 'Batch 2 failed its checks 3 times: persona 3 has no segment. Workspace unchanged.');
+  assert.equal(done.message, 'Batch 2 failed its checks 3 times: persona 1 has no segment (and 9 more). Workspace unchanged.');
   const batchLines = lines.filter(line => line.event === 'cohort-batch-failed');
-  assert.deepEqual(batchLines.map(line => [line.batch, line.attempt, line.maxAttempts, line.reason]), [1, 2, 3].map(attempt => [2, attempt, 3, 'persona 3 has no segment']));
+  assert.deepEqual(batchLines.map(line => [line.batch, line.attempt, line.maxAttempts, line.reason]), [1, 2, 3].map(attempt => [2, attempt, 3, 'persona 1 has no segment (and 9 more)']));
   for (const line of batchLines) { assert.equal(line.jobId, done.id); assert.ok(typeof line.output === 'string' && line.output.length > 0 && line.output.length <= 300); }
   const final = lines.filter(line => line.event === 'draft-failed');
-  assert.equal(final.length, 1); assert.equal(final[0]!.jobId, done.id); assert.equal(final[0]!.task, 'cohort'); assert.match(String(final[0]!.reason), /^Batch 2 failed its checks 3 times: persona 3 has no segment$/);
+  assert.equal(final.length, 1); assert.equal(final[0]!.jobId, done.id); assert.equal(final[0]!.task, 'cohort'); assert.match(String(final[0]!.reason), /^Batch 2 failed its checks 3 times: persona 1 has no segment \(and 9 more\)$/);
 });
 
 test('a persona with a segment the cohort does not have is caught in its batch and fixed by the retry', async t => {
