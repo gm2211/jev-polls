@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createCohortInsights, getPersonaFieldValue, matchesDistributionBucket, validateTargets } from '../src/cohort-insights.js';
-import type { Cohort, DistributionTarget } from '../src/types.js';
+import type { Cohort, DistributionTarget, Persona } from '../src/types.js';
 
 const cohort: Cohort = {
   version: 1, id: 'people', name: 'People', description: 'Test cohort', population: 'Adults', createdAt: '2026-10-03T12:00:00Z',
@@ -123,4 +123,25 @@ test('array attributes are charted per item with missing values disclosed', () =
   assert.equal(result.missing, 2);
   assert.deepEqual(arrays.personas.filter((p: any) => insights.matchesBucket(p, 'attributes.f', result.buckets[1])).map((p: any) => p.id), ['a', 'c']);
   assert.deepEqual(arrays.personas.filter((p: any) => insights.matchesBucket(p, 'attributes.f', result.buckets[2])).map((p: any) => p.id), ['d', 'e']);
+});
+
+test('groupable attributes merge spellings of one attribute and keep attribute objects as families', () => {
+  const insights = createCohortInsights();
+  const persona = (id: string, attributes: Persona['attributes']) => ({ ...cohort.personas[0]!, id, attributes });
+  const messy: Cohort = { ...cohort, personas: [
+    persona('p1', { currentGames: ['Chess'], playerHabits: { hoursPerDay: 2, sessionPattern: 'evenings' }, top10GamesLifetime: ['Go'] }),
+    persona('p2', { current_games: ['Go'], playerHabits: { hoursPerDay: 3 }, 'Top 10 Games Lifetime': ['Chess'] }),
+    persona('p3', { attributes: { currentGame: ['Risk'] }, playerHabits: { hoursPerDay: 1 }, notes: 'rare' }),
+    persona('p4', { currentGames: ['Go'], hours_per_day: 4, playerHabits: { sessionPattern: 'mornings' } }),
+  ] };
+  const fields = insights.groupableAttributes(messy);
+  const games = fields.find(f => f.label === 'Current Games');
+  assert.deepEqual(games?.paths.sort(), ['attributes.attributes.currentGame', 'attributes.currentGames', 'attributes.current_games']);
+  assert.equal(games?.count, 4);
+  assert.equal(fields.filter(f => /top/i.test(f.label)).length, 1);
+  assert.deepEqual(fields.filter(f => f.family === 'Player Habits').map(f => [f.label, f.count]), [['Session Pattern', 2]]);
+  const hours = fields.find(f => f.label === 'Hours Per Day');
+  assert.deepEqual([hours?.family, hours?.count, hours?.field], [undefined, 4, 'attributes.playerHabits.hoursPerDay'], 'the same name in two places, never on one persona together, is one attribute');
+  assert.equal(fields.find(f => f.label === 'Notes')?.count, 1);
+  assert.equal(insights.attributeName('Top10GamesLifetime'), insights.attributeName('top_10_games_lifetime'));
 });

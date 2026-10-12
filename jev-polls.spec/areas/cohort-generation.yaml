@@ -321,6 +321,20 @@ behaviors:
         load that I can inspect as they get generated (also with some sort of placeholders for the
         missing ones and simple animation) - give me a few designs I can choose from
       reference: 2026-10-12 jev-polls project thread, Giulio
+  - id: consistent-attribute-keys
+    description: >-
+      Persona batches of one cohort store each attribute under one key: batches are asked for one
+      camelCase key per attribute and flat attributes, and an accepted persona's keys are respelled as
+      the cohort first spelled them (distribution target fields first), with a nested attributes object
+      lifted out.
+    details: >-
+      Added after a cohort generated in parallel batches showed currentGames, current_games and
+      attributes.currentGames as separate attributes.
+    source:
+      text: >-
+        flexible grouping is good, but maybe there's a better way to present this / a way of making
+        this menu hierarchical
+      reference: 2026-10-12 jev-polls project thread, Giulio
   - id: cancel-generation
     description: Cancel generation stops the job and leaves the workspace unchanged.
   - id: regenerate-persona

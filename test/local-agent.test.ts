@@ -6,7 +6,7 @@ import { mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promise
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import type { ChildProcessWithoutNullStreams, SpawnOptionsWithoutStdio } from 'node:child_process';
-import { BatchRejected, LocalAgentError, readSetupPlan, backoffCause, batchSizes, LocalAgentService, checkCohortBatch, checkCohortSetup, checkPersonaBatch, ShortBatch, concurrentBatches, earlySetupDetails, personasFromTable, segmentSequence, claudeEnvelope, takeAudienceRequests, type LocalAgentJob, type LocalAgentSpawner } from '../src/local-agent.js';
+import { BatchRejected, canonicalAttributes, LocalAgentError, readSetupPlan, backoffCause, batchSizes, LocalAgentService, checkCohortBatch, checkCohortSetup, checkPersonaBatch, ShortBatch, concurrentBatches, earlySetupDetails, personasFromTable, segmentSequence, claudeEnvelope, takeAudienceRequests, type LocalAgentJob, type LocalAgentSpawner } from '../src/local-agent.js';
 import type { ChatGptDraftClient } from '../src/chatgpt.js';
 import type { Cohort, DistributionTargetBucket, Persona } from '../src/types.js';
 import { validateWorkspaceDocument } from '../src/workspace-store.js';
@@ -2154,4 +2154,12 @@ test('only rate-limit, overload and connection class failures are waited out', (
     assert.equal(backoffCause(status, text), cause, `${status} ${text}`);
   }
   for (const [status, text] of [[400, 'bad request'], [401, 'login'], [undefined, 'error_max_structured_output_retries'], [undefined, 'persona 3 has no segment'], [null, null]] as const) assert.equal(backoffCause(status, text), undefined, `${status} ${text}`);
+});
+
+test('persona attributes keep the first spelling their cohort used and lose a nested attributes object', () => {
+  const spellings = new Map<string, string>();
+  assert.deepEqual(canonicalAttributes({ currentGames: ['Chess'], hoursPerDay: 2 }, spellings), { currentGames: ['Chess'], hoursPerDay: 2 });
+  assert.deepEqual(canonicalAttributes({ current_games: ['Go'], 'Hours per day': 3 }, spellings), { currentGames: ['Go'], hoursPerDay: 3 });
+  assert.deepEqual(canonicalAttributes({ attributes: { currentGame: ['Risk'] }, region: 'north' }, spellings), { region: 'north', currentGames: ['Risk'] });
+  assert.deepEqual(personasFromTable({ fields: ['position', 'label', 'attributes.attributes.region'], rows: [[1, 'Ann', 'north']] }), [{ label: 'Ann', attributes: { region: 'north' } }]);
 });

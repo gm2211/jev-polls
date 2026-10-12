@@ -259,13 +259,65 @@ export function createCohortInsights() {
     if (bucket?.member) { const raw = rawFieldValue(persona, field); return Array.isArray(raw) ? arrayItems(raw).includes(bucket.value) : raw !== undefined && raw !== null && stable(raw) === bucket.value; }
     if (bucket?.value === null && bucket.label === 'Missing') { const raw = rawFieldValue(persona, field); if (Array.isArray(raw)) return raw.length === 0; }
     return matchesDistributionBucket(getPersonaFieldValue(persona, field), bucket, kind); }
-  return { discoverFields, distribution, effectiveWeights, allocateTargets, matchesBucket, getPersonaFieldValue, matchesDistributionBucket, validateTargets };
+  /** The words of one attribute key, lower case and singular, so currentGames, current_games and "Current Games" share one name. */
+  function attributeName(key: string): string {
+    return key.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/([A-Za-z])(\d)/g, '$1 $2').replace(/(\d)([A-Za-z])/g, '$1 $2').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean)
+      .map((word) => word.length > 3 && word.endsWith('s') && !word.endsWith('ss') ? word.slice(0, -1) : word).join(' ');
+  }
+  /** A key as a person reads it: "playerHabits" becomes "Player Habits". */
+  function attributeLabel(key: string): string {
+    const words = key.replace(/([a-z])([A-Z])/g, '$1 $2').replace(/([A-Za-z])(\d)/g, '$1 $2').replace(/(\d)([A-Za-z])/g, '$1 $2').split(/[\s_.-]+/).filter(Boolean);
+    return words.map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(' ');
+  }
+  /**
+   * The persona attributes a cohort can be grouped by, one entry per attribute however its batches spelled it.
+   * Spellings that differ only in case, separators or a plural (currentGames, current_games, Current Games) and an
+   * attributes object nested inside attributes share one entry. Fields with the same name that no persona carries
+   * together (hoursPerDay, habits.hoursPerDay) are one attribute that batches placed differently, so they share one too.
+   * An attribute that is itself an object becomes a family of its fields.
+   */
+  function groupableAttributes(cohort: any): { field: string; paths: string[]; label: string; family?: string; count: number }[] {
+    const personas = Array.isArray(cohort?.personas) ? cohort.personas : [];
+    type Merged = { name: string; paths: Map<string, number>; families: Set<string>; leaf: Map<string, number>; people: Set<number> };
+    const spelled = new Map<string, Merged>();
+    for (const { field } of discoverFields(cohort)) {
+      if (!field.startsWith('attributes.')) continue;
+      const parts = field.split('.').slice(1);
+      while (parts.length > 1 && parts[0] === 'attributes') parts.shift();
+      const id = parts.map(attributeName).join('.');
+      const leaf = parts[parts.length - 1]!;
+      const entry: Merged = spelled.get(id) ?? { name: attributeName(leaf), paths: new Map(), families: new Set(), leaf: new Map(), people: new Set() };
+      let count = 0;
+      personas.forEach((persona: any, index: number) => { const value = rawFieldValue(persona, field); if (value !== undefined && value !== null) { count += 1; entry.people.add(index); } });
+      entry.paths.set(field, count);
+      entry.leaf.set(leaf, (entry.leaf.get(leaf) ?? 0) + count + 1);
+      entry.families.add(parts.length > 1 ? attributeLabel(parts.slice(0, -1).join(' ')) : '');
+      spelled.set(id, entry);
+    }
+    const merged: Merged[] = [];
+    for (const entry of [...spelled.values()].sort((a, b) => b.people.size - a.people.size)) {
+      const into = merged.find((other) => other.name === entry.name && [...entry.people].every((person) => !other.people.has(person)));
+      if (!into) { merged.push(entry); continue; }
+      for (const [path, count] of entry.paths) into.paths.set(path, count);
+      for (const [leaf, count] of entry.leaf) into.leaf.set(leaf, (into.leaf.get(leaf) ?? 0) + count);
+      for (const family of entry.families) into.families.add(family);
+      for (const person of entry.people) into.people.add(person);
+    }
+    const mostUsed = (counts: Map<string, number>) => [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]![0];
+    return merged.map((entry) => {
+      const paths = [...entry.paths.entries()].sort((a, b) => b[1] - a[1] || a[0].length - b[0].length || a[0].localeCompare(b[0])).map(([path]) => path);
+      const family = entry.families.size === 1 ? [...entry.families][0] : '';
+      return { field: paths[0]!, paths, label: attributeLabel(mostUsed(entry.leaf)), ...(family ? { family } : {}), count: entry.people.size };
+    }).sort((a, b) => (a.family ?? '').localeCompare(b.family ?? '') || a.label.localeCompare(b.label));
+  }
+  return { discoverFields, distribution, effectiveWeights, allocateTargets, matchesBucket, getPersonaFieldValue, matchesDistributionBucket, validateTargets, attributeName, attributeLabel, groupableAttributes };
 }
 
 const cohortInsights = createCohortInsights();
 export const getPersonaFieldValue = (persona: Persona | Record<string, unknown>, field: string): unknown => cohortInsights.getPersonaFieldValue(persona, field);
 export const matchesDistributionBucket = (value: unknown, bucket: DistributionTargetBucket, kind?: DistributionTarget['kind']): boolean => cohortInsights.matchesDistributionBucket(value, bucket, kind);
 export const validateTargets = (targets: unknown): true => cohortInsights.validateTargets(targets);
+export const attributeName = (key: string): string => cohortInsights.attributeName(key);
 
 // Keep the Cohort import in the public module's type surface useful to editors.
 export type CohortInsightInput = Cohort;

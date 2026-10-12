@@ -75,6 +75,21 @@ behaviors:
     description: >-
       Persona lists paginate with stable page membership, can be grouped by attribute, and stay
       usable for a 20,000-persona cohort.
+  - id: persona-group-menu
+    description: >-
+      The Group personas by menu lists each attribute once however persona batches spelled it, under
+      headings: Profile, Attributes, one heading per attribute object, and On some personas only (with
+      how many personas carry it).
+    details: >-
+      Spellings that differ in case, separators or a plural, an attributes object nested inside
+      attributes, and fields with the same name that no persona carries together share one choice;
+      grouping reads whichever spelling a persona has. Headings are native optgroups, so the menu stays
+      a plain select.
+    source:
+      text: >-
+        flexible grouping is good, but maybe there's a better way to present this / a way of making
+        this menu hierarchical
+      reference: 2026-10-12 jev-polls project thread, Giulio
   - id: content-addressed-import
     description: cohort import stores an immutable revision named by the cohort ID and a content hash.
   - id: sampling-preserves-weights
