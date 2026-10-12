@@ -599,6 +599,31 @@ test('a final choice dropped on an output reads every answer, starts from its op
   assert.deepEqual(plain(flowTodo(pipeline).find((item: any) => item.stageId === added.id)), { stageId: added.id, tab: 'connections' });
 });
 
+test('a Final answer\'s Reads tab lists each earlier output once with an Off / Summary / Every answer switch', async () => {
+  const { S, pipeline, flowAction, flowConnections } = await flowHarness();
+  S.flowCreate = { pipelineId: 'study', x: 10, y: 10, left: 0, top: 0, query: '', index: 0, connect: { stage: 'source', question: 'answer' } };
+  flowAction('flow-create', { dataset: { kind: 'choose' } });
+  const added = pipeline.stages.at(-1);
+  added.questions.choice.optionsFrom = { stage: 'source', question: 'answer', top: 2 };
+  const reads = flowConnections(pipeline, added);
+  assert.match(reads, /Jev picks from<\/span><strong>The top 2 options of /);
+  assert.doesNotMatch(reads, /Connected results|Connect an output|Options from|data-act="flow-disconnect"/);
+  assert.equal(reads.match(/data-source="source" data-question="answer"[^>]*data-mode="off"/g)?.length, 1, 'the options source is one row, not two');
+  assert.match(reads, /Gives the options/);
+  assert.match(reads, /data-source="other" data-question="answer" data-mode="off" aria-pressed="true"/);
+  flowAction('flow-choose-read', { dataset: { id: added.id, source: 'other', question: 'answer', mode: 'summary' } });
+  const key = Object.keys(added.inputs).find((k: string) => added.inputs[k].stage === 'other')!;
+  assert.equal(added.inputs[key].select, 'summary');
+  assert.ok(added.dependsOn.includes('other'));
+  flowAction('flow-choose-read', { dataset: { id: added.id, source: 'other', question: 'answer', mode: 'off' } });
+  assert.ok(!Object.values(added.inputs).some((input: any) => input.stage === 'other'));
+  assert.ok(!added.dependsOn.includes('other'));
+  flowAction('flow-choose-read', { dataset: { id: added.id, source: 'source', question: 'answer', mode: 'off' } });
+  assert.deepEqual(plain(added.inputs), {});
+  assert.ok(added.dependsOn.includes('source'), 'the options source stays a dependency');
+  assert.match(flowConnections(pipeline, added), /Turn on at least one output for Jev to read/);
+});
+
 test('an existing Combine answers step switches to a Final choice that keeps its output name', async () => {
   const { S, pipeline, setupAction, resultSetup } = await flowHarness();
   const combine = { id: 'combine', kind: 'aggregate', label: 'Combined answers', dependsOn: ['source', 'other'], inputs: [{ stage: 'source', question: 'answer', weight: 1 }, { stage: 'other', question: 'answer', weight: 2 }], outputQuestion: 'combined' };
