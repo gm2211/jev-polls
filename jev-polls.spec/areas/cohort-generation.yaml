@@ -107,6 +107,12 @@ behaviors:
       made it 75 s: the first reply came later (median 25 s) and seven requests got no reply for about 20 s
       after the rest, so the limit stayed 48. A Claude Code batch still silent 10 s after three quarters of
       the running batches started writing now gets a second request, up to an eighth of the window beyond it.
+      With 48 at once and that second request, the Mac took 42.6 s: setup 11 s, about 5 s for batches to
+      start, about 18 s writing, and a 7 s tail. So on Claude Code, persona batches now start as soon as the
+      streaming setup reply has complete, valid segments and sources (it is asked to write id, population,
+      segments and sources first), with placeholders for the details still being written; the finished
+      setup keeps those segments and sources (a retried setup is told to), and its reply replaces the
+      placeholders before the audience is checked.
     source:
       text: this is still too slow - it should take no longer than 30 seconds
       reference: 2026-10-11 jev-polls project thread, Giulio

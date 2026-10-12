@@ -320,6 +320,54 @@ const planText = (value: string) => value.replace(/\\+u([0-9a-fA-F]{4})/g, (_, h
  * the name, each group's label and weight in the order written, and how many sources it cites. Incomplete values are skipped
  * until their closing quote arrives. It reports only what the reply already says; the finished reply is still checked in full.
  */
+/** The decoded part of a JSON string value that has streamed so far, from the opening quote at start. */
+function partialJsonString(text: string, start: number): { value: string; closed: boolean } {
+  let value = '';
+  for (let at = start; at < text.length; at++) {
+    const char = text[at]!;
+    if (char === '"') return { value, closed: true };
+    if (char !== '\\') { value += char; continue; }
+    const next = text[at + 1];
+    if (next === undefined) break;
+    if (next === 'u') { const hex = text.slice(at + 2, at + 6); if (!/^[0-9a-fA-F]{4}$/.test(hex)) break; value += String.fromCharCode(parseInt(hex, 16)); at += 5; continue; }
+    value += ({ n: '\n', t: '\t', r: '\r', b: '\b', f: '\f' } as Record<string, string>)[next] ?? next; at++;
+  }
+  return { value, closed: false };
+}
+/** The value of a key in streamed JSON once it is complete (an array or a string), else undefined. */
+function completeJsonValue(text: string, key: string): unknown {
+  const match = new RegExp(`"${key}"\\s*:\\s*([\\[\"])`).exec(text);
+  if (!match) return undefined;
+  const start = match.index + match[0].length - 1;
+  if (match[1] === '"') { const string = partialJsonString(text, start + 1); return string.closed ? string.value : undefined; }
+  let depth = 0; let quoted = false;
+  for (let at = start; at < text.length; at++) {
+    const char = text[at]!;
+    if (quoted) { if (char === '\\') at++; else if (char === '"') quoted = false; continue; }
+    if (char === '"') quoted = true;
+    else if (char === '[' || char === '{') depth++;
+    else if ((char === ']' || char === '}') && --depth === 0) { try { return JSON.parse(text.slice(start, at + 1)); } catch { return undefined; } }
+  }
+  return undefined;
+}
+/**
+ * Cohort details persona batches can start from while the setup reply is still streaming: its segments and sources (and
+ * population, when written), once complete and valid, with placeholders for the rest, which batches do not use. Undefined
+ * until then. Measured on an 18-core Mac, the setup took 11 s of a 42.6 s run and every batch waited for its last word.
+ */
+export function earlySetupDetails(streamed: string, id: string): Record<string, unknown> | undefined {
+  const key = /"documentJson"\s*:\s*"/.exec(streamed);
+  if (!key) return undefined;
+  const inner = partialJsonString(streamed, key.index + key[0].length).value;
+  const segments = completeJsonValue(inner, 'segments'); const sources = completeJsonValue(inner, 'sources');
+  if (!Array.isArray(segments) || !Array.isArray(sources)) return undefined;
+  const population = completeJsonValue(inner, 'population');
+  const details = { version: 1, id, name: id, description: 'Being written.', population: typeof population === 'string' && population.trim() ? population : 'Being written.', createdAt: new Date().toISOString(), sources, segments, assumptions: [] };
+  const parsed = cohortMetadataSchema.safeParse(details);
+  if (!parsed.success) return undefined;
+  try { checkCohortMetadata(parsed.data as Pick<Cohort, 'sources' | 'segments' | 'distributionTargets'>, ''); } catch { return undefined; }
+  return parsed.data as Record<string, unknown>;
+}
 export function readSetupPlan(text: string): SetupPlan | undefined {
   const segments = text.search(PLAN_KEY('segments'));
   const after = segments < 0 ? -1 : segments + 1;
@@ -568,7 +616,7 @@ const checkpointSchema = z.object({
 }).passthrough();
 const keptPersonas = (checkpoint: CohortCheckpoint) => Object.values(checkpoint.batches).reduce((sum, personas) => sum + personas.length, 0);
 interface StreamedBatch { personas: number; chars: number; tokens?: number; thinking?: boolean }
-interface Entry { public: LocalAgentJob; work?: Promise<void>; aborts: Set<() => void>; slots: Map<number, ProviderSlot>; streamed: Map<number, StreamedBatch>; cancelled: boolean; settled: boolean; command?: boolean; describeBatches?: () => { batchDetails: BatchDetail[]; inFlightPersonas: number; estimate?: LocalAgentProgress['estimate'] }; acceptedBatch?: (batch: number) => Persona[] | undefined; disposition?: 'applied' | 'discarded'; checkpoint?: CohortCheckpoint; checkpointWrite?: Promise<void>; warm?: WarmProcess[] }
+interface Entry { public: LocalAgentJob; work?: Promise<void>; aborts: Set<() => void>; slots: Map<number, ProviderSlot>; streamed: Map<number, StreamedBatch>; cancelled: boolean; settled: boolean; command?: boolean; describeBatches?: () => { batchDetails: BatchDetail[]; inFlightPersonas: number; estimate?: LocalAgentProgress['estimate'] }; acceptedBatch?: (batch: number) => Persona[] | undefined; disposition?: 'applied' | 'discarded'; checkpoint?: CohortCheckpoint; checkpointWrite?: Promise<void>; warm?: WarmProcess[]; /** Receives the setup call's streamed reply so far, so persona batches can start before it ends. */ onSetupText?: (text: string) => void }
 class DraftFailure extends Error {}
 /** The AI call itself failed or returned something unreadable; `reason` names what, `excerpt` is the start of the offending output. */
 class RequestFailure extends DraftFailure { constructor(message: string, readonly reason: string, readonly excerpt = '', readonly cause?: BackoffCause) { super(message); } }
@@ -1090,7 +1138,7 @@ export class LocalAgentService {
           for (const line of lines) { const delta = claudeStreamDelta(line); text += delta.text; if (delta.tokens !== undefined) tokens = delta.tokens; if (delta.thinking) thinking = true; }
         }
         outputChars += text.length; const window = tail + text; for (const match of window.matchAll(PERSONA_KEY)) if (match.index + match[0].length > tail.length) streamedPersonas++; tail = window.slice(-PERSONA_KEY_TAIL);
-        if (slot === SETUP_SLOT && setupText.length < PLAN_TEXT_LIMIT) setupText += text;
+        if (slot === SETUP_SLOT && setupText.length < PLAN_TEXT_LIMIT) { setupText += text; if (text) entry.onSetupText?.(setupText); }
         this.recordActivity(entry, { phase: 'receiving', outputChars, streamedPersonas, ...(tokens !== undefined ? { outputTokens: tokens } : {}), ...(thinking ? { thinking } : {}) }, 'cli-stdout', slot, slot === SETUP_SLOT && text ? setupText : undefined);
       } });
       child.stderr.on('data', (data: Buffer) => { bytes += data.length; if (bytes > maxBytes) { stop(); return; } if (captureStderr || process.env.JEV_AGENT_DEBUG_DIR) stderr.push(Buffer.from(data)); });
@@ -1644,9 +1692,13 @@ export class LocalAgentService {
     // A cohort in several batches first gets its details (segments, weights, sources, assumptions) from one short call with no
     // personas, so every persona batch can start at once instead of waiting for a first batch that also writes personas.
     // A saved cohort being regenerated already has them.
+    // Cohort details batches started from while the setup was still streaming; the finished setup keeps their segments and sources.
+    let earlyDetails: Record<string, unknown> | undefined;
+    let finishSetup: Promise<void> | undefined;
+    let failure: { error: unknown } | undefined;
     const setUp = async (): Promise<Record<string, unknown>> => {
       const setupData = { request: input.prompt, selectedProject: projectBrief(input.document, input.projectId), cohortId: request.id, totalPersonas: request.size, batches };
-      const prompt = `${guidance.replace('documentJson is a string containing the COMPLETE workspace document;', 'documentJson is a string containing one cohort object with its details and an empty personas list;')} Set up cohort ${request.id} before its ${request.size} personas are written. Return documentJson as one cohort object matching the cohort schema with "personas": [], and write no personas: give its id, name, description, population, createdAt, sources, segments with weights and weight provenance, and assumptions. Add distributionTargets only for spreads the request asks for, and name each field age, segment or attributes.<attributeName>, never a bare attribute name. A numeric bucket has label, percent, min and max (min included, max excluded, and no value; age bounds are whole numbers from 18 to 121); a categorical bucket has label, percent and value, and no min or max. A target's percents total 100 and its numeric ranges do not overlap. The personas are written next, in ${batches} batches at the same time, and every batch uses these details exactly, so include every segment the request names and make each segment description one specific sentence to write distinct people from. Keep everything else short, because every persona waits for this reply: one sentence each for description and population, at most four one-sentence assumptions, and sources only when the request supplies them. No unrelated workspace data is provided or needed.\n\nCohort schema:\n${JSON.stringify(jsonSchema('cohort'))}\n\nRequest data:\n${JSON.stringify(setupData)}`;
+      const prompt = `${guidance.replace('documentJson is a string containing the COMPLETE workspace document;', 'documentJson is a string containing one cohort object with its details and an empty personas list;')} Set up cohort ${request.id} before its ${request.size} personas are written. Return documentJson as one cohort object matching the cohort schema with "personas": [], and write no personas: write its fields in this order, because personas start being written as soon as the segments and sources arrive: id, population, segments with weights and weight provenance, sources, then name, description, createdAt and assumptions. Add distributionTargets only for spreads the request asks for, and name each field age, segment or attributes.<attributeName>, never a bare attribute name. A numeric bucket has label, percent, min and max (min included, max excluded, and no value; age bounds are whole numbers from 18 to 121); a categorical bucket has label, percent and value, and no min or max. A target's percents total 100 and its numeric ranges do not overlap. The personas are written next, in ${batches} batches at the same time, and every batch uses these details exactly, so include every segment the request names and make each segment description one specific sentence to write distinct people from. Keep everything else short, because every persona waits for this reply: one sentence each for description and population, at most four one-sentence assumptions, and sources only when the request supplies them. No unrelated workspace data is provided or needed.\n\nCohort schema:\n${JSON.stringify(jsonSchema('cohort'))}\n\nRequest data:\n${JSON.stringify(setupData)}`;
       const startedAt = new Date().toISOString();
       let feedback = ''; let transientFailures = 0;
       for (let attempt = 1; ; attempt++) {
@@ -1655,7 +1707,11 @@ export class LocalAgentService {
         try {
           const output = await this.requestDraft(entry, input, withFeedback(prompt, feedback), SETUP_SLOT, undefined, 'setup');
           if (entry.cancelled) throw new StopBatch();
-          const details = checkCohortSetup(output.documentJson, request.id);
+          let details = checkCohortSetup(output.documentJson, request.id);
+          if (earlyDetails) {
+            details = { ...details, segments: earlyDetails.segments, sources: earlyDetails.sources };
+            checkCohortMetadata(details as Pick<Cohort, 'sources' | 'segments' | 'distributionTargets'>, excerptOf(output.documentJson));
+          }
           firstExplanation = output.explanation;
           return details;
         } catch (error) {
@@ -1666,7 +1722,7 @@ export class LocalAgentService {
           if (attempt > BATCH_RETRIES) throw new DraftFailure(`Setting up the audience ${error instanceof BatchRejected || error instanceof z.ZodError ? `failed its checks ${attempt} times` : `could not be drafted after ${attempt} attempts`}: ${reason}. Workspace unchanged.`);
           retries++;
           const cause = error instanceof RequestFailure ? error.cause : undefined;
-          if (!cause) { feedback = `\n\nYour previous attempt at this setup was rejected: ${reason}. Return the complete cohort details again and fix exactly that.`; continue; }
+          if (!cause) { feedback = `\n\nYour previous attempt at this setup was rejected: ${reason}. Return the complete cohort details again and fix exactly that.${earlyDetails ? ` Personas are already being written for these segments and sources, so keep them exactly: ${JSON.stringify({ segments: earlyDetails.segments, sources: earlyDetails.sources })}.` : ''}`; continue; }
           feedback = ''; transientFailures++;
           const base = BACKOFF_MS[Math.min(transientFailures, BACKOFF_MS.length) - 1]!;
           const waitMs = Math.round(base * (1 + BACKOFF_JITTER * (2 * this.random() - 1)));
@@ -1677,13 +1733,33 @@ export class LocalAgentService {
     };
     if (batches > 1) {
       if (!metadata && !originalMetadata && input.engine === 'claude') void this.prewarm(entry, input, Math.min(concurrency, batches));
-      metadata ??= originalMetadata ?? await setUp();
-      if (entry.checkpoint && !entry.checkpoint.metadata) { entry.checkpoint.metadata = metadata; entry.checkpoint.explanation = firstExplanation; void this.saveCheckpoint(entry); }
-      emptyGeneratedBytes = Buffer.byteLength(JSON.stringify({ ...metadata, generationPrompt: input.prompt, personas: [] }));
-      if (!targets.some(target => target.field === 'segment')) segmentPlan = segmentSequence(metadata.segments as Cohort['segments'], request.size);
+      const setDetails = (details: Record<string, unknown>) => {
+        metadata = details;
+        if (entry.checkpoint && !entry.checkpoint.metadata) { entry.checkpoint.metadata = metadata; entry.checkpoint.explanation = firstExplanation; void this.saveCheckpoint(entry); }
+        emptyGeneratedBytes = Buffer.byteLength(JSON.stringify({ ...metadata, generationPrompt: input.prompt, personas: [] }));
+      };
+      metadata ??= originalMetadata;
+      if (metadata) setDetails(metadata);
+      else {
+        const setup = setUp();
+        // On Claude Code, batches start once the streaming setup reply has complete segments and sources; the rest follows.
+        const early = input.engine === 'claude' ? new Promise<Record<string, unknown>>(resolve => {
+          entry.onSetupText = text => { const details = earlySetupDetails(text, request.id); if (details) { entry.onSetupText = undefined; resolve(details); } };
+        }) : undefined;
+        const first = await Promise.race([setup.then(details => ({ details, early: false })), ...(early ? [early.then(details => ({ details, early: true }))] : [])]);
+        entry.onSetupText = undefined;
+        if (!first.early) setDetails(first.details);
+        else {
+          earlyDetails = first.details; metadata = first.details;
+          emptyGeneratedBytes = Buffer.byteLength(JSON.stringify({ ...metadata, generationPrompt: input.prompt, personas: [] }));
+          finishSetup = setup.then(setDetails, error => {
+            if (!stopped) { stopped = true; failure = { error }; for (const abort of [...entry.aborts]) abort(); wakeStarts(); }
+          });
+        }
+      }
+      if (!targets.some(target => target.field === 'segment')) segmentPlan = segmentSequence(metadata!.segments as Cohort['segments'], request.size);
       if (request.size <= MAX_MAPPED_AUDIENCE) this.updateProgress(entry, 'generating', entry.public.message, { audienceMap: audienceMap() });
     }
-    let failure: { error: unknown } | undefined;
     const worker = async () => {
       while (!stopped && !entry.cancelled && nextBatch < batches) {
         if (results[nextBatch]) { nextBatch++; continue; }
@@ -1699,6 +1775,8 @@ export class LocalAgentService {
     const hedgeTimer = setInterval(() => { considerHedges(); considerQuietHedges(); }, this.hedgeCheckMs); hedgeTimer.unref();
     try { await Promise.all(Array.from({ length: Math.min(concurrency, batches) }, worker)); }
     finally { clearInterval(hedgeTimer); }
+    // Batches that started early may finish before the setup reply does.
+    await finishSetup;
     if (failure) throw (failure as { error: unknown }).error;
     const personas = results.flat();
     if (entry.cancelled || !metadata || personas.length !== request.size || acceptedBatches !== batches) throw Error();
