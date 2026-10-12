@@ -15,7 +15,7 @@ export const GENERATION_MAP_CSS = `
 .live-seat[data-state=checking]{border-style:solid;border-color:var(--seg);background:color-mix(in srgb,var(--seg) 22%,transparent)}
 .live-seat[data-state=retry]{border-color:var(--amber);background:var(--amber-soft)}
 .live-seat[data-state=done]{border-style:solid;border-color:var(--seg);background:color-mix(in srgb,var(--seg) 30%,var(--surface));animation:live-seat-land .45s cubic-bezier(.2,1.6,.4,1)}
-.live-seat[aria-pressed=true]{outline:2px solid var(--ink);outline-offset:1px}
+.live-seat:hover{box-shadow:inset 0 0 0 1px var(--seg)}.live-seat[aria-pressed=true]{outline:2px solid var(--ink);outline-offset:1px}
 .live-seat:focus-visible{outline:3px solid var(--focus,var(--blue));outline-offset:2px}
 .live-map-detail{font-size:var(--text-sm);min-height:64px;overflow-wrap:anywhere}
 .live-map-detail h4{margin:0 0 2px;font:600 var(--text-md) var(--body);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
@@ -102,19 +102,21 @@ function liveMapFetch(v){
 function liveMap(job){
   const v=liveMapView(job);if(!v)return '';
   Promise.resolve().then(()=>liveMapFetch(v));
-  const small=v.total>60?' live-map-small':'';
-  const groups=v.rows;
-  return '<section class="live-map'+small+'" aria-label="Who is in the audience" data-live-map="'+attr(liveMapSignature(job))+'"><h3>Who answers</h3><div class="live-map-groups">'+groups.map(group=>'<section class="live-map-group" style="'+(group.index>=0?'--seg:var(--seg-'+(group.index%8)+')':'')+'">'+(group.label?'<h4><i aria-hidden="true"></i>'+esc(group.label)+'<span data-live-count="'+group.index+'">'+liveMapCount(v,group.index)+'</span></h4>':'')+'<div class="live-map-seats">'+group.seats.map(seat=>liveSeat(v,seat)).join('')+'</div></section>').join('')+'</div><div class="live-map-detail" aria-live="polite">'+liveMapDetail(v)+'</div></section>';
+  const small=v.total>60?' live-map-small':'',page=liveMapPage(v),shown=new Set(page.items);
+  const groups=v.rows.filter(row=>row.seats.some(seat=>shown.has(seat))).map(row=>({...row,seats:row.seats.filter(seat=>shown.has(seat))}));
+  return '<section class="live-map'+small+'" aria-label="Who is in the audience" data-live-map="'+attr(liveMapSignature(job))+'"><h3>Who answers</h3><div class="live-map-groups">'+groups.map(group=>'<section class="live-map-group" style="'+(group.index>=0?'--seg:var(--seg-'+(group.index%8)+')':'')+'">'+(group.label?'<h4><i aria-hidden="true"></i>'+esc(group.label)+'<span data-live-count="'+group.index+'">'+liveMapCount(v,group.index)+'</span></h4>':'')+'<div class="live-map-seats">'+group.seats.map(seat=>liveSeat(v,seat)).join('')+'</div></section>').join('')+'</div>'+page.controls+'<div class="live-map-detail" aria-live="polite">'+liveMapDetail(v)+'</div></section>';
 }
+/* The seats on the current page, in row order. */
+function liveMapPage(v){return pageItems(v.seats,'live-seats:'+v.job.id,seatPageSize())}
 /* Updates seats, counts and the inspected seat in place. Returns false when the map needs a full render. */
 function patchLiveMap(job){
   const node=root.querySelector('.live-map'),v=liveMapView(job);
   if(!node||!v||node.dataset.liveMap!==liveMapSignature(job))return false;
   liveMapFetch(v);
-  const buttons=node.querySelectorAll('.live-seat');if(buttons.length!==v.total)return false;
-  if([...buttons].some((button,j)=>button.dataset.key!==v.seats[j].key))return false;
+  const buttons=node.querySelectorAll('.live-seat'),seats=liveMapPage(v).items;if(buttons.length!==seats.length)return false;
+  if([...buttons].some((button,j)=>button.dataset.key!==seats[j].key))return false;
   buttons.forEach((button,j)=>{
-    const seat=v.seats[j];
+    const seat=seats[j];
     if(button.dataset.state!==seat.state)button.dataset.state=seat.state;
     const style=liveSeatStyle(seat);if((button.getAttribute('style')||'')!==style)button.setAttribute('style',style);
     const label=liveSeatLabel(v,seat);if(button.getAttribute('aria-label')!==label)button.setAttribute('aria-label',label);
