@@ -87,6 +87,19 @@ node dist/cli.js cohort list
 
 Audience favorites and reviewer recommendations remain separate stages. Decision stages retain uncertainty. A large number of synthetic profiles is not an equivalent number of independent surveyed humans; repeated simulation measures behavior under saved model outputs. Human data is needed to assess predictive validity.
 
+## Deploy to Render (free tier)
+
+`render.yaml` is a Render Blueprint for a shareable demo on a free web service. In Render choose **New → Blueprint**, pick this repository, enter a site password (12+ characters) and optionally an `ANTHROPIC_API_KEY` for drafting, then deploy. Open the `onrender.com` URL and sign in with any user name and that password.
+
+What hosted mode changes: with `JEV_POLLS_PUBLIC_URL` or Render's `RENDER_EXTERNAL_URL` set, the server listens on `$PORT` on all interfaces, accepts only that public host, and puts every page behind `JEV_POLLS_PASSWORD`. Drafting keys come from `ANTHROPIC_API_KEY`, `XAI_API_KEY`, `OPENROUTER_API_KEY`, `GROQ_API_KEY` or `HF_TOKEN`, since there is no Keychain.
+
+Free-tier limits that shape it:
+
+- The instance sleeps after 15 idle minutes and takes about a minute to wake. A long generation keeps running only while a workspace tab stays open and polling.
+- The disk is ephemeral: projects, cohorts and reports vanish on every sleep, restart or deploy. Export anything you want to keep from **Data**.
+- The Blueprint runs in demo mode (`JEV_POLLS_DEMO=1`), so Run study uses mock answers and never bills TypeSafe. To run real studies, remove that variable and set `TYPESAFE_API_KEY` as a secret, ideally on a paid instance with a persistent disk.
+- Codex and Claude CLI drafting, ChatGPT subscription sign-in and local GLiNER are not available there; use an API-key drafting provider.
+
 ## Development
 
 ```sh
