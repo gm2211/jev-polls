@@ -11,6 +11,19 @@ function locationHash(){
   return '#'+q;
 }
 function syncLocation(){if(!S.doc)return;try{const first=!S.locationReady;S.locationReady=true;const hash=locationHash(),current=location.hash||'';if(hash===current)return;const target=hash||location.pathname+location.search;if(S.locationRestoring||first)history.replaceState(null,'',target);else history.pushState(null,'',target)}catch{}}
+// The tab title leads with what is open, so it stays readable when the browser truncates it.
+function pageTitle(){
+  const p=project();if(!p)return S.projectComposer?'New project':'Projects';
+  const run=(S.snap?.runs||[]).find(r=>r.status==='running'&&r.progress?.total);
+  const progress=run?Math.min(99,Math.floor(100*run.progress.completed/run.progress.total))+'% · ':'';
+  let here=p.name;
+  if(S.tab==='cohorts'){const c=cohort();here=S.cohortComposer?'New cohort':c?(S.personaOpen&&c.personas.find(x=>x.id===S.personId)?.label)||c.name:'Cohorts'}
+  else if(S.tab==='runs')here='Runs';
+  else if(S.tab==='project-settings')here='Settings';
+  else if(S.tab==='studies'&&pipeline())here=(reviewPage()?'Review · ':'')+studyQuestion(pipeline());
+  return progress+(S.dirty?'• ':'')+(here.length>40?here.slice(0,40).replace(/\s+\S*$/,'')+'…':here);
+}
+function syncTitle(){try{const title=(S.doc?pageTitle()+' · ':'')+'Jev';if(document.title!==title)document.title=title}catch{}}
 function restoreLocation(q=initialLocation){
   const id=q.get('project');if(!id||!S.doc?.projects?.some(p=>p.id===id))return false;
   S.locationRestoring=true;

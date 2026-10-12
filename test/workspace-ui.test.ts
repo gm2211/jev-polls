@@ -3687,3 +3687,14 @@ test('drafting progress separates accepted from being written and describes each
   assert.match(early, /^About 2–7 min left$/);
   assert.match(draftEstimate({ ...progress, estimate: undefined }), /Estimating time left…/);
 });
+
+test('the browser tab shows the Jev icon and names the open page first', () => {
+  const html = renderWorkspace('nonce-test', 'token');
+  assert.match(html, /<link rel="icon" type="image\/svg\+xml" href="data:image\/svg\+xml;base64,/);
+  assert.match(html, /<link rel="icon" type="image\/png" sizes="32x32" href="data:image\/png;base64,/);
+  assert.match(html, /<link rel="apple-touch-icon" href="data:image\/png;base64,/);
+  assert.match(html, /<title>Jev<\/title>/);
+  assert.match(html, /<span class="glyph" aria-hidden="true"><svg /);
+  assert.ok(html.includes("const title=(S.doc?pageTitle()+' · ':'')+'Jev'"), 'tab title leads with the page and ends with Jev');
+  assert.ok(html.includes('syncLocation();syncTitle()}'), 'every render refreshes the tab title');
+});
