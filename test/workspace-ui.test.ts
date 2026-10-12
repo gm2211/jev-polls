@@ -4,6 +4,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Script } from 'node:vm';
 import { renderWorkspace } from '../src/workspace-ui.js';
+import { startWorkspaceServer } from '../src/workspace.js';
+import { WorkspaceStore } from '../src/workspace-store.js';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 test('the served workspace client parses and embeds its session token safely', () => {
   const csrf = 'session-token</script><script>unsafe()</script>';
@@ -17,7 +23,7 @@ test('the served workspace client parses and embeds its session token safely', (
   assert.doesNotMatch(html, /<script[^>]+src=/);
 });
 
-function browserHarness(openExistingProject = true, preferences = new Map<string, string>()) {
+function browserHarness(openExistingProject = true, preferences = new Map<string, string>(), server?: string) {
   const documentValue = { version: 1, cohorts: [{ id: 'cohort', name: 'Original cohort', population: 'Adults', description: '', assumptions: [], sources: [], segments: [], personas: [{ id: 'person', label: 'Adult participant', age: 30, segment: 'general', weight: 1, background: 'Independent background', attributes: {}, sourceIds: [], syntheticFields: ['background'] }] }], pipelines: [{ id: 'study', name: 'Original study', description: '', stages: [{ id: 'panel', label: 'First question', kind: 'poll', cohort: 'audience', questions: { answer: { type: 'choice', label: 'Which option fits?', instructions: 'Choose an option.', criteria: { a: 'A', b: 'B' } } }, inputs: {}, dependsOn: [] }], cohorts: { audience: 'cohort' } }] };
   let snapshot = { revision: 1, document: documentValue, auth: { configured: true, source: 'keychain' }, runs: [], activeRun: null };
   const elements = new Map<string, any>();
@@ -49,6 +55,10 @@ function browserHarness(openExistingProject = true, preferences = new Map<string
     fetch: async (path: string, options?: { method?: string; body?: string }) => {
       requests.push(path); if (options?.body) bodies.push({ path, body: JSON.parse(options.body) });
       const key = (options?.method || 'GET') + ' ' + path;
+      if (server && !responses.has(key) && !responses.has(path) && !failures.has(key) && !failures.has(path)) {
+        const post = options?.method && options.method !== 'GET';
+        return fetch(new URL(path, server), { ...options, headers: { ...(options as any)?.headers, ...(post ? { origin: new URL(server).origin } : {}) } } as RequestInit);
+      }
       const found = responses.get(key) ?? responses.get(path) ?? snapshot;
       const data = await (typeof found === 'function' ? found(options?.body ? JSON.parse(options.body) : undefined) : found);
       const failure = failures.get(key) ?? failures.get(path);
@@ -755,7 +765,7 @@ test('skip-phase edges cross reserved gutter above intermediate cards and finish
   assert.match(browser.client.graphEdgePath(source, middle, box), / C /, 'adjacent phases retain curved direct edges');
 });
 
-test('cohort prompt generation scopes the request and previews personas without saving', async () => {
+test('cohort prompt generation scopes the request, previews personas without saving, and saves once the audience is used', async () => {
   const browser = browserHarness(); await settle();
   const { S, act, startCohortJob, adoptCohortProposal, cohortProposalReview } = browser.client;
   S.tab = 'studies'; S.pipelineId = 'study'; S.stageId = 'panel';
@@ -781,7 +791,13 @@ test('cohort prompt generation scopes the request and previews personas without 
   assert.equal(S.tab, 'studies'); assert.equal(S.pipelineId, 'study'); assert.equal(S.stageId, 'panel');
   assert.match(browser.element('app').innerHTML, /Museum visitors/);
   assert.equal(S.doc.pipelines[0].cohorts[S.doc.pipelines[0].stages[0].cohort], candidate.id);
-  assert.equal(browser.bodies.filter(x => x.path === '/api/workspace' || x.path.endsWith('/apply')).length, 0, 'review adoption stays local until explicit save');
+  browser.echoSaves(); await settle();
+  const saves = browser.bodies.filter(x => x.path === '/api/workspace');
+  assert.equal(saves.length, 1, 'using the audience writes it to the saved workspace at once');
+  const written = saves[0]!.body as any;
+  assert.ok(written.document.cohorts.some((c: any) => c.id === 'new-audience' && c.personas.length === 2));
+  assert.equal(written.document.pipelines[0].cohorts[written.document.pipelines[0].stages[0].cohort], 'new-audience');
+  assert.equal(S.dirty, false);
 });
 
 test('a failed cohort generation shows which batch failed and retries the same brief in place', async () => {
@@ -807,6 +823,69 @@ test('a failed cohort generation shows which batch failed and retries the same b
   const sent = browser.bodies.filter(x => x.path === '/api/agent/jobs' && x.body).at(-1)!.body;
   assert.equal(sent.prompt, brief); assert.deepEqual(JSON.parse(JSON.stringify(sent.cohort)), { id: 'gamers', size: 1000, step: { pipelineId: 'study', stageId: 'panel' } });
   assert.equal(S.localJob.id, 'retry-job');
+});
+
+test('a used audience keeps its generated draft on the server until the save lands', async () => {
+  const browser = browserHarness(); await settle();
+  const { S, act, adoptCohortProposal } = browser.client;
+  const candidate = { ...structuredClone(S.doc.cohorts[0]), id: 'big-panel', name: 'Big panel' };
+  S.cohortInlineTarget = { pipelineId: 'study', stageId: 'panel' };
+  S.localJob = { id: 'job-done', projectId: 'existing-research', engine: 'claude', status: 'completed', revision: S.revision, cohort: { id: 'big-panel', size: 1, prompt: 'x' }, proposal: { document: { ...structuredClone(S.doc), cohorts: [...S.doc.cohorts, candidate] }, explanation: 'Done' } };
+  browser.fail('/api/workspace', 'Disk is full.', 'POST');
+  adoptCohortProposal(); await settle();
+  assert.equal(browser.requests.filter(path => path.endsWith('/discard')).length, 0, 'a failed save never deletes the generated draft');
+  assert.match(browser.element('workspaceError').textContent, /not saved: Disk is full\..*reopening the project offers it again/);
+  assert.equal(S.dirty, true); assert.ok(S.doc.cohorts.some((c: any) => c.id === 'big-panel'));
+  browser.unfail('POST /api/workspace'); browser.echoSaves();
+  act(null, { dataset: { act: 'save' } }); await settle();
+  const saved = browser.requests.lastIndexOf('/api/workspace'), discarded = browser.requests.indexOf('/api/agent/jobs/job-done/discard');
+  assert.ok(discarded > saved, 'the draft is let go only after the audience is on disk');
+  assert.equal(S.dirty, false);
+});
+
+test('a generated audience survives a server restart and a browser refresh right after it is used', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'jev-audience-restart-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const persona = { id: 'alex', label: 'Alex', age: 30, segment: 'players', background: 'Enjoys strategy games', attributes: {}, sourceIds: [], syntheticFields: ['background'], weight: 1 };
+  const cohort = { version: 1, id: 'adults', name: 'Adult panel', description: 'Synthetic test profiles', population: 'Adults', createdAt: '2026-10-04T12:00:00Z', sources: [], assumptions: ['Test fixture'], segments: [{ id: 'players', label: 'Players', description: 'Test segment', weight: 1, weightBasis: 'assumed', sourceIds: [] }], personas: [persona] };
+  const seed: any = { version: 1, cohorts: [cohort], pipelines: [{ version: 1, id: 'study', name: 'Game name', description: 'Compare names', context: 'Brief', cohorts: { audience: 'adults' }, stages: [
+    { id: 'panel', kind: 'poll', label: 'Ask the audience', cohort: 'audience', dependsOn: [], questions: { choice: { type: 'choice', label: 'Preference', instructions: 'Which name fits?', criteria: { a: 'A', b: 'B' } } } }] }] };
+  await new WorkspaceStore(directory).save(seed, 0);
+  const personas = Array.from({ length: 1000 }, (_, i) => ({ ...persona, id: 'person-' + i, label: 'Gamer ' + i }));
+  const proposal = { ...structuredClone(seed), cohorts: [cohort, { ...cohort, id: 'gamers', name: 'Gamers', personas }] };
+  const job: any = { id: '00000000-0000-4000-8000-000000000001', projectId: 'existing-research', engine: 'claude', status: 'completed', revision: 1, startedAt: '', updatedAt: '', message: 'Done', cohort: { id: 'gamers', size: 1000, prompt: 'Gamers', step: { pipelineId: 'study', stageId: 'panel' } }, proposal: { document: proposal, explanation: 'Fictional personas.' } };
+  // Stands in for the drafts folder, which outlives the server process.
+  const drafts = { settled: [] as string[], onDiskWhenSettled: [] as boolean[] };
+  const agents = () => ({
+    availability: async () => ({ engines: [] }), start: () => { throw new Error('unused'); }, cancel: () => undefined, close: async () => {},
+    get: (id: string) => id === job.id ? structuredClone(job) : undefined,
+    list: () => drafts.settled.includes(job.id) ? [] : [structuredClone(job)],
+    disposition: () => undefined,
+    settle: (id: string) => { drafts.settled.push(id); drafts.onDiskWhenSettled.push(readFileSync(join(directory, 'workspace.json'), 'utf8').includes('"gamers"')); return structuredClone(job); },
+  });
+  const options = (port?: number) => ({ directory, port, getAuthStatus: async () => ({ configured: false, source: 'none' as const }), localAgents: agents() });
+  const until = async (ready: () => boolean) => { for (let i = 0; i < 500 && !ready(); i++) await new Promise(resolve => setTimeout(resolve, 10)); assert.ok(ready()); };
+
+  const first = await startWorkspaceServer(options());
+  let firstOpen = true; t.after(() => firstOpen ? first.close() : undefined);
+  const port = Number(new URL(first.url).port);
+  const before = browserHarness(true, new Map(), first.url);
+  await until(() => before.client.S.revision === 1);
+  // Opening the project offers the finished draft (the page may already have picked it up on load).
+  await before.client.recoverDraftingJob();
+  await until(() => before.client.S.localJob?.id === job.id);
+  before.client.adoptCohortProposal();
+  await until(() => !before.client.S.dirty && drafts.settled.length === 1);
+  assert.deepEqual(drafts.onDiskWhenSettled, [true], 'the draft is let go only after the audience is on disk');
+
+  firstOpen = false; await first.close();
+  const second = await startWorkspaceServer(options(port));
+  t.after(() => second.close());
+  const after = browserHarness(true, new Map(), second.url);
+  await until(() => after.client.S.revision === 2);
+  const doc = after.client.S.doc;
+  assert.equal(doc.cohorts.find((c: any) => c.id === 'gamers')?.personas.length, 1000);
+  assert.equal(doc.pipelines[0].cohorts[doc.pipelines[0].stages[0].cohort], 'gamers', 'the step still points at the audience');
 });
 
 test('cohort generation preserves unsaved edits and rejects stale proposal adoption', async () => {
@@ -1616,6 +1695,7 @@ test('inline cohort adoption preserves generated work if original step was remov
   adoptCohortProposal();
   assert.ok(S.doc.cohorts.some(c => c.id === candidate.id));
   assert.equal(S.tab, 'studies'); assert.equal(S.dirty, true);
+  await settle();
   assert.match(browser.element('toast').textContent, /original step no longer exists/);
 });
 
@@ -3324,7 +3404,7 @@ test('discarding or adopting a recovered cohort tells the server so other tabs s
   const document = browser.snapshot().document;
   document.cohorts.push({ ...document.cohorts[0], id: 'big-panel', name: 'Big panel' });
   S.localJob = { id: 'job-done', projectId: 'existing-research', engine: 'codex', status: 'completed', revision: 1, message: '', cohort: { id: 'big-panel', size: 1, prompt: 'x' }, proposal: { document, explanation: 'Done' } };
-  adoptCohortProposal();
+  adoptCohortProposal(); await settle();
   assert.ok(browser.requests.includes('/api/agent/jobs/job-done/discard'));
   assert.equal(S.localJob, null);
 });

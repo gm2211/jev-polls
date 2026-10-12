@@ -240,6 +240,19 @@ behaviors:
     description: >-
       A generated cohort stays a proposal until the user chooses Review and edit cohort; Discard
       version leaves the workspace unchanged, and only the selected cohort can change.
+  - id: adopted-audience-saved
+    description: >-
+      Using a generated audience, on its cohort page or assigned to a study step, saves it to disk at
+      once, and the run's draft is kept on disk until that save succeeds, so an app restart or page
+      reload never loses it.
+    details: >-
+      Added 2026-10-12 after a 1,000-person audience assigned to a step vanished: adoption held it
+      only in the page's unsaved edits and discarded the run's draft at the same moment, so a restart
+      plus a reload dropped it. If the save fails the page says so and keeps the edit, the draft stays
+      on disk and is offered again when the project is reopened, and the next successful save lets it go.
+    source:
+      text: why did my cohort disappera
+      reference: 2026-10-12 jev-polls project thread, Giulio, with a screenshot of the empty Who answers panel
   - id: stale-proposal-refused
     description: A proposal based on an older revision cannot be adopted and must be regenerated.
   - id: generation-survives-restart
