@@ -120,7 +120,10 @@ test('AI creation opens prefilled review flow; search only displays validated ca
   let result:any={kind:'draft',target:'study',prompt:'Compare snack names'};
   const h=harness({api:async()=>({status:'completed',commandResult:result})});h.commandOpen();
   h.commandInput({target:{id:'commandSearch',value:'make a snack study'}});await h.commandAskAI();
-  assert.equal(h.S.localPrompt,'Compare snack names');assert.equal(h.commandJobVisible(),true);
+  // The project's study has steps, so the change goes to the assistant in the user's own words, focused on that study.
+  assert.deepEqual(JSON.parse(JSON.stringify(h.context.drafted)),{prompt:'make a snack study',focus:{pipelineId:'names'}});assert.equal(h.commandJobVisible(),true);
+  h.S.doc.pipelines[0].stages=[];result={kind:'draft',target:'study',prompt:'Compare snack names'};h.commandOpen();h.commandInput({target:{id:'commandSearch',value:'make a snack study'}});await h.commandAskAI();
+  assert.equal(h.S.localPrompt,'Compare snack names','an empty study is drafted from the prefilled request as before');h.S.doc.pipelines[0].stages=[{id:'ask',label:'Name preference',kind:'poll'}];
   result={kind:'search',query:'food preference',destinations:['stage:two:food:taste']};h.commandOpen();h.commandInput({target:{id:'commandSearch',value:'find food questions'}});await h.commandAskAI();
   assert.equal(h.commandEntries().length,1);assert.equal(h.commandEntries()[0].stage,'taste');assert.equal(h.S.projectId,'one');
 });
@@ -200,7 +203,12 @@ test('palette shows where it is and a study scope sends the request to the assis
   assert.deepEqual(requests, [], 'a study edit skips the command router');
   assert.deepEqual(JSON.parse(JSON.stringify(h.context.drafted)), { prompt: 'add a follow-up asking why', focus: { pipelineId: 'names', stageId: 'ask' } });
   assert.equal(h.state.open, false); assert.equal(h.commandJobVisible(), true); assert.equal(h.S.flowPanel, false);
-  assert.match(h.draftSidePanel(), /Edit with assistant[\s\S]*Changing[\s\S]*Naming study · 1\. Name preference/);
+  h.S.localStart = { status: 'running' };
+  const panel = h.draftSidePanel();
+  assert.match(panel, /Edit study with assistant[\s\S]*Changing[\s\S]*Naming study · 1\. Name preference[\s\S]*Your request[\s\S]*add a follow-up asking why/);
+  assert.doesNotMatch(panel, /Drop a file|Cohort members are synthetic|Describe your audience|assistant-generate|Refine your request/, 'editing shows none of the from-scratch drafting chrome, and no form while it works');
+  h.S.localStart = null; h.S.localJob = { id: 'j', status: 'completed', proposal: {} };
+  assert.match(h.draftSidePanel(), /Ask for a further change[\s\S]*Revise proposal/);
 });
 
 test('clearing the scope searches everywhere and asks the router again', async () => {
@@ -250,4 +258,15 @@ test('applying an assistant edit can be undone, and only while nothing changed s
   await h.commandApplyProposal(); h.S.doc.pipelines[0].name = 'Edited after';
   h.calls.length = 0; h.undoAssistantProposal(h.S.stepUndo.at(-1));
   assert.equal(h.S.doc.pipelines[0].name, 'Edited after'); assert.equal(h.S.stepUndo.length, 0); assert.ok(h.calls.some((c: string) => /can no longer be undone/.test(c)));
+});
+
+test('a further change to a pending proposal is asked together with the original request', async () => {
+  const h = harness(); h.S.pipelineId = 'names'; h.commandOpen();
+  h.commandInput({ target: { id: 'commandSearch', value: 'rename step 1 to Pick' } }); await h.commandAskAI();
+  h.S.localJob = { id: 'j', status: 'completed', proposal: {} }; h.S.proposalApplied = false; h.S.localPrompt = 'and add Comet';
+  h.commandAction('assistant-generate', { dataset: {} }); await new Promise(r => setTimeout(r, 0));
+  assert.equal(h.context.drafted.prompt, 'rename step 1 to Pick\n\nAlso: and add Comet'); assert.equal(h.S.localPrompt, '');
+  h.S.proposalApplied = true; h.S.localPrompt = 'now drop Orbit';
+  h.commandAction('assistant-generate', { dataset: {} }); await new Promise(r => setTimeout(r, 0));
+  assert.equal(h.context.drafted.prompt, 'now drop Orbit', 'after applying, the next request stands alone');
 });

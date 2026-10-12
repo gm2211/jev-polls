@@ -121,9 +121,17 @@ behaviors:
     details: >-
       Clearing the chip (its close button, or Backspace in an empty search) searches everywhere and
       sends Ask AI to the command router as before; reopening the palette starts from the current
-      view again. Search results are unchanged by the scope. The drafting panel names the study it
-      will change ("Changing …") with a Draft anything button that drops the focus. The focus is
-      recorded on the job, so a reload restores it. Cohort, run and project scopes are shown but
+      view again. Search results are unchanged by the scope. A study change the router recognises
+      from a wider scope also becomes a focused edit in the user's own words. The edit opens as its
+      own view, "Edit study with assistant": it names the study it will change ("Changing …", with
+      Draft something new to drop the focus), shows the request as asked, then the progress or the
+      proposal, and only then a box for a further change, which is asked together with the original
+      request while the proposal is not yet applied. It has none of the from-scratch drafting
+      chrome (source file, examples, cohort disclaimer), and Cancel appears once, on the progress
+      card. Steps are named as the canvas names them (a final answer step is "Final answer"). The
+      focus is recorded on the job, so a reload restores it. (Follow-up from Giulio, 2026-10-12: "is
+      it really draft with assistant? This was the view that was selected when I pressed cmd+k and
+      asked to modify the study it reached for that".) Cohort, run and project scopes are shown but
       still use the command router.
     source:
       text: cmd+k should be context aware - e.g. I should be able to ask my assistant to modify my study

@@ -579,7 +579,9 @@ function focusContext(document: WorkspaceDocument, focus: DraftFocus): { studyId
   const pipeline = document.pipelines.find(item => item.id === focus.pipelineId)!;
   const index = focus.stageId === undefined ? -1 : pipeline.stages.findIndex(stage => stage.id === focus.stageId);
   const stage = pipeline.stages[index];
-  const label = stage ? (stage.label?.trim() || Object.values((stage as { questions?: Record<string, { label?: string }> }).questions ?? {})[0]?.label || stage.id) : '';
+  const custom = stage?.label?.trim();
+  // A final answer step may still carry an older default label; the app calls it Final answer.
+  const label = !stage ? '' : stage.kind === 'choose' && (!custom || ['Final choice', 'Final answer'].includes(custom)) ? 'Final answer' : (custom || Object.values((stage as { questions?: Record<string, { label?: string }> }).questions ?? {})[0]?.label || stage.id);
   return { studyId: pipeline.id, studyName: pipeline.name, ...(stage ? { step: { id: stage.id, position: index + 1, label } } : {}) };
 }
 function projectBrief(document: WorkspaceDocument, projectId?: string): { name: string; description: string } | undefined {
