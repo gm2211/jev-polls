@@ -53,7 +53,8 @@ behaviors:
     details: >-
       Short identity fields such as names keep their check-icon confirm (rename-confirm).
       Deleting a project, study or cohort is confirmed in a dialog and saved at once
-      (list-pages-no-save). Cmd/Ctrl+S saves from any page.
+      (list-pages-no-save). Cmd/Ctrl+S saves from any page. Since 2026-10-12 the cohort and persona
+      pages have no Save button and save their own edits (cohorts.cohort-autosave).
     source:
       text: 1b 2a
       reference: >-
@@ -62,8 +63,8 @@ behaviors:
     description: >-
       The Projects, Studies, Cohorts and Runs lists have no Save button. Their own actions commit
       immediately: create and rename save on confirm, and a delete saves when its dialog is
-      confirmed. Save appears only on pages that edit something (a study, a cohort, a persona,
-      project settings).
+      confirmed. Save appears only on pages that edit something (a study, project settings);
+      cohort and persona pages save automatically (cohorts.cohort-autosave).
     details: >-
       Changed 2026-10-11. Before, deleting from a list only changed the draft, so a Save button
       appeared beside New project with no visible edit to save. Unsaved edits made in an editor
@@ -74,8 +75,9 @@ behaviors:
       reference: 2026-10-11 jev-polls project chat, Giulio, with a screenshot of the Projects list
   - id: unsaved-pill
     description: >-
-      When the draft has unsaved edits and the current page has no Save button of its own (the
-      lists), the top bar shows an "Unsaved changes" pill; clicking it saves.
+      When the draft has unsaved edits and the current page neither has a Save button of its own
+      nor saves automatically (the lists), the top bar shows an "Unsaved changes" pill; clicking it
+      saves.
     details: >-
       Chosen 2026-10-11 as the recommended answer to the open question raised with
       list-pages-no-save, under Giulio's standing approval to decide and ship in this project.
