@@ -2492,7 +2492,7 @@ test('step navigation uses numbered questions consistently without rewriting sav
     assert.doesNotMatch(html, />First question<|>Next question</);
   }
   assert.doesNotMatch(stageMap(p), /From First question/);
-  assert.match(stageMap(p), /Uses step 1</);
+  assert.match(stageMap(p), /title="Uses step 1"/);
   assert.equal(JSON.stringify(p), before, 'display labels preserve stored identity and execution contracts');
   next.questions.answer.label = 'Which launch date fits?';
   assert.equal(stepTitle(p, next), '2. Which launch date fits?');

@@ -142,16 +142,30 @@ behaviors:
     source:
       text: connecting output to blank canvas should trigger popup for new node creation
       reference: jev-polls project chat, 2026-10-12
+  - id: canvas-uniform-cards
+    description: >-
+      Step cards of the same kind are the same height on the canvas whether or not they are named,
+      connected or selected.
+    details: >-
+      The title is one line with one line under it (the question when the step is named, otherwise
+      the kind of answer, such as Compare 3 options). What a step reads is a small chip of step
+      numbers in the card header instead of its own row. The output row always has two lines:
+      Connect output, or where it is sent (Sent to step 2, Final answer), above what it carries.
+      Add next step shows on every Ask and Combine card. Selection is drawn with a ring, not a
+      thicker border. Full title and question show on hover.
+    source:
+      text: why is 2 taller than 1?
+      reference: jev-polls project chat, 2026-10-12
   - id: edge-labels-on-hover
     description: >-
       A wire is named only while the pointer is on it, or while keyboard focus is on its step's
-      "Uses steps" button: a small tooltip says what it carries (Answer summary, Individual answers,
+      inputs chip (the step numbers it reads, in its header): a small tooltip says what it carries (Answer summary, Individual answers,
       Leading option, Mean score or the distribution) and between which steps. No label is drawn on
       wires otherwise, and a selected step's wires are only highlighted.
     details: >-
       The tooltip is clamped to the visible canvas and never sits under the slide-over; Esc dismisses
       it. Wires that run under the slide-over are clipped by the canvas scroll box, not drawn over the
-      panel. The full list of what a step reads is on its card (the Uses steps button names every
+      panel. The full list of what a step reads is on its card (the inputs chip names every
       connection to assistive tech) and in the panel's Inputs tab. Replaces always-on labels on every
       wire touching the selected step, which landed on top of cards and were cut by the slide-over.
     source:

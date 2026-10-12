@@ -556,3 +556,18 @@ test('a dropped wire only offers step kinds that can use it', async () => {
   flowAction('flow-create', { dataset: { kind: 'decision' } });
   assert.equal(pipeline.stages.length, count);
 });
+
+test('canvas cards keep the same rows whether a step is named, connected or not', async () => {
+  const { pipeline, source, target, flowNode, flowConnect } = await flowHarness();
+  source.label = 'name-voting';
+  flowConnect(pipeline, 'source', 'answer', 'target');
+  const named = flowNode(pipeline, source), wired = flowNode(pipeline, target);
+  for (const card of [named, wired]) {
+    assert.match(card, /<button class="flow-select"[^>]*><strong>[^<]*<\/strong><span>[^<]+<\/span><\/button>/, 'title plus one line under it');
+    assert.match(card, /class="flow-next"/, 'Add next step on every Ask card');
+  }
+  assert.match(named, /class="flow-output-sent">Sent to step 3</);
+  assert.match(wired, /Connect output /);
+  assert.match(wired, /<div class="flow-node-header">[\s\S]*data-act="flow-inputs"[\s\S]*title="Uses step 1"[\s\S]*<\/div><button class="flow-select"/, 'inputs sit in the header, not their own row');
+  assert.match(WORKSPACE_FLOW_CSS, /\.flow-map \.flow-node\[data-selected=true\]\{border:1px solid/, 'selection does not change card height');
+});
