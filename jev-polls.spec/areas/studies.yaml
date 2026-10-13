@@ -246,3 +246,18 @@ behaviors:
     source:
       text: "1. every node type should have a way to delete it from subpane / 2. I should be able to delete nodes quickly from canvas (with confirmation and undo)"
       reference: jev-polls project thread "delete from side pane", Giulio, 2026-10-12
+
+  - id: final-answer-reads-switchboard
+    description: >-
+      A Final answer's Options and Reads tabs do not overlap. Options holds what Jev can pick from
+      (typed options or the top options of an earlier step). Reads holds only the evidence Jev
+      weighs: every earlier output once, grouped by step, each with an Off / Summary / Every answer
+      switch. Turning a row on connects that output; Off disconnects it. The same earlier step can
+      supply both the options and evidence.
+    details: >-
+      Chosen as design A of five mocked alternatives, then narrowed so the options source shows
+      only on the Options tab. Turning off the options source's evidence keeps it as a run
+      dependency. Large reads are still split into slices automatically.
+    source:
+      text: "Unclear difference between Options and Reads - should they not be mutually exclusive?"
+      reference: jev-polls project thread "Reads tab", Giulio, 2026-10-12 (asked for alternatives with "this is a little messy and confusing give me 5 alternative designs")
