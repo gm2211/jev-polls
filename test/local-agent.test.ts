@@ -2163,3 +2163,21 @@ test('persona attributes keep the first spelling their cohort used and lose a ne
   assert.deepEqual(canonicalAttributes({ attributes: { currentGame: ['Risk'] }, region: 'north' }, spellings), { region: 'north', currentGames: ['Risk'] });
   assert.deepEqual(personasFromTable({ fields: ['position', 'label', 'attributes.attributes.region'], rows: [[1, 'Ann', 'north']] }), [{ label: 'Ann', attributes: { region: 'north' } }]);
 });
+
+test('a workspace draft asked from a study names that study and step as its focus', async t => {
+  const root = await setup(t);
+  const study = { version: 1, id: 'names', name: 'Which name?', description: 'Pick a name', context: {}, cohorts: { buyers: 'customers' }, stages: [{ id: 'ask', label: 'Name vote', kind: 'poll', cohort: 'buyers', dependsOn: [], questions: { pick: { type: 'noul', label: 'Would you buy Nova?', instructions: 'Answer yes or no.' } } }] };
+  const document = validateWorkspaceDocument({ version: 1, cohorts: proposed.cohorts, pipelines: [study], projects: [{ id: 'games', name: 'Games', description: '', cohortIds: ['customers'], pipelineIds: ['names'] }] } as unknown as WorkspaceDocument);
+  const inputs: string[] = [];
+  const service = new LocalAgentService({ temporaryRoot: root, spawn: fakeSpawner(({ child }) => {
+    inputs.push(child.input);
+    const { projects: _, ...scoped } = document;
+    child.stdout.write(JSON.stringify({ type: 'result', is_error: false, structured_output: { documentJson: JSON.stringify(scoped), explanation: 'Reworded the question.' } })); child.finish();
+  }) }); t.after(() => service.close());
+  assert.throws(() => service.start({ engine: 'claude', projectId: 'games', prompt: 'Reword this step', revision: 0, document, focus: { pipelineId: 'names', stageId: 'missing' } }), /request/);
+  assert.throws(() => service.start({ engine: 'claude', projectId: 'games', prompt: 'Reword', revision: 0, document, focus: { pipelineId: 'names' }, cohort: { id: 'customers', size: 2 } } as never), /request/);
+  const completed = await terminal(service, service.start({ engine: 'claude', projectId: 'games', prompt: 'Reword this step', revision: 0, document, focus: { pipelineId: 'names', stageId: 'ask' } }));
+  assert.equal(completed.status, 'completed'); assert.deepEqual(completed.focus, { pipelineId: 'names', stageId: 'ask' });
+  assert.match(inputs[0]!, /asked from inside one study/);
+  assert.match(inputs[0]!, /"focus":\{"studyId":"names","studyName":"Which name\?","step":\{"id":"ask","position":1,"label":"Name vote"\}\}/);
+});
