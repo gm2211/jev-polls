@@ -290,3 +290,17 @@ test('the finished view shows the study cost: an amount and one detail line, wit
   assert.doesNotMatch(view.statsHtml({ done: 4, total: 48, failed: 0, running: 1, rateText: '', leftText: '' }, true, false, { amount: 'About $0.10', detail: '' }), /Study cost/, 'no cost while the run is live');
   assert.match(html, /<div class="lv-cost"[^>]*><span>Study cost<\/span><strong>About \$0\.10<\/strong><small>1,008 requests · 2\.5M tokens<\/small><\/div><\/section>$/);
 });
+
+test('a step with no audience shows what it decided and what it read, not an empty tile map', () => {
+  const outcome = { answers: [{ id: 'name', label: 'Which name should we ship?', type: 'choice', winner: 'Nova', options: [{ key: 'nova', label: 'Nova', share: 0.62 }, { key: 'ember', label: 'Ember', share: 0.38 }] }], reads: ['Gamers · Which name? (every answer)'], note: 'Final choice read 1,000 responses from Gamers in 7 batches, then combined them in 1 round' };
+  const html = view.html(input({ status: 'completed', members: [], groups: [], outcome, outcomeKind: 'choose', emptyReason: 'choose step · completed · No member evaluations in this step.' }, []));
+  assert.doesNotMatch(html, /No member evaluations/);
+  assert.doesNotMatch(html, /Each tile is one synthetic member evaluation/);
+  assert.match(html, /<p class="lv-outcome-winner">Nova<\/p>/);
+  assert.match(html, /data-lead="true"><span class="lv-outcome-label">Nova<\/span>[\s\S]*?62%/);
+  assert.match(html, /Ember[\s\S]*?38%/);
+  assert.match(html, /Jev read the steps below and answered once/);
+  assert.match(html, /<li>Gamers · Which name\? \(every answer\)<\/li>/);
+  assert.match(html, /in 7 batches, then combined them in 1 round\./);
+  assert.match(html, /Model estimates, not human responses/);
+});

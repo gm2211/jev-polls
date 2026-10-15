@@ -114,3 +114,17 @@ test('a later step can read a final choice', async () => {
   assert.equal(record.stages.result!.status, 'completed');
   assert.equal(record.stages.result!.summaries.result!.winner, record.stages.final!.summaries.name!.winner);
 });
+
+test('a finished final choice reports its pick, shares and reads for the run view', async () => {
+  const { stageOutcome } = await import('../src/stage-outcome.js');
+  const pipeline = parsePipeline(study());
+  const record = await runPipeline(pipeline, { gamers: makeCohort('gamers', 20), board: makeCohort('board', 4) }, { ...options, provider: provider() });
+  const outcome = stageOutcome(record.pipeline, record.stages.final)!;
+  const summary = record.stages.final!.summaries.name!;
+  assert.equal(outcome.answers.length, 1);
+  assert.equal(outcome.answers[0]!.label, 'Which name should we ship?');
+  assert.equal(outcome.answers[0]!.winner, names.type === 'choice' ? names.criteria[summary.winner!] : undefined);
+  assert.deepEqual(outcome.answers[0]!.options.map((option) => option.share), Object.values(summary.probabilities!).sort((a, b) => b - a));
+  assert.deepEqual(outcome.reads, ['Gamers · Which name? (every answer)', 'Exec board · Which name? (every answer)']);
+  assert.equal(stageOutcome(record.pipeline, record.stages.gamers), undefined, 'audience steps keep their tile map');
+});
