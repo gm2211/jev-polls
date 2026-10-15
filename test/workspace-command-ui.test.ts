@@ -10,7 +10,7 @@ function harness(overrides: Record<string, unknown> = {}) {
     doc: { projects: [{ id: 'one', name: 'Games', pipelineIds: ['names'], cohortIds: ['gamers'] }, { id: 'two', name: 'Food', pipelineIds: ['food'], cohortIds: [] }],
       pipelines: [{ id: 'names', name: 'Naming study', stages: [{ id: 'ask', label: 'Name preference', kind: 'poll' }] }, { id: 'food', name: 'Taste study', stages: [{ id: 'taste', label: 'Taste choice', kind: 'poll' }] }], cohorts: [{ id: 'gamers', name: '<Gamers>' }] } };
   const calls: string[] = [];
-  const context: any = { S, TextEncoder, document: { addEventListener(type: string, fn: Function) { listeners.set(type, fn); }, querySelector: () => null, getElementById: () => null, activeElement: { isConnected: false } },
+  const context: any = { S, TextEncoder, AbortController, document: { addEventListener(type: string, fn: Function) { listeners.set(type, fn); }, querySelector: () => null, getElementById: () => null, activeElement: { isConnected: false } },
     root: { querySelector: () => null, querySelectorAll: () => [], classList: { toggle() {} } },
     esc: (x: unknown) => String(x).replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
     attr: (x: unknown) => String(x).replace(/"/g, '&quot;'), icon: () => '',
@@ -52,7 +52,7 @@ test('keyboard shortcut preserves dirty forms and refuses navigation when valida
 });
 
 test('command pagination keeps all matches reachable and escapes cohort labels', () => {
-  const h = harness(); assert.match(h.commandResults(), /Next destinations/);
+  const h = harness(); h.commandOpen(); assert.match(h.commandResults(), /Next destinations/);
   h.commandInput({ target: { id: 'commandSearch', value: 'gamers' } }); assert.match(h.commandResults(), /&lt;Gamers&gt;/);
   h.commandInput({ target: { id: 'commandSearch', value: 'missing' } }); assert.match(h.commandResults(), /Ask AI: missing/);
 });

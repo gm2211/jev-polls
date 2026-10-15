@@ -1,6 +1,6 @@
-commit=6db63381ef89d622f3273d3e79721f57d5446d7c
+commit=057de68227b1c78e6134418905223c658cfc469c
 sourcePath=packages
 mode=packages
-packages=chatgpt-local,core,providers
+packages=chatgpt-local,commands,core,providers
 namePrefix=byos-
 engine=omit
