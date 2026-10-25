@@ -24,11 +24,48 @@ Python/PyTorch dependencies. Inference uses CPU and stays offline afterward.
 Keep several GB of RAM available. No global Python packages are installed.
 
 Model: [`fastino/GLiNER2.5-Decide`](https://huggingface.co/fastino/GLiNER2.5-Decide),
-revision `5a7adf72a23b4d311abae6ce050d7f0012bb3416`. Library: `gliner2==2.0.0`.
-The pinned checkpoint uses the span architecture with DeBERTa-v3-large. Its
-encoder is constructed with Transformers' built-in `DebertaV2Model`; the
-upstream generic loader that enables `trust_remote_code` is bypassed. Setup
-downloads data/configuration/safetensors only; inference never loads Hub code.
+revision `5a7adf72a23b4d311abae6ce050d7f0012bb3416`. Library: `gliner2==2.1.0`
+on `transformers==5.20.2` and `huggingface-hub==1.33.0` (all pins live in
+`scripts/gliner_requirements.txt`). The pinned checkpoint uses the span
+architecture with DeBERTa-v3-large. Its encoder is constructed with
+Transformers' built-in `DebertaV2Model`; the upstream generic loader that
+enables `trust_remote_code` is bypassed. Setup downloads
+data/configuration/safetensors only; inference never loads Hub code.
+
+After upgrading from an older checkout, re-run `npm run setup:gliner` once. The
+worker refuses to start on an older `gliner2` (`Expected gliner2==2.1.0`) until
+setup has upgraded the venv in place; the model download is reused, not repeated.
+
+## Dependency pins and score stability
+
+`transformers` 4.57.6 carried several Hub and Trainer advisories whose fixes are
+all in 5.x, and `gliner2` 2.0.0 caps `transformers<5`. Moving to `gliner2` 2.1.0
+(`transformers<6`) lifts that cap. `huggingface-hub` moves to the 1.x line that
+Transformers 5 requires (1.31 or newer); the pins avoid anything published less
+than 72 hours before the bump.
+
+The upgrade does not change what the model computes. The old pins (`gliner2`
+2.0.0, `transformers` 4.57.6, `huggingface-hub` 0.36.2, `tokenizers` 0.22.2) and
+the new pins were run side by side on CPU against the same checkpoint:
+
+- All 419 loaded tensors hash identically, so nothing is silently re-initialized.
+- 69 scored requests (docs example, setup smoke check, marker characters,
+  non-ASCII text, multi-question heads, the provider test fixture, 43 persona
+  requests from `examples/game-naming`, and the six full-context blind-review
+  requests) covering 122 questions and 353 labels returned bit-identical logits
+  and sigmoid scores. Maximum drift: 0.0. No label ranking or chosen option
+  changed, and `inputTokens` matched on every request.
+- 50 over-limit requests (including the 48 full-context `audience` requests in
+  that example) are rejected with `input_too_large` and the same token counts
+  as before. The 512-token window is unchanged, so that example's `audience`
+  stage still does not fit.
+- Worker stdout stays JSON-only, stderr carries only the loading event, and no
+  `trust_remote_code` call or network access happens during load or inference.
+  Upstream's own `_load_encoder` still passes `trust_remote_code=True` under
+  `gliner2` 2.1.0, so the bypass in `scripts/gliner_runtime.py` is still needed
+  and still works unchanged.
+
+Re-measure with the same side-by-side run whenever any pin above changes.
 
 ## Model scores
 
