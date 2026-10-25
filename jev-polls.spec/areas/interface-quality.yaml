@@ -83,12 +83,20 @@ behaviors:
     description: Interactive targets are at least 44px and keyboard focus is visible.
   - id: theme-and-accent
     description: >-
-      Primary actions use orange and successful progress uses steel blue; light and dark modes stay
+      The app uses the Harbor scheme: crisp near-white (or near-black) neutrals with a deep navy
+      accent for actions and selection. Status colors are unambiguous: green for ready and done,
+      the accent for running, amber only for warnings, red for errors. Light and dark modes stay
       readable, and the initial theme follows the OS preference.
     details: >-
-      With no saved choice the workspace reads prefers-color-scheme at boot and again when the
-      saved choice is cleared; the toggle shows its text label on phone widths too. Fixed on
-      2026-10-10 from the UI audit (the app always opened light).
+      Chosen 2026-10-25 from ten calm schemes compared on the real canvas, run map and report
+      (color-schemes in the project files). A conditional step's status label is neutral, not
+      amber. The 14 option colors keep every pair apart under deuteranopia, and the first six pass
+      the adjacent color-blind and normal-vision separation checks. With no saved choice the workspace
+      reads prefers-color-scheme at boot and again when the saved choice is cleared; the toggle shows
+      its text label on phone widths too.
+    source:
+      text: harbor
+      reference: 2026-10-25 jev-polls project thread, Giulio, picking from the ten color schemes
   - id: delete-dialogs-one-sentence
     description: >-
       Every delete confirmation (project, study, cohort) uses the same shape: one sentence of

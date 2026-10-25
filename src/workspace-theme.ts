@@ -31,23 +31,23 @@ export const THEME_INIT = String.raw`(()=>{
   });
 })();`;
 
-/** Colors shared by CSS and contrast checks. Surfaces express their role, not nesting depth. */
+/** Harbor scheme: crisp neutrals, deep navy accent. Colors shared by CSS and contrast checks. Surfaces express their role, not nesting depth. */
 export const WORKSPACE_PALETTES = {
   light: {
-    paper: '#edf1f5', surface: '#ffffff', raised: '#e6ecf3', field: '#ffffff', hover: '#dae3ed',
-    ink: '#18212c', muted: '#445367', faint: '#4f6075', line: '#c6d0dc', 'control-line': '#63768e',
-    blue: '#1757a5', 'blue-dark': '#124583', 'blue-soft': '#e1edfc',
-    action: '#e1edfc', 'action-hover': '#d3e5fc', selection: '#e1edfc',
-    teal: '#245c8a', 'teal-soft': '#e6eff8', amber: '#765800', 'amber-soft': '#f4edce', red: '#a32b25',
-    'button-ink': '#1757a5', 'disabled-ink': '#58677b', focus: '#1757a5',
+    paper: '#f4f7fb', surface: '#fefefe', raised: '#e8ebee', field: '#fefefe', hover: '#dfe2e6',
+    ink: '#1b1e22', muted: '#4d535a', faint: '#5e646b', line: '#d0d3d6', 'control-line': '#7c8186',
+    blue: '#214487', 'blue-dark': '#23427e', 'blue-soft': '#e3edff',
+    action: '#e3edff', 'action-hover': '#d5e4fe', selection: '#e3edff',
+    teal: '#216573', 'teal-soft': '#def2f7', amber: '#805b2c', 'amber-soft': '#fcecd9', red: '#a03f3c', green: '#2e6e3f',
+    'button-ink': '#214487', 'disabled-ink': '#5e646b', focus: '#214487',
   },
   dark: {
-    paper: '#101318', surface: '#1b2028', raised: '#252d38', field: '#2d3643', hover: '#364252',
-    ink: '#f1f5fa', muted: '#bac5d4', faint: '#adb9ca', line: '#3d4756', 'control-line': '#8d9caf',
-    blue: '#9bc5ff', 'blue-dark': '#bad8ff', 'blue-soft': '#203b5c',
-    action: '#203b5c', 'action-hover': '#2a4c73', selection: '#203b5c',
-    teal: '#9ac8f7', 'teal-soft': '#1c344c', amber: '#efd090', 'amber-soft': '#40351b', red: '#ffa6a2',
-    'button-ink': '#9bc5ff', 'disabled-ink': '#adb9ca', focus: '#9bc5ff',
+    paper: '#0e1114', surface: '#171a1d', raised: '#202327', field: '#272a2e', hover: '#303337',
+    ink: '#f7fbff', muted: '#bec5cd', faint: '#b1b8c0', line: '#383b3f', 'control-line': '#82878b',
+    blue: '#9ebef8', 'blue-dark': '#bed5fe', 'blue-soft': '#26334a',
+    action: '#26334a', 'action-hover': '#30405d', selection: '#26334a',
+    teal: '#95c8d4', 'teal-soft': '#173239', amber: '#ecc69c', 'amber-soft': '#3c2d1c', red: '#eca19a', green: '#94cf9f',
+    'button-ink': '#9ebef8', 'disabled-ink': '#b1b8c0', focus: '#9ebef8',
   },
 } as const;
 
