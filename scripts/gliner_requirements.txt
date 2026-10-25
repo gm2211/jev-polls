@@ -1,8 +1,8 @@
-# Model and classification-score API are tied to GLiNER2 2.0.0.
-gliner2[local]==2.0.0
+# Model and classification-score API are tied to GLiNER2 2.1.0 (Transformers 5.x).
+gliner2[local]==2.1.0
 torch==2.14.1
-transformers==4.57.6
-huggingface-hub==0.36.2
+transformers==5.20.2
+huggingface-hub==1.33.0
 safetensors==0.8.0
 sentencepiece==0.2.1
 numpy==2.4.6
