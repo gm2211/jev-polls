@@ -7,3 +7,6 @@ safetensors==0.8.0
 sentencepiece==0.2.1
 numpy==2.4.6
 peft==0.21.2
+# Transitive dependencies pinned to patched releases so re-running setup upgrades older venvs.
+certifi==2026.10.19
+filelock==4.2.4
