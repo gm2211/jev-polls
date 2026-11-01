@@ -1,6 +1,6 @@
 import { AsyncEntry } from '@napi-rs/keyring';
 import type { ByosProvider, CatalogModel, SignInMethod } from '@byos/core';
-import { claude, grok, groq, huggingface, openrouter, ProviderRequestError, CLAUDE_API_KEY_SETUP } from '@byos/providers';
+import { claude, classifyProviderError, grok, groq, huggingface, openrouter, CLAUDE_API_KEY_SETUP } from '@byos/providers';
 
 /**
  * Drafting providers that come from BYOS (`@byos/providers`) and connect with a key the user pastes.
@@ -21,7 +21,7 @@ export interface ByosEngineInfo {
 export interface ByosKeyStore { read(engine: ByosEngine): Promise<string | null>; write(engine: ByosEngine, key: string): Promise<void>; remove(engine: ByosEngine): Promise<void> }
 export class ByosConnectionError extends Error {}
 
-const LABELS: Record<ByosEngine, string> = { grok: 'Grok (xAI)', openrouter: 'OpenRouter', 'claude-api': 'Claude API', groq: 'Groq', huggingface: 'Hugging Face' };
+const LABELS: Record<ByosEngine, string> = { grok: 'Grok (xAI)', openrouter: 'OpenRouter', 'claude-api': 'Claude (Anthropic)', groq: 'Groq', huggingface: 'Hugging Face' };
 const KEY_PAGES: Partial<Record<ByosEngine, { label: string; url: string }[]>> = {
   grok: [{ label: 'Create an xAI API key', url: 'https://console.x.ai' }],
   openrouter: [{ label: 'Create an OpenRouter key', url: 'https://openrouter.ai/settings/keys' }],
@@ -67,21 +67,22 @@ function provider(engine: ByosEngine): ByosProvider {
     case 'huggingface': return huggingface();
   }
 }
+/** What can be pasted for Claude: BYOS accepts an API key or a Pro/Max subscription token (sk-ant-oat…) on this engine. */
+const CLAUDE_KEY_HINT = 'A Claude API key from platform.claude.com, or a Claude Pro/Max subscription token (sk-ant-oat…). Max and Team plans include monthly API credits for API keys.';
 /** BYOS's own key hint; OpenRouter's BYOS sign-in is browser PKCE only, and its pasted keys work the same way. */
-const keyHint = (engine: ByosEngine) => provider(engine).signIn.find((method): method is Extract<SignInMethod, { kind: 'api-key' }> => method.kind === 'api-key')?.hint
+const keyHint = (engine: ByosEngine) => engine === 'claude-api' ? CLAUDE_KEY_HINT : provider(engine).signIn.find((method): method is Extract<SignInMethod, { kind: 'api-key' }> => method.kind === 'api-key')?.hint
   ?? (engine === 'openrouter' ? 'An OpenRouter API key from openrouter.ai/settings/keys' : undefined);
 
-/** Fixed public messages: raw provider errors can echo request data and never reach the UI. */
-function providerMessage(engine: ByosEngine, error: unknown, connecting = false): string {
+/** Fixed public messages: raw provider errors can echo request data and never reach the UI. The kind comes from BYOS. */
+function providerMessage(engine: ByosEngine, error: unknown): string {
   const label = LABELS[engine];
-  const status = error instanceof ProviderRequestError ? error.status : (error as { name?: string })?.name === 'OpenRouterAuthenticationError' ? 401 : 0;
   if (error instanceof ByosConnectionError) return error.message;
-  if (status === 401 || status === 403) return `${label} did not accept this key. Check it, or paste a new one.`;
-  // BYOS model listing reports a refusal without its status; on connect that almost always means the key.
-  if (connecting) return `${label} did not accept this key, or could not be reached. Check the key and your connection, then try again.`;
-  if (status === 402 || status === 429) return `${label} refused the request because of credits or rate limits. Check your ${label} account, or choose another drafting provider.`;
-  if ((error as { name?: string })?.name === 'AbortError') return `${label} request cancelled. Workspace unchanged.`;
-  return `${label} could not complete this request. Try again or choose another drafting provider. Workspace unchanged.`;
+  switch (classifyProviderError(error).kind) {
+    case 'auth': return `${label} did not accept this key. Check it, or paste a new one.`;
+    case 'quota': return `${label} refused the request because of credits or rate limits. Check your ${label} account, or choose another drafting provider.`;
+    case 'aborted': return `${label} request cancelled. Workspace unchanged.`;
+    case 'unavailable': return `${label} could not complete this request. Try again or choose another drafting provider. Workspace unchanged.`;
+  }
 }
 
 export interface ByosGenerateRequest { engine: ByosEngine; model: string; instructions: string; input: string; signal?: AbortSignal; onProgress?: (progress: { phase: 'starting' | 'generating' | 'receiving'; outputChars: number; outputTokens?: number }) => void }
@@ -113,7 +114,7 @@ export class ByosConnections {
     if (!key || key.length > MAX_KEY_LENGTH || /\s/.test(key)) throw new ByosConnectionError(`Paste a single ${LABELS[engine]} key with no spaces.`);
     let models: CatalogModel[];
     try { models = await provider(engine).listModels(key, AbortSignal.timeout(20_000)); }
-    catch (error) { throw new ByosConnectionError(providerMessage(engine, error, true)); }
+    catch (error) { throw new ByosConnectionError(providerMessage(engine, error)); }
     try { await this.store.write(engine, key); } catch (error) { throw new ByosConnectionError(providerMessage(engine, error)); }
     this.cache.set(engine, key);
     return visible(models);
