@@ -1,4 +1,4 @@
-commit=0b591bae00bcd7c51150e4d01c03bf2db77268e2
+commit=dbb68148492772ccc8c124bc6664726a6bf4eab6
 sourcePath=packages
 mode=packages
 packages=chatgpt-local,commands,core,providers

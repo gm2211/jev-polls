@@ -10,7 +10,7 @@ function savedAISelection(){try{return JSON.parse(localStorage.getItem('jev-ai-s
 function rememberAISelection(){try{localStorage.setItem('jev-ai-selection',JSON.stringify({provider:S.localEngine,accountId:S.chatgpt?.account?.id,model:S.chatgptModel,custom:S.chatgptCustomModel}))}catch{}}
 function restoreAIModel(){const saved=savedAISelection();if(S.chatgpt?.connected&&saved?.accountId===S.chatgpt.account?.id&&typeof saved?.model==='string'){S.chatgptModel=saved.model;S.chatgptCustomModel=!!saved.custom}}
 {const saved=savedAISelection();if(typeof saved?.provider==='string'&&/^[a-z-]{1,40}$/.test(saved.provider))S.localEngine=saved.provider}
-/* BYOS API-key providers (Grok, OpenRouter, Claude API, Groq, Hugging Face). Keys go to the local server once and are kept in the OS credential store; the page never stores or receives them back. */
+/* BYOS API-key providers (Grok, OpenRouter, Claude, Groq, Hugging Face). Keys go to the local server once and are kept in the OS credential store; the page never stores or receives them back. */
 const BYOS_ENGINES=['grok','openrouter','claude-api','groq','huggingface'];
 function isByosEngine(id){return BYOS_ENGINES.includes(id)}
 S.byos={models:{},model:{},loading:false,error:null,key:''};

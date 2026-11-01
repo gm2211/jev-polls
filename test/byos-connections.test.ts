@@ -48,6 +48,19 @@ test('a rejected key is not saved and the provider error text is not echoed', as
   await assert.rejects(byos.connect('groq', 'two words'), /single Groq key/);
 });
 
+test('the Claude engine accepts a Pro/Max subscription token as well as an API key, and says so', async t => {
+  const store = memoryStore(), byos = new ByosConnections(store);
+  const hint = (await byos.engines()).find(engine => engine.id === 'claude-api')?.keyHint ?? '';
+  assert.match(hint, /sk-ant-oat/);
+  const calls = stubFetch(t, () => Response.json({ data: [{ id: 'claude-opus-5-5', display_name: 'Claude Opus 5.5', created_at: '2026-01-01T00:00:00Z' }], has_more: false }));
+  const token = 'sk-ant-oat01-synthetic-subscription-token';
+  const models = await byos.connect('claude-api', token);
+  assert.equal(store.keys.get('claude-api'), token);
+  assert.deepEqual(models.map(model => model.id), ['claude-opus-5-5']);
+  const headers = new Headers(calls[0]!.init.headers);
+  assert.equal(headers.get('authorization'), `Bearer ${token}`);
+});
+
 test('generation streams through the BYOS provider and returns only model text', async t => {
   const store = memoryStore(); store.keys.set('openrouter', KEY);
   const byos = new ByosConnections(store);

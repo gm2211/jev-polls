@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// Run under the sandbox: ~/.claude/bin/safe-run.sh -C . --net --allow-read <byos checkout> -- node scripts/sync-byos.mjs <byos checkout> <full-sha>
+// The exporter runs npm ci on third-party code. Needs an explicit 40-character SHA; never a branch name.
 import { execFileSync } from 'node:child_process';
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
