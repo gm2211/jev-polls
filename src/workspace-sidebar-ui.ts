@@ -8,7 +8,7 @@ function workspaceSidebar(){
   const p=project();if(!p)return '';
   const studies=projectPipelines(),open=S.tab==='studies'?pipeline():null,shown=studies.slice(0,SIDEBAR_STUDY_LIMIT);
   if(open&&!shown.includes(open))shown.push(open);
-  const studyLinks=shown.map(s=>sidebarLink(studyQuestion(s),'side-study',open?.id===s.id,' data-id="'+attr(s.id)+'"',null,true)).join('')
+  const studyLinks=shown.map(s=>sidebarLink(studyName(s),'side-study',open?.id===s.id,' data-id="'+attr(s.id)+'"',null,true)).join('')
     +(studies.length>shown.length?sidebarLink('All '+plural(studies.length,'study','studies'),'tab',false,' data-tab="studies"',null,true):'');
   return '<nav class="app-sidebar" aria-label="Project">'
     +'<button type="button" class="side-back" data-act="projects" aria-label="All projects">'+icon('left')+'<span>All projects</span></button>'

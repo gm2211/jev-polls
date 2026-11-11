@@ -90,7 +90,10 @@ test('both theme palettes keep normal, muted, placeholder, and disabled text rea
       assert.ok(contrast(palette[accent], palette[`${accent}-soft`]) >= 4.5, `${theme} ${accent} status text needs 4.5:1`);
     }
     for (const action of ['action', 'action-hover'] as const) {
-      assert.ok(contrast(palette['button-ink'], palette[action]) >= 4.5, `${theme} primary action text needs 4.5:1`);
+      assert.ok(contrast(palette['button-ink'], palette[action]) >= 4.5, `${theme} soft action text needs 4.5:1`);
+    }
+    for (const fill of ['blue', 'primary-hover'] as const) {
+      assert.ok(contrast(palette['primary-ink'], palette[fill]) >= 4.5, `${theme} filled primary text needs 4.5:1`);
     }
     assert.ok(contrast(palette['disabled-ink'], palette.raised) >= 4.5, `${theme} disabled controls need 4.5:1`);
   }

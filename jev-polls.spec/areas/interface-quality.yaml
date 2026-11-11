@@ -265,3 +265,31 @@ behaviors:
     source:
       text: clicking out of a modal should close it
       reference: jev-polls project thread, Giulio, 2026-10-12
+  - id: one-primary-action
+    description: >-
+      Primary buttons are filled and visibly heavier than soft ones, and a view shows one: Check
+      and run on the canvas, Run study in the check panel, Open report on a run card. Add step and
+      a step panel's Next stay soft. While a step panel covers the header, Check and run rides in
+      the panel footer.
+    details: >-
+      Before 2026-11-11 .button.primary and .button.soft were one rule, so every action looked the
+      same, and an open step panel hid Check and run (UX review item 4).
+    source:
+      text: cool, re-review the suggestions and screenshots then tell coordinator to address the feedback and resolve this
+      reference: jev-polls project thread "Address the UX review feedback", Giulio, 2026-11-11; UX review at commit 846f90b
+  - id: run-card-result
+    description: >-
+      A run card leads with the study's answer once the run has completed ("Answer Deepforge
+      71%"), then one line with when it started, its cost and how many steps ran. A progress bar
+      shows only while a run is running and names the step, never its id; the card's buttons sit
+      in one spaced row, and the Runs page lists cards without an extra wrapping box.
+    details: Added 2026-11-11 from the UX review (item 8).
+    source:
+      text: cool, re-review the suggestions and screenshots then tell coordinator to address the feedback and resolve this
+      reference: jev-polls project thread "Address the UX review feedback", Giulio, 2026-11-11; UX review at commit 846f90b
+  - id: theme-tokens-for-chips
+    description: Chips and pills (such as the cohorts a study can ask) take their colours from theme tokens, so dark mode never shows white chips.
+    details: Fixed 2026-11-11 from the UX review (item 11).
+    source:
+      text: cool, re-review the suggestions and screenshots then tell coordinator to address the feedback and resolve this
+      reference: jev-polls project thread "Address the UX review feedback", Giulio, 2026-11-11; UX review at commit 846f90b

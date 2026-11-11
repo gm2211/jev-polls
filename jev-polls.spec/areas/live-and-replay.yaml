@@ -52,7 +52,14 @@ behaviors:
       When the run completes the live view becomes a results view without navigation: the
       leaderboard is the final ranking, a panel lists each segment's top three options, and one
       factual line says who leads overall and whether segments agree. Open report stays one click
-      away.
+      away. Once the run has completed the header shows the study's answer from its final step
+      ("Answer Deepforge 71%") beside Open report, and a finished run opens on (and a watched run
+      moves once to) that final step; every other step stays one click away in the step map.
+      Options are named by their labels, never their ids, in the leaderboard, tooltips, results
+      and commentary.
+    details: >-
+      Final-answer header and final-step selection added 2026-11-11 by the UX review (item 1): a
+      finished run stayed on step 1, whose headline named a different option than the answer.
     source:
       text: >-
         when the run completes, the live view turns into a results view without navigation ... a
@@ -181,7 +188,7 @@ behaviors:
     description: >-
       Replay offers play, pause, step, restart, show all, 1×/2×/4×/8× speed, and a position slider
       that updates while dragging. A whole replay takes four to forty seconds at 1× whatever its
-      size.
+      size. Replay voting starts playing on the first click (UX review item 7, 2026-11-11).
   - id: evaluations-not-shares
     description: >-
       Tiles and counts describe evaluations of synthetic profiles, not audience share, and colours

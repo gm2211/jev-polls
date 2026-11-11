@@ -20,7 +20,7 @@ function pageTitle(){
   if(S.tab==='cohorts'){const c=cohort();here=S.cohortComposer?'New cohort':c?(S.personaOpen&&c.personas.find(x=>x.id===S.personId)?.label)||c.name:'Cohorts'}
   else if(S.tab==='runs')here='Runs';
   else if(S.tab==='project-settings')here='Settings';
-  else if(S.tab==='studies'&&pipeline())here=(reviewPage()?'Review · ':'')+studyQuestion(pipeline());
+  else if(S.tab==='studies'&&pipeline())here=(reviewPage()?'Review · ':'')+studyName(pipeline());
   return progress+(S.dirty?'• ':'')+(here.length>40?here.slice(0,40).replace(/\s+\S*$/,'')+'…':here);
 }
 function syncTitle(){try{const title=(S.doc?pageTitle()+' · ':'')+'Jev';if(document.title!==title)document.title=title}catch{}}

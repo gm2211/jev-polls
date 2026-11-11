@@ -31,7 +31,7 @@ export function createArenaModel() {
     for (const [id, raw] of Object.entries(questions ?? {})) {
       const type = raw?.type === 'score' || raw?.type === 'noul' ? raw.type : 'choice';
       let options: Option[] = [];
-      if (type === 'choice') options = Object.entries(raw?.criteria ?? {}).map(([optionId, value]: [string, any]) => ({ id: optionId, label: typeof value === 'string' ? optionId : String(value?.label || optionId) }));
+      if (type === 'choice') options = Object.entries(raw?.criteria ?? {}).map(([optionId, value]: [string, any]) => ({ id: optionId, label: typeof value === 'string' ? (value.trim() && value.trim().length <= 48 ? value.trim() : optionId) : String(value?.label || optionId) }));
       else if (type === 'score') options = (Array.isArray(raw?.criteria) ? raw.criteria : []).map((value: unknown, index: number) => ({ id: String(index), label: typeof value === 'string' ? value : String((value as any)?.label ?? index) }));
       else options = [{ id: 'yes', label: 'Yes' }, { id: 'no', label: 'No' }];
       result.push({ id, label: String(raw?.label || id), type, options });

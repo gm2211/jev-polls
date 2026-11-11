@@ -1239,7 +1239,8 @@ test('projects start from a question and assign cohorts only after an explicit c
   assert.equal(S.tab, 'studies');
   assert.equal(S.pipelineId,null);assert.match(html(),/<h1 tabindex="-1">Studies<\/h1>/);
   act(null,{dataset:{act:'open-pipeline',id:'study'}});
-  assert.match(html(), /<h1[^>]*>Which direction should we choose\?<\/h1>/);
+  // The short Study name titles the study; the research question sits under it.
+  assert.match(html(), /<h1[^>]*>Original study<\/h1><p class="study-subtitle" title="Research question">Which direction should we choose\?<\/p>/);
   assert.match(html(), /aria-label="Study editor"/);assert.doesNotMatch(html(), /id="tab-cohorts"/);
   assert.equal(JSON.stringify(S.doc), before);
   S.tab = 'cohorts'; S.cohortPrompt = 'Keep this unfinished cohort prompt';
@@ -2690,7 +2691,7 @@ test('every project tab selects its matching panel directly and keeps pending st
   assert.equal(q.label,'Which title should we choose?','leaving editor flushes pending fields before render');
   root.querySelectorAll=()=>[];
   const before=JSON.stringify(S.doc);
-  for(const [tab,label,content] of [['studies','Studies','<h1 tabindex="-1">Studies</h1>'],['cohorts','Cohorts','<h1 tabindex="-1">Cohorts</h1>'],['runs','Runs','Study runs']]){
+  for(const [tab,label,content] of [['studies','Studies','<h1 tabindex="-1">Studies</h1>'],['cohorts','Cohorts','<h1 tabindex="-1">Cohorts</h1>'],['runs','Runs','<h1 tabindex="-1">Runs</h1>']]){
     click({act:'tab',tab});
     const links=[...html().matchAll(/<button[^>]*class="side-link"[^>]*data-act="tab"[^>]*>/g)].map(match=>match[0]);
     assert.equal(links.length,3);
@@ -2770,8 +2771,13 @@ test('result-only study rows omit an invented answer format and safely expose th
   const before=JSON.stringify(S.doc);render();
   const row=browser.element('app').innerHTML.match(/<button[^>]*data-act="open-pipeline"[^>]*data-id="study"[^>]*>[\s\S]*?<\/button>/)![0];
   assert.match(row,/^<button type="button"/);
-  assert.match(row,/aria-label="Open study: Choose &quot;best&quot; &lt;img src=x onerror=alert\(1\)&gt; &amp; result"/);
-  assert.match(row,/<strong>Choose &quot;best&quot; &lt;img src=x onerror=alert\(1\)&gt; &amp; result<\/strong>/);
+  assert.match(row,/aria-label="Open study: Original study"/);
+  assert.match(row,/<span class="list-sub">Choose &quot;best&quot; &lt;img src=x onerror=alert\(1\)&gt; &amp; result<\/span>/);
+  p.name='Choose "best" <img src=x onerror=alert(1)> & result';render();
+  const named=browser.element('app').innerHTML.match(/<button[^>]*data-act="open-pipeline"[^>]*data-id="study"[^>]*>[\s\S]*?<\/button>/)![0];
+  assert.match(named,/aria-label="Open study: Choose &quot;best&quot; &lt;img src=x onerror=alert\(1\)&gt; &amp; result"/);
+  assert.match(named,/<strong>Choose &quot;best&quot; &lt;img src=x onerror=alert\(1\)&gt; &amp; result<\/strong>/);
+  p.name='Original study';render();
   assert.match(row,/>1 step<\/small>/);assert.match(row,/>0 cohorts<\/small>/);
   assert.doesNotMatch(row,/<img|class="study-format"|>Result<|>Open study</);
   assert.equal((row.match(/<button/g)||[]).length,1,'the whole row remains one native action');
@@ -3040,7 +3046,7 @@ test('live run navigation pins selected stage and member while polling advances 
   assert.match(browser.element('app').innerHTML,/data-stage="follow-up"/,'a new running step takes over the map');
   act(null,{dataset:{act:'live-stage',stage:'screen'}});assert.equal(S.liveStage,'screen');assert.equal(S.liveMemberKey,'');
   assert.match(browser.element('app').innerHTML,/data-stage="screen"/);
-  act(null,{dataset:{act:'live-close'}});assert.equal(S.liveRunId,'history');assert.match(browser.element('app').innerHTML,/Study runs/);
+  act(null,{dataset:{act:'live-close'}});assert.equal(S.liveRunId,'history');assert.match(browser.element('app').innerHTML,/<section id="view-runs"><div class="run-list">/);
   applySnapshot({...next,runs:[{...next.runs[0],message:'Still evaluating'}]});assert.doesNotMatch(browser.element('app').innerHTML,/aria-label="Live voting"/);
   act(null,{dataset:{act:'live-open',id:run.id}});assert.equal(S.liveMemberKey,'');assert.equal(S.liveStage,'');
 });
@@ -3131,7 +3137,7 @@ test('voting replay reveals saved members without inference and stops at navigat
   act(null,{dataset:{act:'live-close'}});
   staleTick();
   assert.equal(S.liveRunId,'history');
-  assert.match(browser.element('app').innerHTML,/Study runs/);
+  assert.match(browser.element('app').innerHTML,/<section id="view-runs"><div class="run-list">/);
   assert.equal(browser.requests.length,initialRequests,'Playback must not dispatch any API request');
   act(null,{dataset:{act:'live-open',id:run.id}});
   assert.match(browser.element('app').innerHTML,/Voting replay/);
@@ -3351,7 +3357,7 @@ test('long sidebar names ellipsize inside the sidebar and show in full on hover'
   const browser = browserHarness(); await settle();
   const { S, render } = browser.client;
   const long = 'Which name will make my $20 game sell the most copies to strategy players on Steam?';
-  S.doc.pipelines[0].description = long; S.tab = 'studies'; S.pipelineId = S.doc.pipelines[0].id; render();
+  S.doc.pipelines[0].description = long; S.doc.pipelines[0].name = long; S.tab = 'studies'; S.pipelineId = S.doc.pipelines[0].id; render();
   const sidebar = browser.element('app').innerHTML.match(/<nav class="app-sidebar"[\s\S]*?<\/nav>/)![0];
   assert.ok(sidebar.includes('aria-current="page" title="Which name will make my $20 game sell the most copies to strategy players on Steam?"'));
 });
@@ -3379,7 +3385,7 @@ test('a selected step opens a closable panel with one row of tabs marking unfini
   assert.deepEqual(tabs(), ['question', 'answers', 'cohort', 'settings'], 'a lone step shows the three guided stops and Settings; Inputs appears once there is something to connect');
   assert.match(html(), /data-act="flow-panel-close" aria-label="Close step panel"/);
   assert.doesNotMatch(html(), /class="button primary study-next"/, 'the panel footer carries the one Next while a guided stop is open');
-  assert.match(html(), /class="button primary" data-act="flow-next"/);
+  assert.match(html(), /class="button soft" data-act="flow-next"/);
   act(null, { dataset: { act: 'flow-inspector', section: 'answers' } });
   assert.match(html(), /data-inspector-tab="answers"/);
   assert.doesNotMatch(html(), /Later steps can use/, 'outputs are listed under Inputs, not on the Options tab');

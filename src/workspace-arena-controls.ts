@@ -25,10 +25,37 @@ function arenaSelectedRun(){return liveStudyRun()||(S.tab==='runs'?projectRuns()
 function arenaStage(run){
   if(S.liveStage)return S.liveStage;const members=run.liveMembers||[],running=members.find(m=>m.status==='running')?.stage;
   if(running||run.status==='running')return running||members.at(-1)?.stage||run.stages?.[0]?.id||'';
-  if(A.runId===run.id&&A.stage&&members.some(m=>m.stage===A.stage))return A.stage;
+  /* A finished run opens on its final step, the study's answer; one watched to the end moves there once, then stays wherever the user goes. */
+  if(A.runId===run.id&&A.stage&&A.settled===run.id&&(members.some(m=>m.stage===A.stage)||(run.stages||[]).some(s=>s.id===A.stage)))return A.stage;
+  if(A.settling===run.id&&A.settleTo)return A.settleTo;
+  const last=run.status==='completed'?arenaFinalStage(run):null;if(last){A.settling=run.id;A.settleTo=last.id;return last.id}
   const counts=new Map();for(const m of members)counts.set(m.stage,(counts.get(m.stage)||0)+1);
   let best='',most=0;for(const stage of (run.stages||[]).map(s=>s.id).concat([...counts.keys()]))if((counts.get(stage)||0)>most){best=stage;most=counts.get(stage)}
   return best||run.stages?.[0]?.id||'';
+}
+/** The step whose result is the study's answer: the last completed step that no other completed step reads. */
+function arenaFinalStage(run){
+  const done=(run.stages||[]).filter(s=>s.status==='completed');
+  return done.filter(s=>!done.some(other=>(other.dependsOn||[]).includes(s.id))).at(-1)||null;
+}
+/** The study's answer in a few words, once a run has completed: "Deepforge · 71%". Null while running or when no final step settled. */
+function arenaFinalAnswer(run){
+  if(!run||run.status!=='completed')return null;
+  const stage=arenaFinalStage(run);if(!stage)return null;
+  const pct=share=>Math.round(share*100)+'%';
+  const answer=stage.outcome?.answers?.[0];
+  if(answer){
+    if(answer.type==='score'&&answer.mean!==undefined)return {stage:stage.id,label:'Mean score '+answer.mean.toFixed(2),share:''};
+    if(answer.type==='noul'&&answer.likelihood!==undefined)return {stage:stage.id,label:pct(answer.likelihood)+' likely yes',share:''};
+    if(!answer.winner)return null;
+    const top=(answer.options||[]).find(o=>o.label===answer.winner);
+    return {stage:stage.id,label:answer.winner,share:top?pct(top.share):''};
+  }
+  const study=S.doc?.pipelines.find(p=>p.id===run.pipelineId),pstage=study?.stages.find(s=>s.id===stage.id),members=(run.liveMembers||[]).filter(m=>m.stage===stage.id);
+  const question=lvm.describeQuestions(pstage?.kind==='poll'?pstage.questions:undefined,members)[0];
+  if(!question||question.type!=='choice')return null;
+  const board=lvm.leaderboard(members,question),lead=board.rows.find(row=>row.id===board.leader);
+  return lead?{stage:stage.id,label:lead.label,share:pct(lead.share)}:null;
 }
 /** The live view owns the whole window whenever a run is selected; Esc or Back returns to the study (or run history). */
 const lvFull=()=>!!arenaSelectedRun();
@@ -78,7 +105,7 @@ function arenaInput(run,withLayout=true){
   const inline=!!liveStudyRun(),back=inline?{backAct:'live-back',backLabel:'Back to study'}:study?{backAct:'run-open-study',backLabel:'Back to study',backId:study.id}:{backAct:'live-close',backLabel:'Back to runs'};
   const news=question?.type==='choice'?arenaNews(run,lvm.commentary(members,question,segmentLabels),live):[];
   const tops=!live&&!replayOn&&question?.type==='choice'?lvm.segmentTops(members,question,segmentLabels):[],results=tops.length||board.evaluated?{summary:lvm.resultSummary(board,tops),cost:run.status==='running'?null:lvm.costSummary(run.usage,run.provider,JEV_USD_PER_MILLION_TOKENS),segments:tops}:null;
-  return {full:lvFull(),studyTitle:study?studyQuestion(study):runTitle(run),...back,news,results,runId:run.id,status:run.status,message:run.message,reportUrl:run.reportUrl,title:stageMeta?.label||pstage?.label||stageId||'Voting',stageId,stages:(run.stages||[]).map(s=>({id:s.id,label:s.label||s.id,status:s.status||'',kind:s.kind||'',dependsOn:s.dependsOn||[]})),graphHtml:withLayout?arenaGraph(run,study,stageId):'',stepsView:ui.steps,members,groups,layout,segmentLabels,questions,question,colorBy:ui.colorBy,groupBy,groupOptions,zoom:ui.zoom,selectedKey:S.liveMemberKey,selected,selectedPersona:selected?lookup(selected):undefined,selectedHidden:!!(replayOn&&selected&&all.some(m=>lvm.memberKey(m)===S.liveMemberKey&&(m.status==='completed'||m.status==='failed'))&&!revealedKeys(all,cursor).has(S.liveMemberKey)),tabKey:keyed.has(S.liveMemberKey)?S.liveMemberKey:groups[0]?.keys[0]||'',board,stats:{...stats,...arenaRateText(run,stageId,stats,live)},replay:replayOn?{cursor,total,playing:R.playing,speed:R.speed,ordered:all.some(m=>m.order!==undefined)}:null,outcome:stageMeta?.outcome,outcomeKind:stageMeta?.kind||'',emptyReason:[stageMeta?.kind?stageMeta.kind+' step · ':'',stageMeta?.status||'No member evaluations',stageMeta?.reason?' · '+stageMeta.reason:''].join('')+' · No member evaluations in this step.'};
+  return {full:lvFull(),studyTitle:runTitle(run),finalAnswer:arenaFinalAnswer(run),...back,news,results,runId:run.id,status:run.status,message:run.message,reportUrl:run.reportUrl,title:stageMeta?.label||pstage?.label||stageId||'Voting',stageId,stages:(run.stages||[]).map(s=>({id:s.id,label:s.label||s.id,status:s.status||'',kind:s.kind||'',dependsOn:s.dependsOn||[]})),graphHtml:withLayout?arenaGraph(run,study,stageId):'',stepsView:ui.steps,members,groups,layout,segmentLabels,questions,question,colorBy:ui.colorBy,groupBy,groupOptions,zoom:ui.zoom,selectedKey:S.liveMemberKey,selected,selectedPersona:selected?lookup(selected):undefined,selectedHidden:!!(replayOn&&selected&&all.some(m=>lvm.memberKey(m)===S.liveMemberKey&&(m.status==='completed'||m.status==='failed'))&&!revealedKeys(all,cursor).has(S.liveMemberKey)),tabKey:keyed.has(S.liveMemberKey)?S.liveMemberKey:groups[0]?.keys[0]||'',board,stats:{...stats,...arenaRateText(run,stageId,stats,live)},replay:replayOn?{cursor,total,playing:R.playing,speed:R.speed,ordered:all.some(m=>m.order!==undefined)}:null,outcome:stageMeta?.outcome,outcomeKind:stageMeta?.kind||'',emptyReason:[stageMeta?.kind?stageMeta.kind+' step · ':'',stageMeta?.status||'No member evaluations',stageMeta?.reason?' · '+stageMeta.reason:''].join('')+' · No member evaluations in this step.'};
 }
 function revealedKeys(all,cursor){return new Set(lvm.replayOrder(all).slice(0,Math.floor(cursor)).map(lvm.memberKey))}
 /** Newest first, each line stamped: the clock time this view first saw it while live, or its place in the vote count otherwise. */
@@ -104,7 +131,7 @@ function arenaAfterRender(){
   if(A.ro){A.ro.disconnect();A.ro=null}
   if(!el){A.el=null;A.byKey.clear();A.sigs.clear();return}
   const run=arenaSelectedRun();if(!run){A.el=null;return}
-  A.el=el;A.runId=run.id;A.stage=el.dataset.stage;A.tipKey=null;
+  A.el=el;A.runId=run.id;A.stage=el.dataset.stage;A.tipKey=null;if(A.settling===run.id&&A.stage===A.settleTo){A.settled=run.id;A.settling=''}
   A.byKey=new Map([...el.querySelectorAll('.lv-tile')].map(tile=>[tile.dataset.key,tile]));
   const ctx=arenaInput(run,false);A.ctx=ctx;A.question=ctx.question;
   A.sigs=new Map(ctx.members.map(member=>[lvm.memberKey(member),lvm.signature(member)]));
@@ -267,7 +294,7 @@ function arenaAction(action,element){
   const run=arenaSelectedRun();if(!run||run.status==='running')return true;
   const stage=arenaStage(run);if(R.runId!==run.id||R.stage!==stage){arenaStop();R.runId=run.id;R.stage=stage;R.cursor=undefined}
   const total=arenaReplayTotal(run);if(!total)return true;
-  if(action==='arena-replay'){arenaStop();R.cursor=0;S.liveMemberKey='';render();return true}
+  if(action==='arena-replay'){arenaStop();R.cursor=0;S.liveMemberKey='';R.playing=true;render();R.last=lvNow();R.timer=setTimeout(arenaTick,80);return true}
   if(action==='arena-live'){arenaReset();render();return true}
   if(R.cursor===undefined){R.cursor=total}
   if(action==='arena-reset'){arenaStop();R.cursor=0;S.liveMemberKey=''}
