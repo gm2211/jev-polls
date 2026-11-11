@@ -25,8 +25,10 @@ function landOnProject(projectId){
   if(count===1&&projectPipelines()[0])openStudy(projectPipelines()[0].id);else createStudy();
 }
 function studyTitle(p){
-  if(S.studyTitleEdit!==p.id)return '<div class="study-title"><h1 tabindex="-1">'+esc(studyQuestion(p))+'</h1><button type="button" class="button small icon-button study-title-edit" data-act="study-title-edit" aria-label="Edit study question" title="Edit study question">'+icon('edit')+'</button><button type="button" class="button small icon-button study-title-edit" data-act="section-view" data-section-key="pipeline" data-section-id="context" aria-label="Study settings" title="Study settings">'+icon('settings')+'</button></div>';
+  const named=studyNamed(p),what=named?'study name':'study question';
+  if(S.studyTitleEdit!==p.id)return '<div class="study-title"><div class="study-title-text"><h1 tabindex="-1">'+esc(studyName(p))+'</h1>'+(named&&p.description?.trim()?'<p class="study-subtitle" title="Research question">'+esc(p.description.trim())+'</p>':'')+'</div><button type="button" class="button small icon-button study-title-edit" data-act="study-title-edit" aria-label="Edit '+what+'" title="Edit '+what+'">'+icon('edit')+'</button><button type="button" class="button small icon-button study-title-edit" data-act="section-view" data-section-key="pipeline" data-section-id="context" aria-label="Study settings" title="Study settings">'+icon('settings')+'</button></div>';
   const question=p.description?.trim()||'';
+  if(named)return '<form class="study-title study-title-form" data-form="study-title" data-id="'+attr(p.id)+'" data-inline-edit="study-title-cancel"><h1 class="visually-hidden" tabindex="-1">'+esc(studyName(p))+'</h1><input name="studyName" value="'+attr(p.name.trim())+'" required maxlength="160" placeholder="Name this study" aria-label="Study name" aria-describedby="inlineEditHint" title="Enter to save · Esc or click away to discard" autocomplete="off">'+inlineEditHint()+'</form>';
   return '<form class="study-title study-title-form" data-form="study-title" data-id="'+attr(p.id)+'" data-inline-edit="study-title-cancel"><h1 class="visually-hidden" tabindex="-1">'+esc(studyQuestion(p))+'</h1><input name="question" value="'+attr(question)+'" required maxlength="500" placeholder="What do you want to find out?" aria-label="Study question" aria-describedby="inlineEditHint" title="Enter to save · Esc or click away to discard" autocomplete="off">'+inlineEditHint()+'</form>';
 }
 function inlineEditHint(){return '<span id="inlineEditHint" class="inline-edit-hint">Enter to save · Esc or click away to discard</span>'}
@@ -53,7 +55,9 @@ root.addEventListener('focusout',e=>{
 });
 function submitStudyTitle(form){
   const p=S.doc.pipelines.find(x=>x.id===form.dataset.id);if(!p){S.studyTitleEdit=null;render();return}
-  const question=String(new FormData(form).get('question')||'').trim();if(!question)throw Error('Write the question this study should answer.');
+  const data=new FormData(form);
+  if(data.has('studyName')){const name=String(data.get('studyName')||'').trim();if(!name)throw Error('Give this study a short name.');S.studyTitleEdit=null;p.name=name;S.dirty=true;render();root.querySelector('h1')?.focus();return}
+  const question=String(data.get('question')||'').trim();if(!question)throw Error('Write the question this study should answer.');
   S.studyTitleEdit=null;p.description=question;
   if(p.context&&typeof p.context==='object'&&!Array.isArray(p.context))p.context.decisionQuestion=question;
   const first=p.stages.find(s=>s.kind==='poll'),q=first&&Object.values(first.questions)[0];if(q&&!String(q.label||'').trim())q.label=question;
@@ -69,7 +73,7 @@ function ensureStudyQuestion(p){
 }
 function studyStartAction(a,el){
   if(a==='create-study'){createStudy();return true}
-  if(a==='study-title-edit'){S.studyTitleEdit=pipeline()?.id||null;render();const input=root.querySelector('[data-form=study-title] [name=question]');input?.focus();input?.select?.();return true}
+  if(a==='study-title-edit'){S.studyTitleEdit=pipeline()?.id||null;render();const input=root.querySelector('[data-form=study-title] input');input?.focus();input?.select?.();return true}
   if(a==='study-title-cancel'){S.studyTitleEdit=null;render();root.querySelector('h1')?.focus();return true}
   return false;
 }
@@ -90,7 +94,7 @@ export const STUDY_START_CSS = String.raw`
 .create-row:focus-visible{outline:2px solid var(--focus,var(--blue));outline-offset:-2px}
 
 .study-title{grid-area:title;display:flex;align-items:center;gap:6px;min-width:0}
-.study-title h1{min-width:0}
+.study-title h1{min-width:0}.study-title-text{min-width:0;display:flex;flex-direction:column}.study-subtitle{margin:1px 0 0;color:var(--muted);font-size:var(--text-sm);line-height:1.35;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .study-title-edit{flex:none;background:transparent;border-color:transparent;color:var(--muted)}.study-title-edit:hover{color:var(--ink)}
 .study-title-form input{flex:1;min-width:0;font:600 var(--text-lg)/1.3 var(--display);letter-spacing:-.02em}
 .inline-edit-hint{flex:none;color:var(--faint);font-size:var(--text-sm);white-space:nowrap}

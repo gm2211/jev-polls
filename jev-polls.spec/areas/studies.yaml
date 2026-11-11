@@ -16,11 +16,16 @@ behaviors:
       study-journey.empty-list-creates.
   - id: study-named-by-question
     description: >-
-      A study is identified by its research question everywhere it is listed or referred to:
-      studies list, sidebar, breadcrumbs, page title, run cards, run detail, search results and the
-      report headline; the study name is secondary, shown as the report subtitle and used for
-      exported files and the CLI.
+      A study is titled by its short Study name everywhere it is listed or referred to: studies
+      list, sidebar, breadcrumbs, page title, the live view header and run cards. The research
+      question is shown once as a subtitle under the title on the canvas (and in the studies
+      list); a study still on a generated name ("Study N", "<project> study") or with no name is
+      titled by its research question instead.
     details: >-
+      Changed 2026-11-11 by the UX review (item 2): a 104-character question was cut off in the
+      sidebar, breadcrumb and live header and wrapped to four lines on a phone, while the short
+      Study name went unused. The pencil beside the title edits whichever text is the title.
+      Earlier history:
       Before 2026-10-10 the Runs page, run breadcrumb, search palette and report used the study
       name while every other surface used the question, so one study read as two. A run card's
       title links back to its study, the run id is a tooltip on the date rather than a heading,
@@ -28,8 +33,8 @@ behaviors:
       list. In study settings the question is a multi-line field, placed before the name. A study
       with an empty question falls back to its name.
     source:
-      text: One study, two names (UI audit, item 1) and Runs page shows a UUID and two permanent explainer cards (item 11)
-      reference: jev-polls project thread "UI audit in a headless browser", 2026-10-10
+      text: cool, re-review the suggestions and screenshots then tell coordinator to address the feedback and resolve this
+      reference: jev-polls project thread "Address the UX review feedback", Giulio, 2026-11-11; UX review at commit 846f90b
   - id: one-new-study-button
     description: >-
       A project's study list offers a single New study button, in the page header; the empty list

@@ -234,7 +234,12 @@ function flowGuidedFooter(p,s,tab){
   const stops=flowGuidedStops(s),i=stops.indexOf(tab);if(i<0)return '';
   const next=stops[i+1],prev=stops[i-1];
   return '<div class="guided-footer">'+(prev?'<button type="button" class="button" data-act="flow-inspector" data-section="'+prev+'">'+icon('left')+' Back</button>':'<span></span>')+
-    '<button type="button" class="button primary" data-act="flow-next">'+(next?'Next: '+(s.kind==='choose'&&next==='connections'?'Reads':FLOW_STOP_LABEL[next])+' '+icon('right'):'Done')+'</button></div>';
+    '<span class="guided-footer-end">'+flowFooterRun(p)+'<button type="button" class="button soft" data-act="flow-next">'+(next?'Next: '+(s.kind==='choose'&&next==='connections'?'Reads':FLOW_STOP_LABEL[next])+' '+icon('right'):'Done')+'</button></span></div>';
+}
+/** The open step panel covers the header, so the study's run action rides along in its footer whenever the study is ready to check. */
+function flowFooterRun(p){
+  const a=studyNextAction(p),act=a.act==='next-review'||a.secondary?.act==='next-review';
+  return act?'<button type="button" class="button primary" data-act="next-review">Check and run</button>':'';
 }
 function flowInspector(p,s){
   if(!s||S.flowPanel===false)return '';
@@ -266,7 +271,7 @@ function flowAddBar(p,add){
 }
 function flowWorkspace(p,s){
   const pending=S.flowSource?.pipelineId===p.id?S.flowSource:null,add=p.stages.find(x=>x.id===S.flowAdd),list=flowListMode();
-  return '<div class="flow-workspace"><section class="flow-board" aria-label="Study flow"><div class="flow-toolbar"><h2>Study flow <span>'+flowPlural(p.stages.length,'step')+'</span></h2><div class="row">'+(p.stages.length?'<button class="button small primary" data-act="flow-create-open" aria-haspopup="dialog">'+icon('plus')+' Add step</button>'+(list?'':'<button class="button small icon-button" data-act="flow-fit" aria-label="Fit flow to view" title="Fit flow to view">'+icon('fit')+'</button><button class="button small" data-act="flow-reset" aria-label="Actual size" title="Actual size">100%</button>'):'')+'</div></div>'+
+  return '<div class="flow-workspace"><section class="flow-board" aria-label="Study flow"><div class="flow-toolbar"><h2>Study flow <span>'+flowPlural(p.stages.length,'step')+'</span></h2><div class="row">'+(p.stages.length?'<button class="button small soft" data-act="flow-create-open" aria-haspopup="dialog">'+icon('plus')+' Add step</button>'+(list?'':'<button class="button small icon-button" data-act="flow-fit" aria-label="Fit flow to view" title="Fit flow to view">'+icon('fit')+'</button><button class="button small" data-act="flow-reset" aria-label="Actual size" title="Actual size">100%</button>'):'')+'</div></div>'+
     (add&&!list?flowAddBar(p,add):'')+
     (pending?'<div class="flow-hint" role="status">'+'<span><strong>Choose where it goes</strong><br>'+esc(inputTitle(p,{stage:pending.stage,question:pending.question}))+' → Click <strong>Connect here</strong> on a highlighted step, or drag the output onto it.</span><button class="button small" data-act="flow-cancel">Cancel connection</button>'+'</div>':'')+flowCanvas(p)+'</section>'+(studyReviewPanel(p)||flowInspector(p,s))+'</div>';
 }
@@ -706,7 +711,7 @@ export const ROUND_PANEL_CSS = `
 .round-tab:focus-visible{outline:2px solid var(--focus,var(--blue));outline-offset:-2px}
 .round-tab-dot{width:7px;height:7px;border-radius:50%;background:var(--amber)}
 .round-tab-check{display:inline-grid;place-items:center;width:16px;height:16px;border-radius:50%;background:var(--blue-soft);color:var(--blue)}.round-tab-check .ui-icon{width:11px;height:11px}
-.guided-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;flex:none;padding:12px 18px;border-top:1px solid var(--line);background:var(--surface)}.review-footer>.row{gap:8px;flex-wrap:wrap}.review-adopt-note{margin:-4px 0 10px}
+.guided-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;flex:none;padding:12px 18px;border-top:1px solid var(--line);background:var(--surface)}.guided-footer-end{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}.review-footer>.row{gap:8px;flex-wrap:wrap}.review-adopt-note{margin:-4px 0 10px}
 .round-panel .setup-wizard-error{margin:12px 0 0}
 .round-panel .flow-inspector-body{flex:1;min-height:0;overflow:auto;padding:16px 18px}
 .flow-inspector-body:has(>.panel>.step-settings){display:flex;flex-direction:column}.flow-inspector-body>.panel:has(>.step-settings){flex:1 0 auto;display:flex;flex-direction:column;margin:0}.flow-inspector .step-settings{flex:1 0 auto;display:flex;flex-direction:column;gap:10px}.step-settings-branch .checkrow{margin:0}.step-settings .field{margin:0;gap:4px}.step-settings .grid2{margin:0;gap:10px}.step-settings .question-card{margin:0;padding:0;border:0}.step-settings textarea{min-height:0}.step-settings-row{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1fr) minmax(0,1fr);gap:10px}.step-settings-pair{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,2fr);gap:10px;align-items:start}.step-settings-question-head{display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:6px}.step-settings-requires{max-height:96px;overflow:auto;padding-block:2px}.step-settings .toolbar{margin:0 0 6px}.flow-inspector .step-settings>.sticky-actions{justify-content:space-between;margin:auto -18px -16px;padding-inline:18px}
