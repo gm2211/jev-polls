@@ -3678,7 +3678,7 @@ test('the study header always names one next action, from the first question to 
   const next = () => html().match(/<button type="button" class="button primary study-next" data-act="([a-z-]+)"[^>]*>([^<]*)<\/button>/)!.slice(1, 3).join('|');
   S.tab = 'studies'; S.pipelineId = 'study'; S.stageId = 'panel'; S.flowPanel = false;
   const stages = study.stages; study.stages = []; render();
-  assert.doesNotMatch(html(), /study-next|data-act="draft-panel-open">Draft with assistant|data-act="flow-create-open"|flow-empty-hint/, 'an empty study offers its two ways in once, on the canvas');
+  assert.doesNotMatch(html(), /study-next|data-act="draft-panel-open"[^>]*>Draft with assistant|data-act="flow-create-open"|flow-empty-hint/, 'an empty study offers its two ways in once, on the canvas');
   assert.equal((html().match(/class="flow-empty-target"/g) || []).length, 2);
   study.stages = stages;
   render(); assert.equal(next(), 'next-review|Check and run', 'a finished study offers the review');

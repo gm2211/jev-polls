@@ -174,6 +174,10 @@ test('Fit all packs 1,000 tiles into a desktop map and drops to scrolling only w
   assert.deepEqual(arena.fixedLayout([300], 800, 22).columns[0]! * 24 <= 800, true);
   assert.equal(arena.initials('Community and PR lead'), 'CL');
   assert.equal(arena.initials('Ohio Civ veteran'), 'OV');
+  // Numbered members show their number: every "Automation builder 0N" used to read A0.
+  assert.equal(arena.initials('Automation builder 07'), '07');
+  assert.equal(arena.initials('Reviewer 3'), '3');
+  assert.equal(arena.initials('Team #12'), '12');
 });
 
 test('throughput is a rolling 20 second rate and time left follows from it', () => {
@@ -206,4 +210,11 @@ test('a tile tooltip follows the pointer or keyboard focus and never survives a 
   state = next(state, { type: 'click' });
   state = next(state, { type: 'focus', key: 'a', keyboard: false });
   assert.equal(state, null);
+});
+
+test('a persona\'s repeats sit side by side within a group', () => {
+  const member = (personaId: string, repeat: number) => ({ stage: 's', personaId, label: `Member ${personaId === 'a' ? 10 : personaId === 'b' ? 2 : 3}`, segment: 'g', age: 30, repeat, status: 'completed' as const });
+  const members = [member('a', 2), member('b', 1), member('c', 1), member('a', 1), member('b', 2), member('c', 2)];
+  const [group] = arena.groupMembers(members, 'segment', () => undefined);
+  assert.deepEqual(group!.keys, ['s:b:1', 's:b:2', 's:c:1', 's:c:2', 's:a:1', 's:a:2'], 'member number order, numeric, repeats adjacent');
 });

@@ -146,8 +146,16 @@ export function createArenaModel() {
    * Groups come out in a stable, readable order: segments as they appear, ages ascending, other attributes
    * by size. More than GROUP_LIMIT groups fold the smallest into "Other".
    */
+  /** Tiles read in member order ("01, 01, 02, 02…"), so a persona's repeats sit side by side. */
+  function pairRepeats(keys: string[], labels: Map<string, string>): string[] {
+    const persona = (key: string): string => key.slice(0, key.lastIndexOf(':'));
+    const repeat = (key: string): number => Number(key.slice(key.lastIndexOf(':') + 1)) || 0;
+    return [...keys].sort((a, b) => (labels.get(a) ?? '').localeCompare(labels.get(b) ?? '', 'en', { numeric: true }) || persona(a).localeCompare(persona(b)) || repeat(a) - repeat(b));
+  }
+
   function groupMembers(members: Member[], groupBy: string, lookup: (member: Member) => Persona, segmentLabels: Record<string, string> = {}): { id: string; label: string; keys: string[] }[] {
     if (!members.length) return [];
+    const labels = new Map(members.map(member => [memberKey(member), member.label]));
     const buckets = new Map<string, { id: string; label: string; keys: string[]; sort: number }>();
     const add = (id: string, label: string, key: string, sort: number): void => {
       const bucket = buckets.get(id) ?? { id, label, keys: [], sort };
@@ -155,11 +163,11 @@ export function createArenaModel() {
       buckets.set(id, bucket);
     };
     if (groupBy === 'none' || !groupBy) {
-      return [{ id: 'all', label: 'All members', keys: members.map(memberKey) }];
+      return [{ id: 'all', label: 'All members', keys: pairRepeats(members.map(memberKey), labels) }];
     }
     if (groupBy === 'segment') {
       members.forEach(member => add(member.segment, segmentLabels[member.segment] || member.segment, memberKey(member), buckets.size));
-      return [...buckets.values()].map(({ id, label, keys }) => ({ id, label, keys }));
+      return [...buckets.values()].map(({ id, label, keys }) => ({ id, label, keys: pairRepeats(keys, labels) }));
     }
     if (groupBy === 'age') {
       for (const member of members) {
@@ -192,7 +200,7 @@ export function createArenaModel() {
       const rest = groups.slice(GROUP_LIMIT - 1);
       groups = [...kept, { id: 'other', label: `Other (${rest.length})`, keys: rest.flatMap(group => group.keys), sort: 9e9 }];
     }
-    return groups.map(({ id, label, keys }) => ({ id, label, keys }));
+    return groups.map(({ id, label, keys }) => ({ id, label, keys: pairRepeats(keys, labels) }));
   }
 
   /** Attributes worth grouping by: 2 to 24 distinct groups once arrays and numbers are folded. */
@@ -281,10 +289,12 @@ export function createArenaModel() {
   /** Biggest tile worth drawing: a handful of members get large tiles with room for a progress ring. */
   function tileCap(total: number): number { return total <= 24 ? 64 : total <= 90 ? 44 : total <= 260 ? 30 : 22; }
   /** Biggest tile Fit may choose in the full-screen view: the viewport decides, this only stops a handful of members becoming billboards. */
-  function fitCap(total: number): number { return total <= 24 ? 72 : total <= 90 ? 56 : total <= 260 ? 44 : 40; }
+  function fitCap(total: number): number { return total <= 12 ? 160 : total <= 24 ? 120 : total <= 90 ? 96 : total <= 260 ? 56 : 40; }
   function tileFor(total: number, zoom: string): number { const cap = tileCap(total); return zoom === '2' ? Math.round(cap * (cap >= 44 ? 1.25 : 1.45)) : cap; }
-  /** Two letters for the middle of a big tile. */
+  /** The text in the middle of a big tile: a numbered member ("Automation builder 07") shows its number, since the group header already names the segment; any other label shows two initials. */
   function initials(label: string): string {
+    const numbered = String(label || '').trim().match(/(?:^|[\s#_-])(\d{1,3})$/);
+    if (numbered) return numbered[1]!;
     const words = String(label || '?').split(/[\s/_-]+/).filter(word => /[\p{L}\p{N}]/u.test(word));
     const first = words[0]?.match(/[\p{L}\p{N}]/u)?.[0] ?? '?', last = words.length > 1 ? words[words.length - 1]!.match(/[\p{L}\p{N}]/u)?.[0] ?? '' : '';
     return (first + last).toUpperCase();

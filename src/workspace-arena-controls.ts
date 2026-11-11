@@ -10,7 +10,7 @@ const LV=window.liveVoting,lvm=LV.model,lvv=LV.view,JEV_USD_PER_MILLION_TOKENS=$
 const A={el:null,runId:'',stage:'',byKey:new Map(),sigs:new Map(),members:new Map(),samples:[],samplesFor:'',rows:new Map(),shares:new Map(),refs:{},question:null,ro:null,relayout:0,tabKey:'',scroll:null,tipKey:'',ctx:null};
 const R={runId:'',stage:'',cursor:undefined,playing:false,speed:1,timer:0,last:0};
 LV.perf=[];
-function liveUi(){return S.live??={colorBy:'pick',groupBy:'segment',zoom:'fit',question:'',steps:'summary'}}
+function liveUi(){return S.live??={colorBy:'pick',groupBy:'segment',zoom:'fit',question:'',steps:'summary',viewOpen:false}}
 /** The study graph above the map: every step with what it reads and gives out. Built from the saved study, so it needs one. */
 function arenaGraph(run,study,stageId){
   if(!study||!window.runGraph||(run.stages||[]).length<2)return '';
@@ -105,7 +105,7 @@ function arenaInput(run,withLayout=true){
   const inline=!!liveStudyRun(),back=inline?{backAct:'live-back',backLabel:'Back to study'}:study?{backAct:'run-open-study',backLabel:'Back to study',backId:study.id}:{backAct:'live-close',backLabel:'Back to runs'};
   const news=question?.type==='choice'?arenaNews(run,lvm.commentary(members,question,segmentLabels),live):[];
   const tops=!live&&!replayOn&&question?.type==='choice'?lvm.segmentTops(members,question,segmentLabels):[],results=tops.length||board.evaluated?{summary:lvm.resultSummary(board,tops),cost:run.status==='running'?null:lvm.costSummary(run.usage,run.provider,JEV_USD_PER_MILLION_TOKENS),segments:tops}:null;
-  return {full:lvFull(),studyTitle:runTitle(run),finalAnswer:arenaFinalAnswer(run),...back,news,results,runId:run.id,status:run.status,message:run.message,reportUrl:run.reportUrl,title:stageMeta?.label||pstage?.label||stageId||'Voting',stageId,stages:(run.stages||[]).map(s=>({id:s.id,label:s.label||s.id,status:s.status||'',kind:s.kind||'',dependsOn:s.dependsOn||[]})),graphHtml:withLayout?arenaGraph(run,study,stageId):'',stepsView:ui.steps,members,groups,layout,segmentLabels,questions,question,colorBy:ui.colorBy,groupBy,groupOptions,zoom:ui.zoom,selectedKey:S.liveMemberKey,selected,selectedPersona:selected?lookup(selected):undefined,selectedHidden:!!(replayOn&&selected&&all.some(m=>lvm.memberKey(m)===S.liveMemberKey&&(m.status==='completed'||m.status==='failed'))&&!revealedKeys(all,cursor).has(S.liveMemberKey)),tabKey:keyed.has(S.liveMemberKey)?S.liveMemberKey:groups[0]?.keys[0]||'',board,stats:{...stats,...arenaRateText(run,stageId,stats,live)},replay:replayOn?{cursor,total,playing:R.playing,speed:R.speed,ordered:all.some(m=>m.order!==undefined)}:null,outcome:stageMeta?.outcome,outcomeKind:stageMeta?.kind||'',emptyReason:[stageMeta?.kind?stageMeta.kind+' step · ':'',stageMeta?.status||'No member evaluations',stageMeta?.reason?' · '+stageMeta.reason:''].join('')+' · No member evaluations in this step.'};
+  return {full:lvFull(),studyTitle:runTitle(run),finalAnswer:arenaFinalAnswer(run),...back,news,results,runId:run.id,status:run.status,message:run.message,reportUrl:run.reportUrl,title:stageMeta?.label||pstage?.label||stageId||'Voting',stageId,stages:(run.stages||[]).map(s=>({id:s.id,label:s.label||s.id,status:s.status||'',kind:s.kind||'',dependsOn:s.dependsOn||[]})),graphHtml:withLayout?arenaGraph(run,study,stageId):'',stepsView:ui.steps,viewOpen:!!ui.viewOpen,members,groups,layout,segmentLabels,questions,question,colorBy:ui.colorBy,groupBy,groupOptions,zoom:ui.zoom,selectedKey:S.liveMemberKey,selected,selectedPersona:selected?lookup(selected):undefined,selectedHidden:!!(replayOn&&selected&&all.some(m=>lvm.memberKey(m)===S.liveMemberKey&&(m.status==='completed'||m.status==='failed'))&&!revealedKeys(all,cursor).has(S.liveMemberKey)),tabKey:keyed.has(S.liveMemberKey)?S.liveMemberKey:groups[0]?.keys[0]||'',board,stats:{...stats,...arenaRateText(run,stageId,stats,live)},replay:replayOn?{cursor,total,playing:R.playing,speed:R.speed,ordered:all.some(m=>m.order!==undefined)}:null,outcome:stageMeta?.outcome,outcomeKind:stageMeta?.kind||'',emptyReason:[stageMeta?.kind?stageMeta.kind+' step · ':'',stageMeta?.status||'No member evaluations',stageMeta?.reason?' · '+stageMeta.reason:''].join('')+' · No member evaluations in this step.'};
 }
 function revealedKeys(all,cursor){return new Set(lvm.replayOrder(all).slice(0,Math.floor(cursor)).map(lvm.memberKey))}
 /** Newest first, each line stamped: the clock time this view first saw it while live, or its place in the vote count otherwise. */
@@ -288,6 +288,7 @@ function arenaAction(action,element){
     if(A.el&&A.byKey.has(element.dataset.key)){arenaSelect(element.dataset.key);return true}
     S.liveMemberKey=element.dataset.key;render();return true;
   }
+  if(action==='lv-view'){const ui=liveUi();ui.viewOpen=!ui.viewOpen;render();return true}
   if(action==='lv-steps'){liveUi().steps=element.dataset.value;render();return true}
   if(action==='lv-color'||action==='lv-zoom'){const ui=liveUi();if(action==='lv-color')ui.colorBy=element.dataset.value;else ui.zoom=element.dataset.value;render();return true}
   if(!action.startsWith('arena-'))return false;
@@ -309,6 +310,7 @@ document.addEventListener('change',event=>{
   const ui=liveUi();
   if(event.target.matches?.('[data-lv-group]')){ui.groupBy=event.target.value;render()}
   else if(event.target.matches?.('[data-lv-question]')){ui.question=event.target.value;render()}
+  else if(event.target.matches?.('[data-lv-stage]'))act(null,{dataset:{act:'live-stage',stage:event.target.value}});
 });
 /** Esc leaves the full-screen live view for the study. Called from the shared keyboard handler; true when it handled the key. */
 function arenaEscape(event){
