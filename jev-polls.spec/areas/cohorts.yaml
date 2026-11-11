@@ -21,7 +21,16 @@ behaviors:
   - id: synthetic-fields-labeled
     description: Each persona lists which of its fields are synthetic, and the workspace shows that distinction.
   - id: cohort-share-visible
-    description: Each persona row shows its effective cohort share.
+    description: >-
+      Each persona row shows its effective cohort share as a small figure at the end of the row,
+      and leads with what tells personas apart: chips for age and up to three short attributes
+      whose values differ across the cohort (such as weekly hours or session preference).
+    details: >-
+      Rebalanced 2026-11-11 from the UX review (item 10): the share was the largest type in the row
+      and identical within a segment, while age was small grey text and other attributes were absent.
+    source:
+      text: cool, re-review the suggestions and screenshots then tell coordinator to address the feedback and resolve this
+      reference: jev-polls project thread "Address the UX review feedback", Giulio, 2026-11-11; UX review at commit 846f90b
   - id: distribution-targets
     description: >-
       Distribution targets on age, segment, or an attribute accept buckets totaling 100 percent

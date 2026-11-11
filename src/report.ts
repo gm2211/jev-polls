@@ -90,7 +90,7 @@ export function renderReport(run: RunRecord, options: { workspace?: boolean; pro
     .why{max-width:56ch}.answer-side{display:grid;gap:10px;align-content:start}
     .pill{display:inline-block;font-size:var(--text-xs);font-weight:600;border-radius:999px;padding:1px 8px;margin-left:6px;vertical-align:1px}.pill.close{background:var(--amber-soft);color:var(--amber)}.pill.clear{background:var(--blue-soft);color:var(--blue)}
     .swatch{display:inline-block;width:10px;height:10px;border-radius:2px;flex:none;vertical-align:baseline}
-    .bars{display:grid;gap:6px}.bar{display:grid;grid-template-columns:minmax(0,170px) minmax(0,1fr) 48px;gap:10px;align-items:center;font-size:var(--text-sm)}
+    .bars{display:grid;gap:6px;max-width:560px}.bar{display:grid;grid-template-columns:minmax(0,170px) minmax(0,1fr) 48px;gap:10px;align-items:center;font-size:var(--text-sm)}
     .bar-label{overflow-wrap:anywhere}.bar-track{height:9px;background:var(--hover);border-radius:999px;overflow:hidden}.bar-fill{display:block;height:100%;border-radius:999px;background:var(--blue)}.bar-value{text-align:right;color:var(--muted);font-variant-numeric:tabular-nums}
     .bar.lead .bar-label{font-weight:600}.rank{display:inline-block;width:22px;color:var(--muted)}
     .more{font:inherit;font-size:var(--text-sm);background:none;border:0;padding:0;color:var(--blue);cursor:pointer;justify-self:start}
@@ -104,7 +104,7 @@ export function renderReport(run: RunRecord, options: { workspace?: boolean; pro
     .people{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:20px;align-items:start}
     .legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:var(--text-sm);color:var(--muted)}.legend span{display:inline-flex;align-items:center;gap:6px}
     .map{display:grid;gap:12px;min-width:0}.seg-row{display:grid;gap:5px}.seg-row-head{display:flex;justify-content:space-between;gap:8px;font-size:var(--text-sm);font-weight:600}.seg-row-head span:last-child{color:var(--muted);font-weight:500}
-    .seats{display:grid;grid-template-columns:repeat(auto-fill,12px);gap:3px}.seat{width:12px;height:12px;padding:0;border:0;border-radius:3px;background:var(--hover);cursor:pointer}.seat[aria-pressed=true]{outline:2px solid var(--ink);outline-offset:1px}
+    .seats{display:grid;grid-template-columns:repeat(auto-fill,22px);gap:4px}.seat{width:22px;height:22px;padding:0;border:0;border-radius:3px;background:var(--hover);cursor:pointer}.seat[aria-pressed=true]{outline:2px solid var(--ink);outline-offset:1px}
     .person{background:var(--raised);border-radius:10px;padding:18px;display:grid;gap:14px;min-width:0}.person h3{font-size:var(--text-lg)}.person-sub{color:var(--muted);font-size:var(--text-sm)}
     .their{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:12px;display:grid;gap:8px}.their .bar{grid-template-columns:minmax(0,120px) minmax(0,1fr) 40px}
     .facts{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px 16px}.fact{display:grid;gap:2px;min-width:0;align-content:start}.fact dt{font-size:var(--text-xs);color:var(--muted);text-transform:uppercase;letter-spacing:.06em}.fact dd{margin:0;overflow-wrap:anywhere}.fact.wide{grid-column:1/-1}
@@ -296,6 +296,13 @@ ${RUN_GRAPH_CSS}
       const segs=Object.entries(summary.bySegment??{});if(segs.length<2)return;const list=el('div','bars');
       segs.forEach(([key,s])=>{const row=el('div','bar');row.append(el('span','bar-label',segmentLabel(key,stage)),el('span'),el('span','bar-value',value(s)));list.append(row);});host.append(el('h3','','By segment'),list);
     }
+    /** A combining step whose answer equals one earlier step's answer (one input ran, or they agreed exactly) says so in one line instead of repeating the ranking. */
+    function passThrough(stage,index,summary){
+      const mine=Object.entries(summary?.probabilities??{});if(!mine.length)return null;
+      for(let at=index-1;at>=0;at--){const earlier=run.pipeline.stages[at],result=stageResult(earlier.id);if(!result||result.status!=='completed')continue;
+        for(const other of Object.values(result.summaries??{})){const theirs=other?.probabilities??{};if(Object.keys(theirs).length===mine.length&&mine.every(([key,value])=>Math.abs((theirs[key]??-1)-value)<5e-4))return {stage:earlier,index:at};}}
+      return null;
+    }
     function renderResults(){
       const host=$('#results');let shown=0;
       run.pipeline.stages.forEach((stage,index)=>{
@@ -304,6 +311,8 @@ ${RUN_GRAPH_CSS}
         const block=el('div','step-results'),title=el('div','step-title');title.append(el('span','eyebrow','Step '+(index+1)+' · '+kindLabel(stage)),el('h3','',nameOf(stage)),el('span','hint',stagePlain(stage)));block.append(title);
         if(result.batching)block.append(el('p','hint',result.batching.note+' ('+result.batching.batches+' batches).'));
         if(stage.kind==='decision'){const summary=result.summaries[ids[0]],question=questionFor(stage,ids[0]),top=ranked(summary)[0];if(top){const line=el('p','');const sw=el('span','swatch');sw.style.background=optionColor(question,top[0],summary);line.append(sw,' ',el('strong','',choiceLabel(question,top[0])),' with '+pct(top[1])+'. The ranking matches the step it came from.');block.append(line);host.append(block);return;}}
+        const same=stage.kind==='aggregate'&&ids.length===1?passThrough(stage,index,result.summaries[ids[0]]):null;
+        if(same){const summary=result.summaries[ids[0]],question=questionFor(stage,ids[0]),top=ranked(summary)[0];const line=el('p','');if(top){const sw=el('span','swatch');sw.style.background=optionColor(question,top[0],summary);line.append(sw,' ',el('strong','',choiceLabel(question,top[0])),' with '+pct(top[1])+'. ')}line.append('Same result as step '+(same.index+1)+' ('+nameOf(same.stage)+'): its other inputs were skipped or agreed exactly.');block.append(line);host.append(block);return;}
         ids.forEach(qid=>renderQuestion(stage,qid,result.summaries[qid],block,shown>1));host.append(block);
       });
       if(!shown)host.append(el('div','empty','No step recorded a result.'));

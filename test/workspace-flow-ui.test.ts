@@ -430,7 +430,9 @@ test('a step lists everything it reads, by step and projection, instead of label
   assert.match(card, /Uses steps 1, 2/);
   assert.match(card, /aria-label="Inputs: Answer summary from step 1; Individual answers from step 2"/, 'the full list is available to assistive tech');
   assert.doesNotMatch(WORKSPACE_FLOW_CLIENT, /flow-wire-label/, 'no label text is drawn on wires');
-  assert.doesNotMatch(WORKSPACE_FLOW_CLIENT, /createElementNS\([^)]*'text'\)/);
+  // The only text drawn on the canvas is a bundled wire's count badge, a number; names stay in the hover tooltip.
+  assert.equal((WORKSPACE_FLOW_CLIENT.match(/createElementNS\([^)]*'text'\)/g) || []).length, 1);
+  assert.match(WORKSPACE_FLOW_CLIENT, /t\.textContent=String\(edge\.count\)/);
   assert.match(WORKSPACE_FLOW_CLIENT, /flow-wire-hit/, 'a wire is named only while the pointer is on it');
   assert.match(WORKSPACE_FLOW_CSS, /\.flow-wire-hit\{[^}]*pointer-events:stroke/);
 });
