@@ -60,6 +60,16 @@ behaviors:
     source:
       text: the detailed run view should show schema of inputs and outputs in pipeline graph, both in live preview and in report
       reference: 2026-10-12 jev-polls project thread "run graph schema", Giulio
+  - id: report-no-repeated-rankings
+    description: >-
+      A combining step whose result equals an earlier step's result (one input ran, or its inputs
+      agreed exactly) prints one line, the top option with its share and "Same result as step N",
+      instead of the ranking again. Ranking and segment bars are at most 560px wide so a label
+      stays near its value, and Who answered squares are 22px.
+    details: Added 2026-11-11 from the UX review (item 9); steps 3, 5 and 6 of the example printed one ranking three times.
+    source:
+      text: cool, re-review the suggestions and screenshots then tell coordinator to address the feedback and resolve this
+      reference: jev-polls project thread "Address the UX review feedback", Giulio, 2026-11-11; UX review at commit 846f90b
   - id: open-without-losing-edits
     description: Open report opens a separate tab so unsaved workspace edits stay intact.
   - id: consistent-style
