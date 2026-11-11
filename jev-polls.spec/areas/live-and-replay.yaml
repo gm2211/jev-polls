@@ -69,8 +69,11 @@ behaviors:
     description: >-
       Live voting and Voting replay draw one tile per persona evaluation (repeats are separate
       tiles) in a dense map grouped by segment, with group headers and counts. Fit all packs about
-      a thousand tiles into the window; 1:1 and Large keep a fixed size and scroll. Newly finished
-      tiles brighten for about a second and their group pulses once.
+      a thousand tiles into the window and scales small panels up to fill the stage (capped at
+      160px for up to 12 tiles, 120px up to 24, 96px up to 90); 1:1 and Large keep a fixed size and
+      scroll. Tiles run in member order with a persona's repeats side by side, and a numbered
+      member's tile shows its number ("07") since the group header names the segment. Newly
+      finished tiles brighten for about a second and their group pulses once.
     details: >-
       Queued tiles are neutral, thinking tiles pulse, failed tiles are red with a cross, and finished
       tiles take the colour of the member's top pick (Choice) or a sequential colour for the Score
@@ -86,7 +89,9 @@ behaviors:
       leaves the map, on scroll, on Esc, on blur and when the selected member changes, and focus
       that came from a click never brings it back; the detail stays in the side panel. Tiles are
       focusable buttons with labels, and the arrow keys move between them. A step with few members
-      draws large tiles with initials.
+      draws large tiles with the member number, or initials for unnumbered labels. Changed
+      2026-11-11 by the UX review (item 3): Fit all left two thirds of the stage empty, every
+      "Automation builder 0N" tile read "A0", and repeats were scattered.
     source:
       text: >-
         observing the voting process should be almost like a videogame and using a view a bit like
@@ -162,7 +167,16 @@ behaviors:
   - id: live-narrow-screens
     description: >-
       On a phone the map scrolls inside its own box, the leaderboard stacks under it, and every
-      control stays reachable without clipping; the top bar stays pinned.
+      control stays reachable without clipping; the top bar stays pinned. Up to 760px wide the step
+      map becomes one step picker ("1 of 6 · Audience preferences") and Colour by, Group by,
+      Question and Zoom sit behind a View button, so the first tiles start about 265px down instead
+      of 445px; the answer and the Back and Open report buttons span the width under the title.
+    details: >-
+      Step picker and View panel added 2026-11-11 by the UX review (item 6). The View panel is a
+      toggled panel of controls, not a disclosure element.
+    source:
+      text: cool, re-review the suggestions and screenshots then tell coordinator to address the feedback and resolve this
+      reference: jev-polls project thread "Address the UX review feedback", Giulio, 2026-11-11; UX review at commit 846f90b
   - id: run-graph-schema
     description: >-
       Live voting and Voting replay show the study as a graph of its steps, left to right, each with
